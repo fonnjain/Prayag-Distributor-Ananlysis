@@ -122,22 +122,102 @@ function stripFences(s: string): string {
 // ── WIDEN (deepDive) sizing — pure, exported for unit tests ──────────────────
 //
 // State-head scope sizes each distributor's range gap vs the peer-median
-// distinct-brand count from the Sheets-based deep dive:
-//   perCodeQuarterly = (medianNet / max(1, months/3)) / peerMedianBrands
+// distinct-brand count from the Sheets-based deep dive. medianNet must come
+// from the same secondary-distributor population as peerMedianBrands:
+//   perCodeQuarterly = (medianSecondaryDistributorNet / max(1, months/3)) / peerMedianBrands
 //   valueHigh        = gapBrands × perCodeQuarterly × rangeUptake
 //   valueLow         = valueHigh / 2
 export function widenDeepDiveSizing(
   gapBrands: number,
   peerMedianBrands: number,
-  medianNet: number,
+  medianSecondaryDistributorNet: number,
   monthCount: number,
   rangeUptake: number,
-): { valueHigh: number; valueLow: number } {
-  const perCodeQuarterly = peerMedianBrands > 0
-    ? (medianNet / Math.max(1, monthCount / 3)) / peerMedianBrands
-    : 0;
+): { valueHigh: number; valueLow: number } | null {
+  if (
+    gapBrands <= 0 ||
+    peerMedianBrands <= 0 ||
+    medianSecondaryDistributorNet <= 0 ||
+    monthCount <= 0
+  ) return null;
+  const perCodeQuarterly =
+    (medianSecondaryDistributorNet / Math.max(1, monthCount / 3)) / peerMedianBrands;
   const valueHigh = gapBrands * perCodeQuarterly * rangeUptake;
   return { valueHigh, valueLow: valueHigh / 2 };
+}
+
+export function activateSecondarySizing(
+  dormantRetailers: number,
+  medianSecondaryRetailerNet: number,
+  monthCount: number,
+  dormantRevival: number,
+): { valueHigh: number; valueLow: number } | null {
+  if (
+    dormantRetailers <= 0 ||
+    medianSecondaryRetailerNet <= 0 ||
+    monthCount <= 0
+  ) return null;
+  const quarterlyRetailerMedian =
+    medianSecondaryRetailerNet / Math.max(1, monthCount / 3);
+  const valueHigh = dormantRetailers * quarterlyRetailerMedian * dormantRevival;
+  return { valueHigh, valueLow: valueHigh / 2 };
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
+function normRetailerCohortKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+export function buildUnambiguousRetailerCohort(
+  distributors: Array<{
+    name: string;
+    retailers: Array<{ name: string; memberName: string }>;
+  }>,
+): {
+  ownerByKey: Map<string, string | null>;
+  membersByKey: Map<string, Set<string>>;
+  keysByDistributor: Map<string, Set<string>>;
+} {
+  const ownerByKey = new Map<string, string | null>();
+  const membersByKey = new Map<string, Set<string>>();
+  for (const distributor of distributors) {
+    for (const retailer of distributor.retailers) {
+      const key = normRetailerCohortKey(retailer.name);
+      if (!key) continue;
+      const existing = ownerByKey.get(key);
+      if (existing === undefined) ownerByKey.set(key, distributor.name);
+      else if (existing !== distributor.name) ownerByKey.set(key, null);
+
+      let memberKeys = membersByKey.get(key);
+      if (!memberKeys) {
+        memberKeys = new Set();
+        membersByKey.set(key, memberKeys);
+      }
+      if (retailer.memberName) {
+        memberKeys.add(normRetailerCohortKey(retailer.memberName));
+      }
+    }
+  }
+
+  const keysByDistributor = new Map<string, Set<string>>();
+  for (const [key, owner] of ownerByKey) {
+    if (!owner) continue;
+    let keys = keysByDistributor.get(owner);
+    if (!keys) {
+      keys = new Set();
+      keysByDistributor.set(owner, keys);
+    }
+    keys.add(key);
+  }
+  return { ownerByKey, membersByKey, keysByDistributor };
 }
 
 // ── SQL queries ───────────────────────────────────────────────────────────────
@@ -306,33 +386,6 @@ async function queryNarrowers(
   return res.rows;
 }
 
-type MedianRow = { median_net: string; active_count: string };
-async function queryMedianActiveCustomer(
-  fy: string,
-  labels: string[],
-  headFilter: string | null,
-  stateFilter: string | null,
-): Promise<MedianRow> {
-  if (labels.length === 0) return { median_net: "0", active_count: "0" };
-  const labelFrag  = sql.join(labels.map(l => sql`${l}`), sql`, `);
-  const headClause  = headFilter  ? sql`AND head_canon = ${headFilter}`  : sql``;
-  const stateClause = stateFilter ? sql`AND state_canon = ${stateFilter}` : sql``;
-  const res = await db.execute<MedianRow>(sql`
-    WITH cust_net AS (
-      SELECT customer, SUM(amount::float8) as net
-      FROM sale_line WHERE version_status='current' AND fy=${fy}
-        AND month_label IN (${labelFrag}) AND head_canon != ${PROJECT_HEAD}
-        ${headClause} ${stateClause}
-      GROUP BY customer HAVING SUM(amount::float8) > 0
-    )
-    SELECT
-      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY net)::text as median_net,
-      COUNT(*)::text as active_count
-    FROM cust_net
-  `);
-  return res.rows[0] ?? { median_net: "0", active_count: "0" };
-}
-
 type ProjectGapRow = { customer: string; total_net: string; project_net: string; project_pct: string };
 async function queryProjectGaps(
   fy: string,
@@ -373,13 +426,16 @@ async function queryProjectGaps(
 async function querySecondarySkuLineExists(
   fy: string,
   stateFilter?: string | null,
+  headFilter?: string | null,
 ): Promise<boolean> {
   const stateClause = stateFilter ? sql`AND state_canon = ${stateFilter}` : sql``;
+  const headClause = headFilter ? sql`AND head_canon = ${headFilter}` : sql``;
   const res = await db.execute<{ n: string }>(sql`
     SELECT COUNT(*)::text AS n
     FROM   secondary_sku_line
     WHERE  fy = ${fy}
       ${stateClause}
+      ${headClause}
     LIMIT 1
   `);
   return parseInt(res.rows[0]?.n ?? "0") > 0;
@@ -396,12 +452,14 @@ type DistActivationRow = {
   distributor: string;
   retailer_count: string;
   active_count: string;
+  peer_median_retailer_net: string | null;
 };
 
 export async function queryDistributorActivationCompany(
   fy: string,
   labels: string[],
   stateFilter?: string | null,
+  headFilter?: string | null,
 ): Promise<DistActivationRow[]> {
   // secondary_sku_line only covers closed FYs — return empty for FYs with no data
   const check = await db.execute<{ n: string }>(sql`
@@ -413,34 +471,44 @@ export async function queryDistributorActivationCompany(
     ? sql`AND month_label IN (${sql.join(labels.map(l => sql`${l}`), sql`, `)})`
     : sql``;
   const stateClause = stateFilter ? sql`AND state_canon = ${stateFilter}` : sql``;
+  const headClause = headFilter ? sql`AND head_canon = ${headFilter}` : sql``;
 
   const res = await db.execute<DistActivationRow>(sql`
     WITH all_ret AS (
-      SELECT distributor,
+      SELECT DISTINCT distributor,
              COALESCE(NULLIF(TRIM(retailer_id), ''), LOWER(TRIM(retailer))) AS rkey
       FROM   secondary_sku_line
       WHERE  fy = ${fy}
         AND  distributor IS NOT NULL AND TRIM(distributor) != ''
         AND  retailer    IS NOT NULL AND TRIM(retailer)    != ''
         ${stateClause}
+        ${headClause}
     ),
     active_ret AS (
       SELECT distributor,
-             COALESCE(NULLIF(TRIM(retailer_id), ''), LOWER(TRIM(retailer))) AS rkey
+             COALESCE(NULLIF(TRIM(retailer_id), ''), LOWER(TRIM(retailer))) AS rkey,
+             SUM(net_amount::numeric) AS retailer_net
       FROM   secondary_sku_line
       WHERE  fy = ${fy}
         AND  distributor IS NOT NULL AND TRIM(distributor) != ''
         AND  retailer    IS NOT NULL AND TRIM(retailer)    != ''
-        AND  net_amount  > 0
         ${periodFrag}
         ${stateClause}
+        ${headClause}
+      GROUP BY distributor, 2
+      HAVING SUM(net_amount::numeric) > 0
+    ),
+    retailer_peer AS (
+      SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY retailer_net) AS median_retailer_net
+      FROM active_ret
     )
     SELECT a.distributor,
            COUNT(DISTINCT a.rkey)::text  AS retailer_count,
-           COUNT(DISTINCT ac.rkey)::text AS active_count
-    FROM   all_ret a
+           COUNT(DISTINCT ac.rkey)::text AS active_count,
+           p.median_retailer_net::text AS peer_median_retailer_net
+    FROM   all_ret a CROSS JOIN retailer_peer p
     LEFT   JOIN active_ret ac USING (distributor, rkey)
-    GROUP  BY a.distributor
+    GROUP  BY a.distributor, p.median_retailer_net
     HAVING COUNT(DISTINCT a.rkey) >= 3
     ORDER  BY (COUNT(DISTINCT ac.rkey)::float / NULLIF(COUNT(DISTINCT a.rkey), 0)) ASC
     LIMIT  50
@@ -458,6 +526,8 @@ type DistRangeGapRow = {
   distributor: string;
   distinct_segments: string;
   peer_median: string;
+  peer_median_net: string | null;
+  loaded_month_count: string;
   gap: string;
 };
 
@@ -473,31 +543,81 @@ export async function queryDistributorRangeGapCompany(
   const stateClause = stateFilter ? sql`AND state_canon = ${stateFilter}` : sql``;
 
   const res = await db.execute<DistRangeGapRow>(sql`
-    WITH dist_segs AS (
+    WITH dist_total AS (
       SELECT distributor,
-             COUNT(DISTINCT segment_canon) AS distinct_segments
+             SUM(net_amount::numeric) AS distributor_net
       FROM   secondary_sku_line
       WHERE  fy          = ${fy}
         AND  distributor IS NOT NULL AND TRIM(distributor) != ''
+        ${stateClause}
+      GROUP BY distributor
+      HAVING SUM(net_amount::numeric) > 0
+    ),
+    positive_segments AS (
+      SELECT distributor, segment_canon
+      FROM   secondary_sku_line
+      WHERE  fy = ${fy}
+        AND  distributor IS NOT NULL AND TRIM(distributor) != ''
         AND  segment_canon IS NOT NULL AND TRIM(segment_canon) != ''
         AND  TRIM(segment_canon) != 'Unmapped'
-        AND  net_amount  > 0
         ${stateClause}
-      GROUP  BY distributor
-      HAVING COUNT(DISTINCT segment_canon) >= 1
+      GROUP BY distributor, segment_canon
+      HAVING SUM(net_amount::numeric) > 0
+    ),
+    dist_segs AS (
+      SELECT t.distributor,
+             COUNT(p.segment_canon) AS distinct_segments,
+             t.distributor_net
+      FROM dist_total t
+      JOIN positive_segments p USING (distributor)
+      GROUP BY t.distributor, t.distributor_net
+      HAVING COUNT(p.segment_canon) >= 1
     ),
     peer AS (
-      SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY distinct_segments) AS median_segs
+      SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY distinct_segments) AS median_segs,
+             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY distributor_net) AS median_distributor_net
       FROM   dist_segs
+    ),
+    coverage AS (
+      SELECT COUNT(DISTINCT month_label) AS loaded_month_count
+      FROM secondary_sku_line
+      WHERE fy = ${fy}
+        ${stateClause}
     )
     SELECT d.distributor,
            d.distinct_segments::text                                   AS distinct_segments,
            p.median_segs::text                                          AS peer_median,
+           p.median_distributor_net::text                                AS peer_median_net,
+           c.loaded_month_count::text                                    AS loaded_month_count,
            (p.median_segs - d.distinct_segments)::text                 AS gap
-    FROM   dist_segs d, peer p
+    FROM   dist_segs d, peer p, coverage c
     WHERE  p.median_segs > d.distinct_segments
     ORDER  BY (p.median_segs - d.distinct_segments) DESC
     LIMIT  20
+  `);
+  return res.rows;
+}
+
+type StateHeadSecondaryRow = {
+  customer: string;
+  head_canon: string | null;
+  brand_canon: string | null;
+  net_amount: string;
+  month_label: string;
+};
+
+async function queryStateHeadSecondaryRows(
+  fy: string,
+  retailerKeys: string[],
+): Promise<StateHeadSecondaryRow[]> {
+  if (retailerKeys.length === 0) return [];
+  const keys = sql.join(retailerKeys.map(key => sql`${key}`), sql`, `);
+  const res = await db.execute<StateHeadSecondaryRow>(sql`
+    SELECT customer, head_canon, brand_canon, net_amount::text, month_label
+    FROM secondary_register_line
+    WHERE fy = ${fy}
+      AND customer IS NOT NULL AND TRIM(customer) != ''
+      AND lower(regexp_replace(customer, '[^a-zA-Z0-9]', '', 'g')) IN (${keys})
   `);
   return res.rows;
 }
@@ -707,7 +827,6 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       customerStateRows,
       lostCodeRows,
       narrowerRows,
-      medianRow,
       shrinkerRows,
       projectGapRows,
       blockedResult,
@@ -715,7 +834,6 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       queryCustomerStates(fy, labels, priorLabels, headFilter, stateFilter),
       queryLostCodes(fy, labels, priorLabels, headFilter, stateFilter),
       queryNarrowers(fy, labels, priorLabels, headFilter, stateFilter),
-      queryMedianActiveCustomer(fy, labels, headFilter, stateFilter),
       queryShrinkers(fy, labels, py, priorLabels, headFilter, stateFilter),
       queryProjectGaps(fy, labels),
       getBlockedCustomers().catch((): { blocked: Set<string>; available: boolean } => ({ blocked: new Set(), available: false })),
@@ -729,23 +847,84 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
 
     // State-head scoped distributor deep dive (statehead scope only — too expensive company-wide)
     let deepDive: DistributorDeepDiveResult | null = null;
+    let stateHeadSecondaryRows: StateHeadSecondaryRow[] = [];
+    let stateHeadRetailerOwner = new Map<string, string | null>();
+    let stateHeadRetailerMembers = new Map<string, Set<string>>();
+    let stateHeadCohortKeysByDistributor = new Map<string, Set<string>>();
     if (scope === "statehead" && stateHead) {
       deepDive = await loadDistributorDeepDive(fy, stateHead).catch(() => null);
+      if (deepDive) {
+        const cohort = buildUnambiguousRetailerCohort(
+          deepDive.distributors as DistributorGroup[],
+        );
+        stateHeadRetailerOwner = cohort.ownerByKey;
+        stateHeadRetailerMembers = cohort.membersByKey;
+        stateHeadCohortKeysByDistributor = cohort.keysByDistributor;
+        const unambiguousRetailerKeys = [...stateHeadRetailerOwner.entries()]
+          .filter(([, owner]) => owner != null)
+          .map(([key]) => key);
+        stateHeadSecondaryRows = await queryStateHeadSecondaryRows(
+          fy, unambiguousRetailerKeys,
+        ).catch((): StateHeadSecondaryRow[] => []);
+      }
     }
+
+    type StateHeadDistributorBasis = {
+      totalNet: number;
+      brandNet: Map<string, number>;
+      retailerNet: Map<string, number>;
+    };
+    const stateHeadBasisByDistributor = new Map<string, StateHeadDistributorBasis>();
+    const stateHeadLoadedMonths = new Set<string>();
+    for (const row of stateHeadSecondaryRows) {
+      const retailerKey = normRetailerCohortKey(row.customer);
+      const distributorName = stateHeadRetailerOwner.get(retailerKey);
+      if (!distributorName) continue;
+      const allowedMembers = stateHeadRetailerMembers.get(retailerKey);
+      const rowMemberKey = row.head_canon
+        ? normRetailerCohortKey(row.head_canon)
+        : "";
+      if (allowedMembers?.size && !allowedMembers.has(rowMemberKey)) continue;
+      let basis = stateHeadBasisByDistributor.get(distributorName);
+      if (!basis) {
+        basis = { totalNet: 0, brandNet: new Map(), retailerNet: new Map() };
+        stateHeadBasisByDistributor.set(distributorName, basis);
+      }
+      const net = Number(row.net_amount) || 0;
+      basis.totalNet += net;
+      basis.retailerNet.set(
+        retailerKey,
+        (basis.retailerNet.get(retailerKey) ?? 0) + net,
+      );
+      if (row.brand_canon?.trim()) {
+        basis.brandNet.set(
+          row.brand_canon,
+          (basis.brandNet.get(row.brand_canon) ?? 0) + net,
+        );
+      }
+      if (row.month_label) stateHeadLoadedMonths.add(row.month_label);
+    }
+    const stateHeadRetailerMedianNet = median(
+      [...stateHeadBasisByDistributor.values()]
+        .flatMap(basis => [...basis.retailerNet.values()])
+        .filter(net => net > 0),
+    );
+    const stateHeadLoadedMonthCount = stateHeadLoadedMonths.size;
+    const stateHeadSecondaryPeriod = stateHeadLoadedMonthCount > 0
+      ? `${stateHeadLoadedMonthCount} loaded month${stateHeadLoadedMonthCount === 1 ? "" : "s"} in FY ${fy}`
+      : `FY ${fy} (no matched secondary months)`;
 
     // Company- and state-scope distributor data (SQL-only path — runs in parallel with other queries)
     let companyActivationRows: DistActivationRow[] = [];
     let companyRangeGapRows: DistRangeGapRow[] = [];
-    // stateSecondaryHasData: independent availability signal — true when secondary_sku_line has
-    // rows for this FY+state regardless of whether any opportunity query returns results.
-    let stateSecondaryHasData = false;
+    // Independent availability signal: true when secondary_sku_line has rows
+    // for this FY/geography regardless of whether an opportunity query returns results.
+    let secondarySkuHasData = false;
     if (scope === "company" || scope === "state") {
-      [companyActivationRows, companyRangeGapRows, stateSecondaryHasData] = await Promise.all([
-        queryDistributorActivationCompany(fy, labels, stateFilter).catch((): DistActivationRow[] => []),
+      [companyActivationRows, companyRangeGapRows, secondarySkuHasData] = await Promise.all([
+        queryDistributorActivationCompany(fy, labels, stateFilter, null).catch((): DistActivationRow[] => []),
         queryDistributorRangeGapCompany(fy, stateFilter).catch((): DistRangeGapRow[] => []),
-        scope === "state"
-          ? querySecondarySkuLineExists(fy, stateFilter).catch((): boolean => false)
-          : Promise.resolve(false),
+        querySecondarySkuLineExists(fy, stateFilter).catch((): boolean => false),
       ]);
     }
 
@@ -856,39 +1035,41 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     // ── §3 ACTIVATE — dormant retailers ──────────────────────────────────────
     // Dormant: no current-year purchase, no prior-year purchase (never/new), OR
     //          purely at the distributor level: low activation < 40%
-    const dormantRows = customerStateRows.filter(r => {
-      const cur = parseFloat(r.cur_net ?? "0") || 0;
-      return cur === 0;
-    });
-
-    const medianNet = parseFloat(medianRow.median_net) || 0;
-    const activeCount = parseInt(medianRow.active_count) || 0;
-
     // Distributor-level activation
     // statehead scope: loaded from the Sheets-based deep dive
     // company scope:   loaded from secondary_sku_line via queryDistributorActivationCompany
     type ActivationDist = { name: string; retailerCount: number; activeCount: number; dormantCount: number; activationPct: number; dormantValueLow: number | null; dormantValueHigh: number | null };
     const lowActivationDists: ActivationDist[] = [];
-    const quarterlyMedian = medianNet / Math.max(1, labels.length / 3);
 
-    if (deepDive) {
+    if (
+      deepDive &&
+      stateHeadRetailerMedianNet != null &&
+      stateHeadRetailerMedianNet > 0 &&
+      stateHeadLoadedMonthCount > 0
+    ) {
       for (const d of deepDive.distributors as DistributorGroup[]) {
-        if (!d.retailerCount || d.retailerCount === 0) continue;
-        const total  = d.retailerCount;
-        const active = d.activeCount;
+        const cohortKeys = stateHeadCohortKeysByDistributor.get(d.name);
+        if (!cohortKeys || cohortKeys.size === 0) continue;
+        const basis = stateHeadBasisByDistributor.get(d.name);
+        const total = cohortKeys.size;
+        const active = [...cohortKeys].filter(
+          key => (basis?.retailerNet.get(key) ?? 0) > 0,
+        ).length;
         const actPct = (active / total) * 100;
         if (actPct < 40) {
           const dormant  = total - active;
-          // Size: dormant_count × median active retailer quarterly order × revival_assumption
-          const valueHigh = dormant * quarterlyMedian * dormantRevival;
+          const sizing = activateSecondarySizing(
+            dormant, stateHeadRetailerMedianNet, stateHeadLoadedMonthCount, dormantRevival,
+          );
+          if (!sizing) continue;
           lowActivationDists.push({
             name: d.name,
-            retailerCount: d.retailerCount,
-            activeCount: d.activeCount,
+            retailerCount: total,
+            activeCount: active,
             dormantCount: dormant,
             activationPct: t2(actPct) ?? actPct,
-            dormantValueLow:  t2(valueHigh / 2),
-            dormantValueHigh: t2(valueHigh),
+            dormantValueLow:  t2(sizing.valueLow),
+            dormantValueHigh: t2(sizing.valueHigh),
           });
         }
       }
@@ -901,16 +1082,22 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         const actPct = (active / total) * 100;
         if (actPct < 40) {
           const dormant  = total - active;
-          // Size: dormant_count × median active retailer quarterly order × revival_assumption
-          const valueHigh = dormant * quarterlyMedian * dormantRevival;
+          const retailerMedianNet = r.peer_median_retailer_net != null
+            ? Number(r.peer_median_retailer_net)
+            : null;
+          if (retailerMedianNet == null || retailerMedianNet <= 0) continue;
+          const sizing = activateSecondarySizing(
+            dormant, retailerMedianNet, labels.length, dormantRevival,
+          );
+          if (!sizing) continue;
           lowActivationDists.push({
             name: r.distributor,
             retailerCount: total,
             activeCount:   active,
             dormantCount:  dormant,
             activationPct: t2(actPct) ?? actPct,
-            dormantValueLow:  t2(valueHigh / 2),
-            dormantValueHigh: t2(valueHigh),
+            dormantValueLow:  t2(sizing.valueLow),
+            dormantValueHigh: t2(sizing.valueHigh),
           });
         }
       }
@@ -918,31 +1105,62 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       lowActivationDists.sort((a, b) => b.dormantCount - a.dormantCount);
     }
 
-    // Entities counted in ACTIVATE = dormant customers NOT in CLOSE or RECOVER
-    const activateEntities = dormantRows
-      .filter(r => !closeEntities.has(r.customer.toUpperCase()) && !recoverEntitySet.has(r.customer.toUpperCase()));
-    const activateEntitySet = new Set(activateEntities.map(r => r.customer.toUpperCase()));
-
-    const totalDormantValue = activateEntities.reduce((s, r) => s + (parseFloat(r.prior_net ?? "0") || 0), 0);
-    // For pure dormant sizing: dormant_count × median × revival; range = half to full
-    const activateValueHigh = activateEntities.length * medianNet * dormantRevival;
+    // ACTIVATE is now distributor/retailer-secondary throughout. Deduplicate
+    // distributor entities against the higher-priority CLOSE and RECOVER levers.
+    const preDedupActivationDists = [...lowActivationDists];
+    const dedupedActivationDists = lowActivationDists.filter(d => {
+      const key = d.name.toUpperCase();
+      return !closeEntities.has(key) && !recoverEntitySet.has(key);
+    });
+    lowActivationDists.length = 0;
+    lowActivationDists.push(...dedupedActivationDists);
+    const activateEntitySet = new Set(lowActivationDists.map(d => d.name.toUpperCase()));
+    const activateValueHigh = lowActivationDists.reduce(
+      (sum, d) => sum + (d.dormantValueHigh ?? 0), 0,
+    );
     const activateValueLow  = activateValueHigh / 2;
+    const activateHasEntities = lowActivationDists.length > 0;
+    const totalDormantRetailers = preDedupActivationDists.reduce(
+      (sum, d) => sum + d.dormantCount, 0,
+    );
+    const activateMedianNet = scope === "statehead"
+      ? stateHeadRetailerMedianNet
+      : companyActivationRows[0]?.peer_median_retailer_net != null
+        ? Number(companyActivationRows[0].peer_median_retailer_net)
+        : null;
+    const activateBasisAvailable = activateMedianNet != null && activateMedianNet > 0;
 
     const activate = {
       periodLabel,
       dormantRevivalAssumption: dormantRevival,
-      medianActiveCustomerValue: t2(medianNet),
-      medianSource: "median of active customers' primary sales in scope (proxy for quarterly order magnitude)",
-      medianNote: "Median used — never mean. A single large customer distorts the mean significantly.",
-      totalDormantCount: dormantRows.length,
-      afterDedupCount: activateEntities.length,
-      dedupNote: dormantRows.length - activateEntities.length > 0
-        ? `${dormantRows.length - activateEntities.length} dormant account(s) already counted in CLOSE or RECOVER.`
+      medianActiveRetailerValue: activateBasisAvailable ? t2(activateMedianNet) : null,
+      medianSource: scope === "statehead"
+        ? "median positive secondary-register NET per matched active retailer in the selected state-head distributor cohort"
+        : "median positive secondary-SKU NET per active retailer in the selected report period and geography",
+      medianNote: `Median used — never mean. Opportunity uses the selected ${Math.round(dormantRevival * 100)}% revival assumption and is reported as a half-to-full range; it is not observed sales or a probability.`,
+      basis: {
+        population: scope === "statehead"
+          ? "matched secondary-register retailers in the state-head distributor cohort"
+          : "secondary SKU",
+        entity: "retailer",
+        source: scope === "statehead" ? "secondary_register_line" : "secondary_sku_line",
+        valuePeriod: scope === "statehead" ? stateHeadSecondaryPeriod : periodLabel,
+        retailerUniversePeriod: `FY ${fy}`,
+        geography: scopeLabel,
+        numerator: "median positive secondary NET per active retailer",
+        estimate: `${Math.round(dormantRevival * 100)}% revival assumption; half-to-full opportunity range`,
+      },
+      totalDormantCount: totalDormantRetailers,
+      afterDedupCount: lowActivationDists.length,
+      dedupNote: preDedupActivationDists.length - lowActivationDists.length > 0
+        ? `${preDedupActivationDists.length - lowActivationDists.length} low-activation distributor(s) already counted in CLOSE or RECOVER.`
         : null,
-      valueHigh: t2(activateValueHigh),
-      valueLow:  t2(activateValueLow),
+      valueHigh: activateHasEntities ? t2(activateValueHigh) : null,
+      valueLow:  activateHasEntities ? t2(activateValueLow) : null,
       lowActivationDistributors: lowActivationDists.slice(0, 20),
-      distributorNote: scope === "state" && !stateSecondaryHasData
+      distributorNote: !activateBasisAvailable
+        ? "Secondary retailer median is unavailable for this scope and period; ACTIVATE estimates are omitted."
+        : scope === "state" && !secondarySkuHasData
         ? "Distributor activation data not available for this state in the secondary register for this FY."
         : scope === "state"
         ? "Source: secondary item-code register filtered to this state. Activation = active retailers in selected period ÷ all retailers seen this FY. Distributor names are as recorded in the secondary register."
@@ -950,6 +1168,8 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         ? "Distributor activation data not available for this FY — secondary register not yet loaded for company scope."
         : scope === "company"
         ? "Source: secondary item-code register (FY to date). Activation = active retailers in selected period ÷ all retailers seen this FY. Distributor names are as recorded in the secondary register."
+        : scope === "statehead"
+        ? "Source: the selected state head's working-sheet distributor roster matched to secondary-register retailers for the requested FY. Ambiguous retailer names are excluded rather than assigned."
         : null,
       unassignedRetailers: deepDive ? {
         total: deepDive.noneAssigned?.retailerCount ?? null,
@@ -962,8 +1182,10 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
           .slice(0, 10)
           .map((d: { district: string; noneCount: number }) => ({ district: d.district, count: d.noneCount })),
       } : null,
-      notAvailable: activateEntities.length === 0 && lowActivationDists.length === 0,
-      notAvailableReason: "No dormant accounts identified in scope for this period.",
+      notAvailable: !activateBasisAvailable || lowActivationDists.length === 0,
+      notAvailableReason: !activateBasisAvailable
+        ? "Secondary retailer value basis is unavailable for this scope and period; ACTIVATE is omitted."
+        : "No low-activation distributors identified in scope for this period.",
     };
 
     // ── §4 WIDEN — range gap ──────────────────────────────────────────────────
@@ -971,52 +1193,78 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     const widenDists: WidenDist[] = [];
 
     if (deepDive) {
-      // State-head scope: use Sheets-based deep dive (brand_canon from secondary_register_line)
-      const allSpread = (deepDive.distributors as DistributorGroup[])
-        .filter(d => d.skuSpread?.distinctBrands != null)
-        .map(d => d.skuSpread!.distinctBrands!)
+      // State-head range breadth is a full-FY/FY-to-date carried-range measure.
+      // Keep the existing brand_canon taxonomy, but derive both median NET and
+      // median breadth from the same eligible secondary distributor population.
+      const eligibleSpread = (deepDive.distributors as DistributorGroup[])
+        .map(d => {
+          const basis = stateHeadBasisByDistributor.get(d.name);
+          const positiveBrands = basis
+            ? [...basis.brandNet.values()].filter(net => net > 0).length
+            : 0;
+          return {
+            distributor: d,
+            totalNet: basis?.totalNet ?? 0,
+            distinctBrands: positiveBrands,
+          };
+        })
+        .filter(d => d.totalNet > 0 && d.distinctBrands > 0);
+      const allSpread = eligibleSpread
+        .map(d => d.distinctBrands)
+        .sort((a, b) => a - b);
+      const allDistributorNet = eligibleSpread
+        .map(d => d.totalNet)
         .sort((a, b) => a - b);
 
-      const peerMedianBrands = allSpread.length > 0
-        ? allSpread[Math.floor(allSpread.length / 2)]
-        : null;
+      const peerMedianBrands = median(allSpread);
+      const peerMedianDistributorNet = median(allDistributorNet);
 
-      for (const d of (deepDive.distributors as DistributorGroup[]).slice(0, 20)) {
-        const brands = d.skuSpread?.distinctBrands ?? null;
-        if (brands == null || peerMedianBrands == null) continue;
+      for (const d of eligibleSpread.slice(0, 20)) {
+        const brands = d.distinctBrands;
+        if (
+          brands == null ||
+          peerMedianBrands == null ||
+          peerMedianDistributorNet == null
+        ) continue;
         const gap = peerMedianBrands - brands;
         if (gap <= 0) continue;
-        // Size: gap_codes × peer_median_quarterly_per_code × uptake
-        const { valueHigh, valueLow } = widenDeepDiveSizing(
-          gap, peerMedianBrands, medianNet, labels.length, rangeUptake,
+        const sizing = widenDeepDiveSizing(
+          gap, peerMedianBrands, peerMedianDistributorNet,
+          stateHeadLoadedMonthCount, rangeUptake,
         );
+        if (!sizing) continue;
         widenDists.push({
-          name: d.name,
+          name: d.distributor.name,
           distinctBrands: brands,
-          broadSegments: d.skuSpread?.broadSegmentsCovered ?? null,
+          broadSegments: null,
           rangeGapNote: `peer median: ${peerMedianBrands} brands; gap: ${gap} brands`,
-          valueHigh: t2(valueHigh),
-          valueLow:  t2(valueLow),
+          valueHigh: t2(sizing.valueHigh),
+          valueLow:  t2(sizing.valueLow),
         });
       }
     } else if ((scope === "company" || scope === "state") && companyRangeGapRows.length > 0) {
-      // Company/state scope: use SQL-only path from secondary_sku_line (segment_canon as brand proxy)
+      // Company/state scope: full-FY/FY-to-date breadth and NET both come from
+      // the same eligible secondary_sku_line distributor population.
       const peerMedian = parseFloat(companyRangeGapRows[0]?.peer_median ?? "0") || 0;
-      const perCodeQuarterly = peerMedian > 0
-        ? (medianNet / Math.max(1, labels.length / 3)) / peerMedian
-        : 0;
+      const peerMedianDistributorNet =
+        parseFloat(companyRangeGapRows[0]?.peer_median_net ?? "0") || 0;
+      const loadedMonthCount =
+        parseInt(companyRangeGapRows[0]?.loaded_month_count ?? "0") || 0;
       for (const r of companyRangeGapRows) {
         const brands  = parseInt(r.distinct_segments) || 0;
         const gap     = parseFloat(r.gap) || 0;
         if (gap <= 0) continue;
-        const valueHigh = gap * perCodeQuarterly * rangeUptake;
+        const sizing = widenDeepDiveSizing(
+          gap, peerMedian, peerMedianDistributorNet, loadedMonthCount, rangeUptake,
+        );
+        if (!sizing) continue;
         widenDists.push({
           name: r.distributor,
           distinctBrands: brands,
           broadSegments: null,
           rangeGapNote: `peer median: ${Math.round(peerMedian)} segments; gap: ${Math.round(gap)} segments`,
-          valueHigh: t2(valueHigh),
-          valueLow:  t2(valueHigh / 2),
+          valueHigh: t2(sizing.valueHigh),
+          valueLow:  t2(sizing.valueLow),
         });
       }
     }
@@ -1042,6 +1290,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     }));
 
     const totalWidenValueHigh = widenDists.reduce((s, d) => s + (d.valueHigh ?? 0), 0);
+    const widenHasEntities = widenDists.length > 0;
 
     const widenDataSource = scope === "statehead"
       ? "brand_canon from secondary register (Sheets-based deep dive)"
@@ -1051,19 +1300,36 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
 
     const widen = {
       rangeUptakeAssumption: rangeUptake,
-      peerNote: "Value uses primary sales peer median ÷ segment count as per-segment proxy. Peer median computed from all distributors in secondary register for this FY.",
+      peerNote: `Value uses median positive secondary distributor NET ÷ peer median carried segments as a per-segment proxy. Both medians use the same requested-FY secondary distributor population. The ${Math.round(rangeUptake * 100)}% uptake is a half-to-full opportunity estimate, not observed sales or a probability.`,
       excludesProjectNote: "Territory figures only — project/non-territory channel excluded.",
       dataSourceNote: widenDists.length > 0 ? widenDataSource : null,
+      basis: {
+        population: scope === "statehead"
+          ? "matched secondary-register retailers in the state-head distributor cohort"
+          : "secondary SKU",
+        entity: "distributor",
+        source: scope === "statehead" ? "secondary_register_line" : "secondary_sku_line",
+        numerator: "median positive secondary NET per eligible distributor",
+        denominator: scope === "statehead"
+          ? "median distinct brand_canon count across the same eligible distributors"
+          : "median distinct segment_canon count across the same eligible distributors",
+        period: scope === "statehead"
+          ? `${stateHeadSecondaryPeriod} carried range`
+          : `${parseInt(companyRangeGapRows[0]?.loaded_month_count ?? "0") || 0} loaded month${parseInt(companyRangeGapRows[0]?.loaded_month_count ?? "0") === 1 ? "" : "s"} in FY ${fy} carried range`,
+        geography: scopeLabel,
+        taxonomy: "unchanged by Prompt 75",
+        estimate: `${Math.round(rangeUptake * 100)}% uptake assumption; half-to-full opportunity range`,
+      },
       dedupNote: widenDedupDropped > 0
         ? `${widenDedupDropped} distributor(s) already counted in CLOSE, RECOVER or ACTIVATE — excluded from WIDEN.`
         : null,
       top20Distributors: widenDists.slice(0, 20),
-      valueHigh: t2(totalWidenValueHigh),
-      valueLow:  t2(totalWidenValueHigh / 2),
+      valueHigh: widenHasEntities ? t2(totalWidenValueHigh) : null,
+      valueLow:  widenHasEntities ? t2(totalWidenValueHigh / 2) : null,
       segmentRollup,
       notAvailable: widenDists.length === 0,
       notAvailableReason: widenDists.length > 0 ? null :
-        scope === "state" && !stateSecondaryHasData
+        scope === "state" && !secondarySkuHasData
           ? "Secondary register data not available for this state in this FY — range gap cannot be computed."
           : scope === "state"
           ? "All distributors in this state meet or exceed the peer segment range — no range gap identified."
@@ -1156,7 +1422,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     }, 0);
 
     // Ledger rows that imply visits = RECOVER + ACTIVATE entries (each is a retailer/customer to visit)
-    const ledgerVisitImplied = recoverEntities.length + activateEntities.length;
+    const ledgerVisitImplied = recoverEntities.length + lowActivationDists.length;
     const visitRate = totalWorkingDaysActual > 0 ? totalWorkingDaysActual / Math.max(1, labels.length / 3) : 0;
     const remainingDays = Math.max(0, Math.round(250 - totalWorkingDaysActual)); // rough FY capacity
 
@@ -1183,19 +1449,16 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       { item: "Stock levels", reason: "Inventory data is not ingested into this system." },
     ];
     if (scope === "state") {
-      if (!stateSecondaryHasData) {
-        unavailableItems.push({ item: "Distributor activation (state)", reason: "Secondary register not yet loaded for this state in this FY — activation data unavailable." });
-        unavailableItems.push({ item: "Distributor range gap (state)", reason: "Secondary register not yet loaded for this state in this FY — range gap data unavailable." });
-      }
+      if (activate.notAvailable) unavailableItems.push({ item: "Distributor activation (state)", reason: activate.notAvailableReason });
+      if (widen.notAvailable) unavailableItems.push({ item: "Distributor range gap (state)", reason: widen.notAvailableReason ?? "Matched secondary range basis unavailable." });
       unavailableItems.push({ item: "Silent distributor and concentration flags", reason: "Requires state-head scope." });
     } else if (scope === "company") {
-      if (companyActivationRows.length === 0) {
-        unavailableItems.push({ item: "Distributor activation (company)", reason: "Secondary register not yet loaded for this FY — activation data unavailable." });
-      }
-      if (companyRangeGapRows.length === 0) {
-        unavailableItems.push({ item: "Distributor range gap (company)", reason: "Secondary register not yet loaded for this FY — range gap data unavailable." });
-      }
+      if (activate.notAvailable) unavailableItems.push({ item: "Distributor activation (company)", reason: activate.notAvailableReason });
+      if (widen.notAvailable) unavailableItems.push({ item: "Distributor range gap (company)", reason: widen.notAvailableReason ?? "Matched secondary range basis unavailable." });
       unavailableItems.push({ item: "Silent distributor and concentration flags", reason: "Requires state-head scope — run per state head for distributor recency and concentration." });
+    } else if (scope === "statehead") {
+      if (activate.notAvailable) unavailableItems.push({ item: "Distributor activation (state head)", reason: activate.notAvailableReason });
+      if (widen.notAvailable) unavailableItems.push({ item: "Distributor range gap (state head)", reason: widen.notAvailableReason ?? "Matched secondary range basis unavailable." });
     } else if (scope !== "statehead") {
       // defensive fallback for any future scope value
       unavailableItems.push({ item: "Distributor activation and SKU range by distributor", reason: "Requires state-head or company scope." });
@@ -1257,7 +1520,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       precedenceRules: [
         "1. CLOSE (scheme arithmetic — no conversion assumption)",
         "2. RECOVER (specific prior purchase × recovery assumption)",
-        "3. ACTIVATE (dormant — never a prior buyer in scope)",
+        "3. ACTIVATE (low-activation distributor with dormant secondary retailers)",
         "4. WIDEN (distributor range gap — peer inference)",
       ],
       note: "A retailer or distributor may appear in more than one lever's narrative but is counted in only ONE lever's total.",
@@ -1301,7 +1564,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         contributionHigh: null, contributionLow: null,
         effort: "Medium", confidence: "Low",
         conversionAssumption: dormantRevival,
-        basisNote: `Dormant retailer count × median active retailer quarterly value × ${Math.round(dormantRevival * 100)}% revival assumption.`,
+        basisNote: `Secondary dormant retailer count × median positive secondary NET per active retailer × ${Math.round(dormantRevival * 100)}% revival assumption; ${activate.basis.valuePeriod}; half-to-full opportunity estimate.`,
       });
     }
 
@@ -1314,7 +1577,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         contributionHigh: null, contributionLow: null,
         effort: "Medium", confidence: "Low",
         conversionAssumption: rangeUptake,
-        basisNote: `Range gap codes × per-code peer median quarterly value × ${Math.round(rangeUptake * 100)}% uptake assumption.`,
+        basisNote: `Secondary distributor range gap × matched secondary per-segment value × ${Math.round(rangeUptake * 100)}% uptake assumption; ${widen.basis.period}; half-to-full opportunity estimate.`,
       });
     }
 
@@ -1372,9 +1635,10 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     const leverValues: Array<{ lever: string; value: number; entityCount: number }> = [
       { lever: "CLOSE",    value: totalCloseValue,     entityCount: allNudges.length },
       { lever: "RECOVER",  value: postDedupValue - totalCloseValue - activateValueHigh - totalWidenValueHigh, entityCount: recoverEntities.length },
-      { lever: "ACTIVATE", value: activateValueHigh,   entityCount: activateEntities.length },
+      { lever: "ACTIVATE", value: activateValueHigh,   entityCount: lowActivationDists.length },
       { lever: "WIDEN",    value: totalWidenValueHigh, entityCount: widenDists.length },
-    ].sort((a, b) => b.value - a.value);
+    ].filter(lever => lever.entityCount > 0 && lever.value > 0)
+      .sort((a, b) => b.value - a.value);
 
     const largestOpportunityRow = topRows[0] ?? null;
     const largestRisk = hiddenShrinkers[0] ?? null;

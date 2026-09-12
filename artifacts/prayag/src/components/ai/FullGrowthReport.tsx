@@ -43,7 +43,12 @@ export type FullGrowthReportData = {
     rows: LedgerRow[]; totalRows: number; omittedCount: number; omittedValue: number | null;
   };
   activate: {
-    dormantRevivalAssumption: number; medianActiveCustomerValue: number | null;
+    dormantRevivalAssumption: number; medianActiveRetailerValue: number | null;
+    medianSource?: string;
+    basis?: {
+      population: string; entity: string; source: string; valuePeriod: string;
+      retailerUniversePeriod: string; geography: string; numerator: string; estimate: string;
+    };
     medianNote: string; totalDormantCount: number; afterDedupCount: number;
     dedupNote: string | null; valueHigh: number | null; valueLow: number | null;
     lowActivationDistributors: Array<{
@@ -57,6 +62,10 @@ export type FullGrowthReportData = {
   };
   widen: {
     rangeUptakeAssumption: number; peerNote: string; excludesProjectNote: string;
+    basis?: {
+      population: string; entity: string; source: string; numerator: string;
+      denominator: string; period: string; geography: string; taxonomy: string; estimate: string;
+    };
     top20Distributors: Array<{ name: string; distinctBrands: number | null; broadSegments: number | null; rangeGapNote: string; valueHigh: number | null; valueLow: number | null }>;
     valueHigh: number | null; valueLow: number | null;
     segmentRollup: Array<{ segment: string; codesLost: number; priorNet: number | null }>;
@@ -277,7 +286,12 @@ export default function FullGrowthReport({ data }: { data: FullGrowthReportData 
               ))}
             </div>
             {activate.dedupNote && <p className="text-xs text-amber-700 mb-2">{activate.dedupNote}</p>}
-            <p className="text-[10px] text-muted-foreground mb-2">{activate.medianNote} Median active customer value: ₹{lac(activate.medianActiveCustomerValue != null ? activate.medianActiveCustomerValue * 100_000 : null)}L · Assumption: {Math.round(activate.dormantRevivalAssumption * 100)}%</p>
+            <p className="text-[10px] text-muted-foreground mb-2">{activate.medianNote} Median active secondary retailer value: ₹{lac(activate.medianActiveRetailerValue != null ? activate.medianActiveRetailerValue * 100_000 : null)}L · Assumption: {Math.round(activate.dormantRevivalAssumption * 100)}%</p>
+            {activate.basis && (
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Basis: {activate.basis.population} · {activate.basis.entity} · {activate.basis.source} · value period {activate.basis.valuePeriod} · retailer universe {activate.basis.retailerUniversePeriod} · {activate.basis.geography}.
+              </p>
+            )}
             {activate.distributorNote && (
               <p className="text-xs text-muted-foreground italic mb-2">{activate.distributorNote}</p>
             )}
@@ -326,6 +340,11 @@ export default function FullGrowthReport({ data }: { data: FullGrowthReportData 
         ) : (
           <>
             <p className="text-xs text-muted-foreground mb-2">{widen.peerNote}</p>
+            {widen.basis && (
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Basis: {widen.basis.population} · {widen.basis.entity} · {widen.basis.source} · {widen.basis.period} · {widen.basis.geography} · taxonomy unchanged.
+              </p>
+            )}
             <p className="text-[10px] text-muted-foreground mb-3">{widen.excludesProjectNote} · Assumption: {Math.round(widen.rangeUptakeAssumption * 100)}% uptake · Value: ₹{cr(widen.valueLow != null ? widen.valueLow * 10_000_000 : null)}–₹{cr(widen.valueHigh != null ? widen.valueHigh * 10_000_000 : null)} Cr</p>
             {widen.top20Distributors.length > 0 && (
               <div className="overflow-x-auto mb-3">

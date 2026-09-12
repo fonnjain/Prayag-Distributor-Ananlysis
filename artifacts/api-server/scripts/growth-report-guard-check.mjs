@@ -253,6 +253,56 @@ if (body == null) {
   process.exit(1);
 }
 
+// ── Check 1b: matched secondary basis contracts ──────────────────────────────
+const activate = body.activate ?? {};
+const widen = body.widen ?? {};
+check(
+  "ACTIVATE declares a secondary retailer basis",
+  activate.basis?.entity === "retailer" &&
+    typeof activate.basis?.source === "string" &&
+    activate.basis.source.startsWith("secondary_") &&
+    typeof activate.basis?.valuePeriod === "string",
+  JSON.stringify(activate.basis ?? null),
+);
+check(
+  "ACTIVATE no longer exposes the primary-customer median field",
+  !Object.prototype.hasOwnProperty.call(activate, "medianActiveCustomerValue") &&
+    Object.prototype.hasOwnProperty.call(activate, "medianActiveRetailerValue"),
+  JSON.stringify({
+    medianActiveCustomerValue: activate.medianActiveCustomerValue,
+    medianActiveRetailerValue: activate.medianActiveRetailerValue,
+  }),
+);
+check(
+  "unavailable ACTIVATE is null-valued, never numeric zero",
+  activate.notAvailable !== true ||
+    (activate.valueLow == null && activate.valueHigh == null),
+  JSON.stringify({
+    notAvailable: activate.notAvailable,
+    valueLow: activate.valueLow,
+    valueHigh: activate.valueHigh,
+  }),
+);
+check(
+  "WIDEN declares a matched secondary distributor basis and period",
+  widen.basis?.entity === "distributor" &&
+    typeof widen.basis?.source === "string" &&
+    widen.basis.source.startsWith("secondary_") &&
+    typeof widen.basis?.period === "string" &&
+    /loaded month/i.test(widen.basis.period),
+  JSON.stringify(widen.basis ?? null),
+);
+check(
+  "unavailable WIDEN is null-valued, never numeric zero",
+  widen.notAvailable !== true ||
+    (widen.valueLow == null && widen.valueHigh == null),
+  JSON.stringify({
+    notAvailable: widen.notAvailable,
+    valueLow: widen.valueLow,
+    valueHigh: widen.valueHigh,
+  }),
+);
+
 // ── Check 2: post-dedup ≤ pre-dedup ──────────────────────────────────────────
 const dedup = body.deduplication ?? {};
 const preDedupValue  = typeof dedup.preDedupValue  === "number" ? dedup.preDedupValue  : null;
