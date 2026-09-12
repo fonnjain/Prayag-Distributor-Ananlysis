@@ -108,6 +108,27 @@ function fmtPct(n: number | null | undefined): string {
   return `${n >= 0 ? "+" : ""}${n}%`;
 }
 
+const FISCAL_MONTH_ORDER = new Map(
+  ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
+    .map((month, index) => [month.toUpperCase(), index]),
+);
+
+export function sortReport2Months<T extends { month: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const aMonth = a.month.split("-")[0]?.toUpperCase() ?? "";
+    const bMonth = b.month.split("-")[0]?.toUpperCase() ?? "";
+    return (FISCAL_MONTH_ORDER.get(aMonth) ?? 99) - (FISCAL_MONTH_ORDER.get(bMonth) ?? 99);
+  });
+}
+
+export function formatReport2Growth(thisFy: number | null, lastFy: number | null): string {
+  if (thisFy == null) return "\u2014";
+  if (lastFy == null || lastFy === 0) return thisFy > 0 ? "new" : "\u2014";
+  const growthPct = ((thisFy / lastFy) - 1) * 100;
+  if (!Number.isFinite(growthPct)) return "\u2014";
+  return `${growthPct >= 0 ? "+" : ""}${growthPct.toFixed(1)}%`;
+}
+
 function fmtQty(n: number, unit: string): string {
   const unitLabel = unit === "L" || unit.toUpperCase() === "LTR" || unit.toUpperCase() === "LITRE"
     ? "L" : unit || "pcs";
@@ -502,6 +523,17 @@ function DiffCell({ value }: { value: number }) {
 
 function GrowthCell({ value }: { value: number | null }) {
   return <span className={growthColor(value)}>{fmtPct(value)}</span>;
+}
+
+function Report2GrowthCell({ thisFy, lastFy }: { thisFy: number | null; lastFy: number | null }) {
+  const label = formatReport2Growth(thisFy, lastFy);
+  const growthPct = thisFy != null && lastFy != null && lastFy !== 0
+    ? ((thisFy / lastFy) - 1) * 100
+    : null;
+  const className = label === "new"
+    ? "text-green-700 dark:text-green-400 font-medium"
+    : growthColor(growthPct);
+  return <span className={className}>{label}</span>;
 }
 
 function R4ItemDrill({ fy, priorFy, state, customer, group, months, entityFilter }: { fy: string; priorFy: string; state: string; customer: string; group: string; months: string; entityFilter: EntityFilterValue }) {
@@ -978,7 +1010,7 @@ export default function CompanyReports() {
             if (drillPath.length === 1) {
               const state = drillPath[0];
               const parentRow = data.r1r2_byState.find(r => r.label === state);
-              const rows = data.r2_byStateMonth?.filter(r => r.state === state) ?? [];
+              const rows = sortReport2Months(data.r2_byStateMonth?.filter(r => r.state === state) ?? []);
               return <DrillTable
                 rows={rows}
                 parentAmount={parentRow?.thisFy}
@@ -988,7 +1020,7 @@ export default function CompanyReports() {
                   { header: `FY ${fy}`, align: "right", isSumTarget: true, render: r => r.thisFy != null ? fmtCr(r.thisFy) : "—" },
                   { header: `FY ${priorFy}`, align: "right", render: r => r.lastFy != null ? fmtCr(r.lastFy) : "—" },
                   { header: "Diff", align: "right", render: r => <DiffCell value={(r.thisFy || 0) - (r.lastFy || 0)} /> },
-                  { header: "Growth", align: "right", render: r => <GrowthCell value={r.lastFy ? (((r.thisFy || 0) / r.lastFy) - 1) * 100 : null} /> },
+                  { header: "Growth", align: "right", render: r => <Report2GrowthCell thisFy={r.thisFy} lastFy={r.lastFy} /> },
                 ]}
               />;
             }
