@@ -51,6 +51,7 @@ import {
 import { normName } from "../lib/mgmt/names.js";
 import {
   db,
+  secondaryHeadMonths,
   distributorTierOverrideTable,
   insertDistributorTierOverrideSchema,
 } from "@workspace/db";
@@ -59,6 +60,11 @@ import { serveWithSnapshot, invalidateSnapshots, prewarmSnapshot } from "../lib/
 import { logger } from "../lib/logger.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
 import { monthFreezeAt } from "../lib/registers/monthlyReplace.js";
+import {
+  buildDeepDiveExport,
+  type DeepDiveMonthlyRow,
+} from "../lib/mgmt/deepDiveExport.js";
+import { provisionalMonthsExportInfo } from "../lib/exportInfo.js";
 
 const router: IRouter = Router();
 
@@ -1319,6 +1325,189 @@ router.get("/mgmt/deep-dive", async (req: Request, res: Response): Promise<void>
     if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "mgmt/deep-dive: handler threw");
     res.status(500).json({ error: "Could not load deep-dive data." });
+  }
+});
+
+// Workbook generation is intentionally separate from the JSON endpoint.  A
+// small keyed guard prevents two clicks (or two browser tabs) from doing the
+// same expensive Sheets/DB work concurrently.
+const deepDiveExportInFlight = new Map<string, Promise<Buffer>>();
+
+const EXPORT_MONTHS = new Set(Array.from({ length: 12 }, (_, i) => i + 1));
+export function normalizeDeepDiveExportPeriod(raw: unknown): number[] | undefined {
+  if (raw == null || raw === "") return undefined;
+  if (typeof raw !== "string") throw new Error("periodMonths must be a comma-separated list");
+  if (raw === "none") return [];
+  const values = raw.split(",").map((v) => Number(v.trim()));
+  if (values.length === 0 || values.length > 12 || values.some((v) => !Number.isInteger(v) || !EXPORT_MONTHS.has(v))) {
+    throw new Error("periodMonths must contain only fiscal month indexes 1-12");
+  }
+  return [...new Set(values)].sort((a, b) => a - b);
+}
+
+export function deepDiveExportGuardKey(
+  fy: string,
+  stateHead: string | undefined,
+  memberKey: string,
+  period: { months?: number[]; label: string; preset: string; month: string; fromDate: string; toDate: string },
+): string {
+  return [
+    fy, stateHead ?? "", memberKey, period.months === undefined ? "*" : period.months.join(","),
+    period.label, period.preset, period.month, period.fromDate, period.toDate,
+  ].join("|");
+}
+
+router.get("/mgmt/deep-dive/export", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const fy =
+      typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+        ? req.query.fy.trim()
+        : currentOpenFy();
+    const stateHeadRaw = typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
+    const stateHead = stateHeadRaw || undefined;
+    const memberRaw = typeof req.query.member === "string" ? req.query.member.trim() : "";
+    if (!memberRaw) {
+      res.status(400).json({ error: "member is required" });
+      return;
+    }
+    let periodMonths: number[] | undefined;
+    try {
+      periodMonths = normalizeDeepDiveExportPeriod(req.query.periodMonths);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : "Invalid periodMonths" });
+      return;
+    }
+    if (!periodMonths && typeof req.query.periodMonth === "string") {
+      const legacyIndex = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
+        .indexOf(req.query.periodMonth.trim());
+      if (legacyIndex >= 0) periodMonths = [legacyIndex + 1];
+    }
+    const periodLabelRaw = typeof req.query.periodLabel === "string" ? req.query.periodLabel.trim() : "";
+    if (periodLabelRaw.length > 120 || /[\u0000-\u001f\u007f]/.test(periodLabelRaw)) {
+      res.status(400).json({ error: "periodLabel is invalid or too long" });
+      return;
+    }
+    const periodLabel = periodLabelRaw || "Full FY / current page selection";
+    const periodPreset = typeof req.query.periodPreset === "string" ? req.query.periodPreset : "";
+    const periodMonth = typeof req.query.periodMonth === "string" ? req.query.periodMonth : "";
+    const fromDate = typeof req.query.fromDate === "string" ? req.query.fromDate : "";
+    const toDate = typeof req.query.toDate === "string" ? req.query.toDate : "";
+    if (!["", "today", "7d", "15d", "month", "custom"].includes(periodPreset) ||
+        (periodMonth && !["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"].includes(periodMonth)) ||
+        (fromDate && !/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) ||
+        (toDate && !/^\d{4}-\d{2}-\d{2}$/.test(toDate))) {
+      res.status(400).json({ error: "period query input is invalid" });
+      return;
+    }
+    const period = {
+      months: periodMonths,
+      label: periodLabel,
+      preset: periodPreset,
+      month: periodMonth,
+      fromDate,
+      toDate,
+    };
+
+    // Keep export identity resolution byte-for-byte aligned with the normal
+    // deep-dive route. In particular, an ambiguous registry name is never
+    // silently guessed.
+    const registry = await loadRegistry(fy);
+    const resolved = registry?.resolve(
+      memberRaw,
+      stateHead ? { stateHead } : undefined,
+    );
+    if (resolved?.kind === "ambiguous") {
+      res.status(400).json({
+        error: resolved.message,
+        candidates: resolved.candidates.map((p) => ({
+          displayName: p.displayName,
+          stateHead: p.stateHead,
+          hq: p.hq ?? null,
+        })),
+      });
+      return;
+    }
+    if (resolved?.kind !== "found") {
+      res.status(400).json({ error: "Selected member was not found in the identity registry." });
+      return;
+    }
+    if (stateHead && normName(resolved.person.stateHead) !== normName(stateHead)) {
+      res.status(400).json({
+        error: `Selected member does not belong to state head ${stateHead}.`,
+      });
+      return;
+    }
+    const memberKey = resolved.person.nsk;
+    const canonicalStateHead = resolved.person.stateHead;
+    const guardKey = deepDiveExportGuardKey(fy, stateHead, memberKey, period);
+    let work = deepDiveExportInFlight.get(guardKey);
+    if (!work) {
+      work = (async () => {
+        const result = await loadDeepDiveData(fy, stateHead, memberKey);
+        if (result.error && !result.kpis) throw new Error(result.error);
+        if (!result.kpis) throw new Error("Selected member was not found.");
+        const monthlyDbRows = await db
+          .select({
+            monthLabel: secondaryHeadMonths.monthLabel,
+            monthIdx: secondaryHeadMonths.monthIdx,
+            planAmount: secondaryHeadMonths.planAmount,
+            orderedAmount: secondaryHeadMonths.orderedAmount,
+            receivedAmount: secondaryHeadMonths.receivedAmount,
+            achievementPct: secondaryHeadMonths.achievementPct,
+            notYetRecorded: secondaryHeadMonths.notYetRecorded,
+          })
+          .from(secondaryHeadMonths)
+          .where(and(
+            eq(secondaryHeadMonths.fy, fy),
+            // Exact resolved normKey only. Never use state-head/team joins or
+            // roll subordinate rows into this selected-member workbook.
+            eq(secondaryHeadMonths.headCanon, result.kpis.normKey),
+            eq(secondaryHeadMonths.stateHead, canonicalStateHead),
+          ))
+          .orderBy(secondaryHeadMonths.monthIdx);
+        const monthlyRows: DeepDiveMonthlyRow[] = monthlyDbRows.map((r) => ({
+          monthLabel: r.monthLabel,
+          monthIdx: Number(r.monthIdx),
+          planAmount: r.planAmount == null ? null : Number(r.planAmount),
+          orderedAmount: r.orderedAmount == null ? null : Number(r.orderedAmount),
+          receivedAmount: r.receivedAmount == null ? null : Number(r.receivedAmount),
+          achievementPct: r.achievementPct == null ? null : Number(r.achievementPct),
+          notYetRecorded: Boolean(r.notYetRecorded),
+        }));
+        return buildDeepDiveExport({
+          fy,
+          kpis: result.kpis,
+          monthlyRows,
+          periodLabel: period.label,
+          periodMonths,
+          dataReadAt: result.dataReadAt,
+          provisionalMonths: await provisionalMonthsExportInfo(fy),
+          fromDbSnapshot: result.fromDbSnapshot,
+          stale: result.stale,
+          retailerDetailStatus: result.retailerDetail?.status ?? "not-loaded",
+          retailerRowCount: result.retailerDetail?.status === "ok"
+            ? result.retailerDetail.rows.length
+            : null,
+          skuSpreadIncluded: result.skuSpread != null,
+          winBackIncluded: result.winBack != null,
+        });
+      })();
+      deepDiveExportInFlight.set(guardKey, work);
+      void work.then(
+        () => deepDiveExportInFlight.delete(guardKey),
+        () => deepDiveExportInFlight.delete(guardKey),
+      );
+    }
+    const buffer = await work;
+    const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+    const filename = `SalesDeepDive_${safe(resolved.person.displayName)}_${fy}_${safe(period.label)}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.end(buffer);
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err }, "mgmt/deep-dive/export failed");
+    if (!res.headersSent) res.status(500).json({ error: "Could not generate deep-dive workbook." });
   }
 });
 

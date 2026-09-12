@@ -4,7 +4,7 @@ import { trunc2 } from "@/lib/trunc";
 // Phase 2: member's own working sheet retailer-level detail (source B).
 // Direct Dealer order kept separate from retailer/party OB throughout.
 // Achievement always recomputed (sale / plan); never read from a sheet % cell.
-import { Loader2 } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { cn } from "@/lib/utils";
@@ -2315,6 +2315,8 @@ export default function SalesDeepDive() {
   // True while Google Sheets is briefly rate-limiting reads (503 quota);
   // a retry is scheduled automatically after the server's retryAfter hint.
   const [quotaWait, setQuotaWait] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Request generation counter: each user-initiated load bumps it, so a stale
   // quota retry (or late response) from an earlier selection never commits.
@@ -2435,6 +2437,56 @@ export default function SalesDeepDive() {
     : allMonths;
   const dateFilterLabel    = activeDateRange?.label ?? null;
 
+  const downloadWorkbook = useCallback(async () => {
+    if (!kpis || !selectedMemberKey || exporting) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      // Keep query ordering stable: it makes downloads auditable and avoids
+      // browser/proxy cache keys changing for the same page selection.
+      const params = new URLSearchParams();
+      params.set("fy", fy);
+      params.set("stateHead", selectedHead);
+      params.set("member", selectedMemberKey);
+      params.set("periodPreset", dateFilter.preset ?? "");
+      params.set("periodMonth", dateFilter.preset === "month" ? dateFilter.month : "");
+      params.set("fromDate", dateFilter.fromDate);
+      params.set("toDate", dateFilter.toDate);
+      params.set(
+        "periodMonths",
+        covered
+          ? ([...covered].map((m) => FY_MONTH_ORDER.indexOf(m) + 1).sort((a, b) => a - b).join(",") || "none")
+          : "",
+      );
+      params.set("periodLabel", dateFilterLabel ?? "Full FY / current page selection");
+      const response = await fetch(`${API}/mgmt/deep-dive/export?${params.toString()}`);
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+          const body = await response.json() as { error?: string };
+          if (body.error) detail = body.error;
+        } catch { /* retain HTTP status for non-JSON errors */ }
+        throw new Error(detail);
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const filename = disposition.match(/filename="?([^"]+)"?/i)?.[1]
+        ?? `SalesDeepDive_${kpis.name}_${fy}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "Could not download workbook.");
+    } finally {
+      setExporting(false);
+    }
+  }, [covered, dateFilter, dateFilterLabel, exporting, fy, kpis, selectedHead, selectedMemberKey]);
+
   return (
     <div className="space-y-6">
 
@@ -2554,6 +2606,27 @@ export default function SalesDeepDive() {
               </div>
               {/* Phase 7: 4 achievement badges replacing the old blended figure */}
               <div className="flex flex-wrap gap-2">
+                {kpis && selectedMemberKey && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={downloadWorkbook}
+                      disabled={exporting}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium hover:bg-muted/50 disabled:cursor-wait disabled:opacity-60"
+                      data-testid="button-download-sales-deep-dive"
+                    >
+                      {exporting
+                        ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                        : <Download className="h-3 w-3" aria-hidden="true" />}
+                      {exporting ? "Preparing…" : "Download Excel"}
+                    </button>
+                    {exportError && (
+                      <span className="text-xs text-destructive" role="alert">
+                        Excel export failed: {exportError}
+                      </span>
+                    )}
+                  </>
+                )}
                 {kpis.achievementSale != null && (
                   <div className={cn("rounded-full px-3 py-1 text-xs font-semibold", achieveBand(kpis.achievementSale))}>
                     {fmtPct(kpis.achievementSale)} sale vs total target

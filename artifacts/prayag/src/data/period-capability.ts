@@ -16,6 +16,10 @@ export const FY_ONLY_REASON =
   "This page shows year-to-date figures. Month selection is not available " +
   "because its source has no monthly breakdown.";
 
+export const DEEP_DIVE_FY_ONLY_REASON =
+  "This page shows year-to-date headline figures. Month selection is not available " +
+  "because the headline source is not period-sliced; Excel includes member monthly rows where recorded.";
+
 /** Shown in place of the filter controls when the page is NONE. */
 export const NONE_REASON =
   "Period selection does not apply to this page.";

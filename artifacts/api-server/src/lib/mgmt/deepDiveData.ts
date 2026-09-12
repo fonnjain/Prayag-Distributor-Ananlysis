@@ -110,6 +110,8 @@ export type MemberKpis = {
   orderBooking: number | null;           // Retailer/party secondary OB (NET)
   directDealersOrder: number | null;     // Direct dealer OB — kept separate
   sale: number | null;                   // YTD sales received
+  /** Exact source selected for sale after the SOBR freshness override. */
+  saleSource?: "secondary_order_booking_report" | "state_head_dashboard_data_tab" | "unavailable";
   // Derived achievement ratios — recomputed, never read from a sheet % cell
   achievementPct: number | null;         // = achievementSale (kept for backward compat)
   achievementSecondary: number | null;   // orderBooking / secondaryTarget
@@ -968,6 +970,11 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       orderBooking,
       directDealersOrder,
       sale,
+      saleSource: sobrSale !== null
+        ? "secondary_order_booking_report"
+        : dataSale !== null
+          ? "state_head_dashboard_data_tab"
+          : "unavailable",
       achievementPct,
       achievementSecondary,
       achievementDirectDealer,

@@ -5,6 +5,7 @@
 //   NONE    — period controls hidden; reason shown
 import { Clock, RefreshCw, ChevronDown, Settings2, AlertCircle } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import {
   useGlobalFilter,
@@ -16,7 +17,11 @@ import {
   type FiscalMonthIdx,
   type PeriodMode,
 } from "@/data/global-filter-context";
-import { FY_ONLY_REASON, NONE_REASON } from "@/data/period-capability";
+import {
+  DEEP_DIVE_FY_ONLY_REASON,
+  FY_ONLY_REASON,
+  NONE_REASON,
+} from "@/data/period-capability";
 import { useDashboard } from "@/data/dashboard-context";
 import {
   Select,
@@ -253,6 +258,7 @@ interface GlobalFilterBarProps {
 }
 
 export default function GlobalFilterBar({ hideSyncRow, className }: GlobalFilterBarProps) {
+  const [location] = useLocation();
   const {
     fy, setFy,
     periodMode, setPeriodMode,
@@ -310,7 +316,9 @@ export default function GlobalFilterBar({ hideSyncRow, className }: GlobalFilter
       <div className={cn("flex flex-col gap-1.5", className)}>
         <div className="flex flex-wrap items-center gap-1.5">
           {FySelector}
-          <CapabilityNote reason={FY_ONLY_REASON} />
+          <CapabilityNote
+            reason={location === "/sales/deep-dive" ? DEEP_DIVE_FY_ONLY_REASON : FY_ONLY_REASON}
+          />
         </div>
         {!hideSyncRow && <SyncRow />}
       </div>
