@@ -750,3 +750,17 @@ mtime_ms = 1789203714680
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/c5f02964-80cc-4e50-959a-6176d461b39b/d3b65365-31ec-4fce-8388-c49ff1d395da"
 storage_version_token = "1789203722356183"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "zaTNZDlzL2WDExhZ7XohF"
+uri = "file://.local/outputs/State-Head-Dashboard-Section-A-Implementation-Report.docx"
+type = "word_document"
+title = "State Head Dashboard — Section A Implementation Report"
+description = "Word document covering FY2026–27 Head Summary results, FY2025–26 preservation, three-state evidence, source provenance, fill-rate improvement, validation, Git revisions, and publishing status."
+logical_id = "10d616eb-2414-4666-b833-91b43dcff719"
+content_hash = "sha256:b4b3cb014ebdd201fb9d401561a22219d55ca51d51eddc920a18f806cb781fc6"
+size = 39968
+mtime_ms = 1789207293813
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/10d616eb-2414-4666-b833-91b43dcff719/b09e2400-93c8-4cf2-814b-0418b7d008ac"
+storage_version_token = "1789207299786651"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
