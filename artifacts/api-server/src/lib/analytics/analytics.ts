@@ -20,6 +20,11 @@ import {
   resolvePriorEntityFilter,
   type EntityFilter,
 } from "../saleLineFilter.js";
+import {
+  MASTER_CATEGORY_DISPLAY_NOTE,
+  loadLatestReviewedMasterByCode,
+  rollUpMarginRows,
+} from "../categoryDisplay.js";
 
 const MONTH_NAMES = [
   "Apr",
@@ -313,17 +318,19 @@ async function margins(
 
   const rows = await db
     .select({
-      group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
+      code: saleLines.code,
       revenue: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
       cost: sql<number>`coalesce(sum(${saleLines.qty} * ${costMaster.fgCost}), 0)::float8`,
     })
     .from(saleLines)
     .innerJoin(costMaster, eq(saleLines.code, costMaster.code))
     .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...monthConds, ...entityConds(filter)))
-    .groupBy(sql`1`);
+    .groupBy(saleLines.code);
+  const masterByCode = await loadLatestReviewedMasterByCode(rows.map((row) => row.code));
+  const groupedRows = rollUpMarginRows(rows, masterByCode);
 
   return {
-    byGroup: rows
+    byGroup: groupedRows
       .map((r) => ({
         group: r.group,
         revenue: Math.round(r.revenue),
@@ -405,16 +412,15 @@ async function sapMargins(agg: SapAggregate): Promise<Margins> {
     if (r.fgCost != null) costMap.set(String(r.code).toUpperCase(), Number(r.fgCost));
   }
   let covered = 0;
-  const byGroup = new Map<string, { revenue: number; cost: number }>();
+  const coveredRows: Array<{ code: string; revenue: number; cost: number }> = [];
   for (const c of agg.byCode) {
     const fgCost = costMap.get(c.code.toUpperCase());
     if (fgCost == null) continue;
     covered += c.revenue;
-    const g = byGroup.get(c.group) ?? { revenue: 0, cost: 0 };
-    g.revenue += c.revenue;
-    g.cost += c.qty * fgCost;
-    byGroup.set(c.group, g);
+    coveredRows.push({ code: c.code, revenue: c.revenue, cost: c.qty * fgCost });
   }
+  const masterByCode = await loadLatestReviewedMasterByCode(coveredRows.map((row) => row.code));
+  const byGroup = rollUpMarginRows(coveredRows, masterByCode);
   const coveragePct = total === 0 ? 0 : Math.round((covered / total) * 1000) / 10;
   if (covered === 0) {
     return {
@@ -425,11 +431,11 @@ async function sapMargins(agg: SapAggregate): Promise<Margins> {
     };
   }
   return {
-    byGroup: [...byGroup.entries()]
-      .map(([group, v]) => ({
-        group,
-        revenue: Math.round(v.revenue),
-        margin: Math.round(v.revenue - v.cost),
+    byGroup: byGroup
+      .map((row) => ({
+        group: row.group,
+        revenue: Math.round(row.revenue),
+        margin: Math.round(row.revenue - row.cost),
       }))
       .sort((a, b) => b.revenue - a.revenue),
     coveragePct,
@@ -520,6 +526,7 @@ export type AnalyticsReport = {
   retention: Retention;
   margins: Margins;
   groups: GroupStat[];
+  masterCategoryDisplayNote: string;
 };
 
 export function priorFy(fy: string): string {
@@ -691,5 +698,6 @@ export async function buildAnalytics(
     },
     margins: marginData,
     groups,
+    masterCategoryDisplayNote: MASTER_CATEGORY_DISPLAY_NOTE,
   };
 }

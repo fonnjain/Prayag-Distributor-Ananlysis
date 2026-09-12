@@ -71,7 +71,7 @@ router.get(
       // (a live compare year changes as new months are ingested).
       const report = await serveWithSnapshot({
         // v3: expose whether the comparison period has a usable channel split.
-        key: `analytics|v3|${fy}|${compareFy}`,
+        key: `analytics|v4|${fy}|${compareFy}`,
         ttlMs: ANALYTICS_TTL_MS,
         build: () => buildAnalytics(fy, compareFy) as Promise<Record<string, unknown>>,
         log: req.log,
@@ -131,6 +131,7 @@ async function buildWorkbook(p: AnalyticsReport, filter?: EntityFilter): Promise
     ["State filter", filter?.states?.length ? filter.states.join(", ") : "All"],
     ["Distributor filter", filter?.customers?.length ? filter.customers.join(", ") : "All"],
     ["Provisional months", await provisionalMonthsExportInfo(p.fy)],
+    ["Master category display", p.masterCategoryDisplayNote],
     ["Note", "YoY and retention figures use complete months only, matched by month name across both years. The prior FY is scoped to the current-FY customer set when head/state filters are active."],
   ];
   for (const [k, v] of infoRows) {

@@ -68,6 +68,7 @@ type AnalyticsPayload = {
     provisional: boolean;
     message: string | null;
   };
+  masterCategoryDisplayNote: string;
 };
 
 function YoyCard({ title, split, subtitle }: { title: string; split: AnalyticsYoy; subtitle: string }) {
@@ -364,6 +365,9 @@ export default function Growth() {
               </div>
               <p className="text-xs text-muted-foreground mt-3">
                 Cost coverage: {margins.coveragePct}% of revenue.
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {report.masterCategoryDisplayNote}
               </p>
             </>
           )}

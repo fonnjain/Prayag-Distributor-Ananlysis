@@ -10,6 +10,7 @@
 import { pool } from "@workspace/db";
 import { isMonthComplete } from "../analytics/analytics.js";
 import { entityCondsText, type EntityFilter } from "../saleLineFilter.js";
+import { latestReviewedMasterJoinSql } from "../categoryDisplay.js";
 
 // ── Month helpers ─────────────────────────────────────────────────────────────
 
@@ -130,6 +131,7 @@ export type CategoryRow = {
 export type ProductRow = {
   customer: string;
   category: string;
+  subcategory: string;
   code: string;
   itemName: string | null;
   qtyCy: number;
@@ -312,6 +314,7 @@ export async function getCustomerCategories(params: {
   monthsLy: string[];
 }): Promise<CategoryRow[]> {
   const { customer, fyCy, fyLy, monthsCy, monthsLy } = params;
+  const registryJoin = latestReviewedMasterJoinSql("sl");
 
   const res = await pool.query<{
     category: string | null;
@@ -322,18 +325,19 @@ export async function getCustomerCategories(params: {
   }>(
     `
     SELECT
-      COALESCE(group_canon, group_raw, 'Uncategorized') AS category,
-      COALESCE(SUM(qty::numeric) FILTER (WHERE fy = $1 AND month_label = ANY($3::text[])), 0) AS qty_cy,
-      COALESCE(SUM(amount::numeric) FILTER (WHERE fy = $1 AND month_label = ANY($3::text[])), 0) AS val_cy,
-      COALESCE(SUM(qty::numeric) FILTER (WHERE fy = $2 AND month_label = ANY($4::text[])), 0) AS qty_ly,
-      COALESCE(SUM(amount::numeric) FILTER (WHERE fy = $2 AND month_label = ANY($4::text[])), 0) AS val_ly
-    FROM sale_line_current
-    WHERE customer = $5
+      COALESCE(registry_master.master_category, 'Unmapped') AS category,
+      COALESCE(SUM(sl.qty::numeric) FILTER (WHERE sl.fy = $1 AND sl.month_label = ANY($3::text[])), 0) AS qty_cy,
+      COALESCE(SUM(sl.amount::numeric) FILTER (WHERE sl.fy = $1 AND sl.month_label = ANY($3::text[])), 0) AS val_cy,
+      COALESCE(SUM(sl.qty::numeric) FILTER (WHERE sl.fy = $2 AND sl.month_label = ANY($4::text[])), 0) AS qty_ly,
+      COALESCE(SUM(sl.amount::numeric) FILTER (WHERE sl.fy = $2 AND sl.month_label = ANY($4::text[])), 0) AS val_ly
+    FROM sale_line_current sl
+    ${registryJoin}
+    WHERE sl.customer = $5
       AND (
-        (fy = $1 AND month_label = ANY($3::text[]))
-        OR (fy = $2 AND month_label = ANY($4::text[]))
+        (sl.fy = $1 AND sl.month_label = ANY($3::text[]))
+        OR (sl.fy = $2 AND sl.month_label = ANY($4::text[]))
       )
-    GROUP BY COALESCE(group_canon, group_raw, 'Uncategorized')
+    GROUP BY COALESCE(registry_master.master_category, 'Unmapped')
     ORDER BY qty_cy DESC
     `,
     [fyCy, fyLy, monthsCy, monthsLy, customer],
@@ -356,7 +360,7 @@ export async function getCustomerCategories(params: {
         : null;
     return {
       customer,
-      category: r.category ?? "Uncategorized",
+      category: r.category ?? "Unmapped",
       qtyCy,
       valCy,
       qtyLy,
@@ -383,15 +387,17 @@ export async function getCustomerProducts(params: {
   monthsLy: string[];
 }): Promise<ProductRow[]> {
   const { customer, category, fyCy, fyLy, monthsCy, monthsLy } = params;
+  const registryJoin = latestReviewedMasterJoinSql("sl");
 
   const catFilter = category
-    ? `AND COALESCE(sl.group_canon, sl.group_raw, 'Uncategorized') = $6`
+    ? `AND COALESCE(registry_master.master_category, 'Unmapped') = $6`
     : "";
   const params6 = category ? [fyCy, fyLy, monthsCy, monthsLy, customer, category] : [fyCy, fyLy, monthsCy, monthsLy, customer];
 
   const res = await pool.query<{
     code: string;
     category: string | null;
+    subcategory: string | null;
     item_name: string | null;
     qty_cy: unknown;
     val_cy: unknown;
@@ -401,7 +407,8 @@ export async function getCustomerProducts(params: {
     `
     SELECT
       sl.code,
-      COALESCE(sl.group_canon, sl.group_raw, 'Uncategorized') AS category,
+      COALESCE(registry_master.master_category, 'Unmapped') AS category,
+      COALESCE(registry_master.canonical_category, 'Unmapped') AS subcategory,
       im.item_name,
       COALESCE(SUM(sl.qty::numeric) FILTER (WHERE sl.fy = $1 AND sl.month_label = ANY($3::text[])), 0) AS qty_cy,
       COALESCE(SUM(sl.amount::numeric) FILTER (WHERE sl.fy = $1 AND sl.month_label = ANY($3::text[])), 0) AS val_cy,
@@ -409,13 +416,14 @@ export async function getCustomerProducts(params: {
       COALESCE(SUM(sl.amount::numeric) FILTER (WHERE sl.fy = $2 AND sl.month_label = ANY($4::text[])), 0) AS val_ly
     FROM sale_line_current sl
     LEFT JOIN item_master im ON im.code = sl.code
+    ${registryJoin}
     WHERE sl.customer = $5
       AND (
         (sl.fy = $1 AND sl.month_label = ANY($3::text[]))
         OR (sl.fy = $2 AND sl.month_label = ANY($4::text[]))
       )
       ${catFilter}
-    GROUP BY sl.code, COALESCE(sl.group_canon, sl.group_raw, 'Uncategorized'), im.item_name
+    GROUP BY sl.code, COALESCE(registry_master.master_category, 'Unmapped'), COALESCE(registry_master.canonical_category, 'Unmapped'), im.item_name
     ORDER BY qty_cy DESC
     `,
     params6,
@@ -438,7 +446,8 @@ export async function getCustomerProducts(params: {
         : null;
     return {
       customer,
-      category: r.category ?? "Uncategorized",
+      category: r.category ?? "Unmapped",
+      subcategory: r.subcategory ?? "Unmapped",
       code: r.code,
       itemName: r.item_name,
       qtyCy,

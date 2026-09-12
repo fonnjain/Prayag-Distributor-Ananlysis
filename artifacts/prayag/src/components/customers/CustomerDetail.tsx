@@ -29,6 +29,7 @@ type CategoryRow = {
 };
 
 type ProductRow = CategoryRow & {
+  subcategory: string;
   code: string;
   itemName: string | null;
 };
@@ -126,6 +127,7 @@ export default function CustomerDetail({
   const [catLoading, setCatLoading] = useState(false);
   const [prodLoading, setProdLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
+  const [masterCategoryDisplayNote, setMasterCategoryDisplayNote] = useState("");
 
   const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -142,7 +144,10 @@ export default function CustomerDetail({
     });
     fetch(`${BASE}/api/customers/detail?${params}`)
       .then((r) => r.json())
-      .then((d) => setCatData(d.data ?? []))
+      .then((d) => {
+        setCatData(d.data ?? []);
+        setMasterCategoryDisplayNote(d.masterCategoryDisplayNote ?? "");
+      })
       .catch(() => {})
       .finally(() => setCatLoading(false));
   }
@@ -188,6 +193,7 @@ export default function CustomerDetail({
   }));
 
   const prodColumns: Array<{ key: keyof ProductRow; label: string }> = [
+    { key: "subcategory", label: "Sub-category" },
     { key: "code", label: "Code" },
     { key: "itemName", label: "Product" },
     { key: "qtyCy", label: `Qty ${fyCy}` },
@@ -239,6 +245,9 @@ export default function CustomerDetail({
           Close
         </Button>
       </div>
+      {masterCategoryDisplayNote && (
+        <p className="text-xs text-muted-foreground">{masterCategoryDisplayNote}</p>
+      )}
 
       {!selectedCategory && (
         <>

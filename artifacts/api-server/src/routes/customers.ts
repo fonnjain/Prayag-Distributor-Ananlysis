@@ -33,6 +33,7 @@ import {
   type EntityFilter,
 } from "../lib/saleLineFilter.js";
 import { parseJsonArray } from "./companyReports.js";
+import { MASTER_CATEGORY_DISPLAY_NOTE } from "../lib/categoryDisplay.js";
 import { computeAllMultipliers } from "../lib/customers/laspeyres.js";
 import { getSplit } from "../lib/headSplits.js";
 import { currentOpenFy, deriveSaleLineCohortFy, priorFy } from "../lib/fyAnchors.js";
@@ -248,11 +249,11 @@ router.get("/customers/detail", async (req, res) => {
     if (category) {
       // Product-level drill
       const products = await getCustomerProducts({ customer, category, fyCy, fyLy, monthsCy, monthsLy });
-      res.json({ customer, fyCy, fyLy, monthsCy, monthsLy, category, level: "product", data: products });
+      res.json({ customer, fyCy, fyLy, monthsCy, monthsLy, category, level: "product", masterCategoryDisplayNote: MASTER_CATEGORY_DISPLAY_NOTE, data: products });
     } else {
       // Category-level
       const categories = await getCustomerCategories({ customer, fyCy, fyLy, monthsCy, monthsLy });
-      res.json({ customer, fyCy, fyLy, monthsCy, monthsLy, level: "category", data: categories });
+      res.json({ customer, fyCy, fyLy, monthsCy, monthsLy, level: "category", masterCategoryDisplayNote: MASTER_CATEGORY_DISPLAY_NOTE, data: categories });
     }
   } catch (err) {
     req.log.error(err);
@@ -554,6 +555,7 @@ router.get("/customers/export", async (req, res) => {
       ["State Head filter", entityFilter?.heads?.length ? entityFilter.heads.join(", ") : "All"],
       ["State filter", entityFilter?.states?.length ? entityFilter.states.join(", ") : "All"],
       ["Distributor filter", entityFilter?.customers?.length ? entityFilter.customers.join(", ") : "All"],
+      ["Master category display", MASTER_CATEGORY_DISPLAY_NOTE],
       ["Note", "Quantity leads (pcs); realized price = value / qty. Prior-FY figures for head/state filters use the current-FY customer set."],
     ];
     for (const [k, v] of infoRows) {

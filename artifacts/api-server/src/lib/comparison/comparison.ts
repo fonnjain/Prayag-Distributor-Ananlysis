@@ -19,6 +19,7 @@ import { loadDeepDiveData, loadRegistry, type MemberKpis } from "../mgmt/deepDiv
 import type { RetailerRow } from "../mgmt/memberSheet.js";
 import { fyForDate, priorFy } from "../mgmt/targetEngine.js";
 import { logger } from "../logger.js";
+import { MASTER_CATEGORY_DISPLAY_NOTE } from "../categoryDisplay.js";
 
 // ── Selection schema ─────────────────────────────────────────────────────────
 
@@ -640,6 +641,7 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
 
   const guards: GuardResult[] = [];
   const notes: string[] = [];
+  if (req.entityType === "segment") notes.push(MASTER_CATEGORY_DISPLAY_NOTE);
 
   // ── Guard 10 — IDENTITY (resolve entities first; ambiguity is an error) ──
   let entities: ResolvedEntity[] = [];
@@ -1275,9 +1277,17 @@ async function computeCell(
       const r = await one(sql`
         SELECT coalesce(sum(amount::float8),0) AS v, coalesce(sum(qty::float8),0) AS q,
                count(DISTINCT customer)::int AS c, count(DISTINCT code)::int AS b
-        FROM sale_line_current
+        FROM sale_line_current sl
+        LEFT JOIN LATERAL (
+          SELECT registry.master_category
+          FROM canonical_item_category_registry registry
+          WHERE UPPER(BTRIM(registry.item_code)) = UPPER(BTRIM(sl.code))
+            AND registry.master_category IS NOT NULL
+          ORDER BY registry.effective_from DESC NULLS LAST, registry.id DESC
+          LIMIT 1
+        ) registry_master ON TRUE
         WHERE fy = ${p.fy} AND ${monthIn(p.monthLabels)} AND ${channelFilter(channel)}
-          AND coalesce(group_canon, group_raw, 'Uncategorized') = ${e.key}`);
+          AND coalesce(registry_master.master_category, 'Unmapped') = ${e.key}`);
       if (def.id === "net") return { value: Number(r.v) };
       if (def.id === "quantity") return { value: Number(r.q) };
       if (def.id === "customersBuying") return { value: Number(r.c) };

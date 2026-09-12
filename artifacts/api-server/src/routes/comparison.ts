@@ -15,6 +15,7 @@ import { loadDeepDiveData } from "../lib/mgmt/deepDiveData.js";
 import { runCohort, CohortError, type CohortRequest } from "../lib/comparison/cohort.js";
 import { fyForDate } from "../lib/mgmt/targetEngine.js";
 import { logger } from "../lib/logger.js";
+import { MASTER_CATEGORY_DISPLAY_NOTE } from "../lib/categoryDisplay.js";
 
 const router = Router();
 
@@ -56,10 +57,24 @@ router.get("/comparison/entities", async (req: Request, res: Response): Promise<
       }
       case "segment": {
         const rows = await db.execute(sql`
-          SELECT DISTINCT group_canon FROM sale_line_current
-          WHERE group_canon IS NOT NULL AND group_canon <> ''
-          ORDER BY group_canon`);
-        res.json({ entities: (rows.rows as { group_canon: string }[]).map((r) => r.group_canon) });
+          WITH classified AS (
+            SELECT DISTINCT COALESCE(registry_master.master_category, 'Unmapped') AS master_category
+            FROM sale_line_current sl
+            LEFT JOIN LATERAL (
+              SELECT registry.master_category
+              FROM canonical_item_category_registry registry
+              WHERE UPPER(BTRIM(registry.item_code)) = UPPER(BTRIM(sl.code))
+                AND registry.master_category IS NOT NULL
+              ORDER BY registry.effective_from DESC NULLS LAST, registry.id DESC
+              LIMIT 1
+            ) registry_master ON TRUE
+          )
+          SELECT master_category FROM classified
+          ORDER BY array_position(
+            ARRAY['PLUMBING','PTMT','C P','SANITARYWARE','SINK','HARDWARE','Unmapped']::text[],
+            master_category
+          ), master_category`);
+        res.json({ entities: (rows.rows as { master_category: string }[]).map((r) => r.master_category) });
         return;
       }
       case "code": {
@@ -244,6 +259,7 @@ function addBasisSheet(wb: ExcelJS.Workbook, result: ComparisonResponse | Blocke
   const b = result.basis;
   if (b.channelLabel) add("CHANNEL", b.channelLabel);
   if (b.entityType) add("Entity type", String(b.entityType));
+  if (b.entityType === "segment") add("Master category display", MASTER_CATEGORY_DISPLAY_NOTE);
   if (b.basis) add("Basis", String(b.basis));
   if (b.population) add("Population", String(b.population));
   if (b.normalise) add("Normalise", String(b.normalise));
