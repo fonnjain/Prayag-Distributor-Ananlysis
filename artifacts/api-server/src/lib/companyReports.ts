@@ -11,7 +11,7 @@
 //     register chain (SALE SHEET, Sale, State Head Sale, Order Sheet). Taxable
 //     Value (amount column) is the measure; MRP/rate list is never used.
 import { and, eq, inArray, lte, or, isNull, sql } from "drizzle-orm";
-import { db, saleLines, itemMaster } from "@workspace/db";
+import { db, saleLines, itemMaster, customerMaster } from "@workspace/db";
 import { isMonthComplete } from "./analytics/analytics.js";
 import { priorFy as computePriorFy, fyStartYear } from "./mgmt/names.js";
 import { entityConds, normStateExpr, resolvePriorEntityFilter } from "./saleLineFilter.js";
@@ -72,6 +72,33 @@ export async function computeLikeMonths(fy: string): Promise<LikeMonthsResult> {
 function growthPct(cur: number, prior: number): number | null {
   if (prior === 0) return null;
   return Math.round(((cur - prior) / Math.abs(prior)) * 1000) / 10;
+}
+
+export function normalizeCustomerKey(value: string | null | undefined): string {
+  return (value ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+/** Resolve only unambiguous exact customer_master matches.
+ * This is intentionally pure so the export path can be tested without DB I/O. */
+export function resolveCustomerDistricts(
+  rows: Array<{ company: string | null; district: string | null }>,
+): Map<string, string> {
+  const candidates = new Map<string, Map<string, string>>();
+  for (const row of rows) {
+    const key = normalizeCustomerKey(row.company);
+    if (!key) continue;
+    const district = row.district?.trim() ?? "";
+    if (!district) continue;
+    const districtKey = normalizeCustomerKey(district);
+    const districts = candidates.get(key) ?? new Map<string, string>();
+    districts.set(districtKey, district);
+    candidates.set(key, districts);
+  }
+  return new Map(
+    [...candidates.entries()]
+      .filter(([, districts]) => districts.size === 1)
+      .map(([key, districts]) => [key, [...districts.values()][0] ?? ""]),
+  );
 }
 
 // Sum amounts from two arrays of rows keyed by a string field.
@@ -160,6 +187,25 @@ export type SaleCustomerRow = {
   diff: number;
 };
 
+export type Report1PartyRow = SaleCustomerRow & {
+  /** Exact customer_master district, or blank when the match is ambiguous. */
+  district: string;
+};
+
+export type Report2StateMonthRow = {
+  state: string;
+  month: string;
+  thisFy: number | null;
+  lastFy: number | null;
+};
+
+export type Report2PartyMonthRow = {
+  state: string;
+  customer: string;
+  district: string;
+  months: Array<{ month: string; thisFy: number | null; lastFy: number | null }>;
+};
+
 export type CompanyReportsPayload = {
   fy: string;
   priorFy: string;
@@ -168,6 +214,11 @@ export type CompanyReportsPayload = {
   asOfDate: string;
   // Reports 1 & 2 — sale by state, like months
   r1r2_byState: ReportRow[];
+  /** C1 export-only drill-down data. */
+  c1_byState?: ReportRow[];
+  r1_partyByCustomer?: Report1PartyRow[];
+  r2_byStateMonth?: Report2StateMonthRow[];
+  r2_byPartyMonth?: Report2PartyMonthRow[];
   // Report 3 — by segment/group, like months
   r3_byGroup: ReportRow[];
   // Report 3A — state × group, like months
@@ -197,6 +248,12 @@ export type CompanyReportsPayload = {
   monthlyPrimary: Array<{ label: string; amount: number; byHead: Record<string, number> }>;
 };
 
+export type CompanyReportsBuildOptions = { includeC1ExportData?: boolean };
+
+export function c1ExportDataEnabled(options?: CompanyReportsBuildOptions): boolean {
+  return options?.includeC1ExportData === true;
+}
+
 async function resolvePriorFilter(
   fy: string,
   filter?: CompanyReportsFilter,
@@ -207,7 +264,9 @@ export async function buildCompanyReports(
   fy: string,
   asOfDate?: string,
   filter?: CompanyReportsFilter,
+  options?: CompanyReportsBuildOptions,
 ): Promise<CompanyReportsPayload> {
+  const includeC1ExportData = c1ExportDataEnabled(options);
   const priorFyStr = computePriorFy(fy);
   const like = await computeLikeMonths(fy);
   const { likeMonths, likeMonthsPrior } = applyMonthFilter(like.current, like.prior, filter);
@@ -218,6 +277,7 @@ export async function buildCompanyReports(
     const empty: CompanyReportsPayload = {
       fy, priorFy: priorFyStr, likeMonths: [], likeMonthsPrior: [], asOfDate: today,
       r1r2_byState: [], r3_byGroup: [], r3a_byStateGroup: [], r3b_byPartyGroup: [],
+      c1_byState: [], r1_partyByCustomer: [], r2_byStateMonth: [], r2_byPartyMonth: [],
       r3c_byGroupFull: [], r4_byGroupQty: [], r5_byCustomer: [],
       r5_collectionNote: "No collection data source connected.",
       r6_byGroupFull: [], r7_asOf: { date: today, total: 0, byGroup: [], byState: [], invoiceCount: 0, customerCount: 0, note: "No data" },
@@ -247,6 +307,12 @@ export async function buildCompanyReports(
     asOfRows,
     monthlyRows,
     monthlyByHead,
+    c1PriorByState,
+    c1PriorByCustomer,
+    c1CurrentByStateMonth,
+    c1PriorByStateMonth,
+    c1CurrentByCustomerMonth,
+    c1PriorByCustomerMonth,
   ] = await Promise.all([
     // Reports 1+2: by state
     queryByState(fy, likeMonths, filter),
@@ -273,7 +339,27 @@ export async function buildCompanyReports(
     // Monthly primary (for Combined page)
     queryMonthlyTotal(fy, filter),
     queryMonthlyByHead(fy, filter),
+    // C1 compares the same explicit head/state/customer scope in both years.
+    // Do not apply resolvePriorEntityFilter here; that is web/Reports 3-7
+    // territory semantics, not the export's direct historical scope.
+    includeC1ExportData ? queryByState(priorFyStr, likeMonthsPrior, filter) : Promise.resolve([]),
+    includeC1ExportData ? queryByCustomer(priorFyStr, likeMonthsPrior, filter) : Promise.resolve([]),
+    includeC1ExportData ? queryByStateMonth(fy, likeMonths, filter) : Promise.resolve([]),
+    includeC1ExportData ? queryByStateMonth(priorFyStr, likeMonthsPrior, filter) : Promise.resolve([]),
+    includeC1ExportData ? queryByCustomerMonth(fy, likeMonths, filter) : Promise.resolve([]),
+    includeC1ExportData ? queryByCustomerMonth(priorFyStr, likeMonthsPrior, filter) : Promise.resolve([]),
   ]);
+
+  // Customer attribution is looked up only for parties already present in
+  // Reports 1/2. Never load the full customer_master table for every export.
+  const customerNames = includeC1ExportData ? [...new Set(
+    [...curByCustomer, ...c1PriorByCustomer]
+      .map((row) => normalizeCustomerKey(row.customer))
+      .filter(Boolean),
+  )] : [];
+  const customerMasterRows = includeC1ExportData
+    ? await queryCustomerMasterDistricts(customerNames)
+    : [];
 
   // ── Reports 1 & 2 ──────────────────────────────────────────────────────────
   const stateMap = mergeAmounts(
@@ -399,6 +485,118 @@ export async function buildCompanyReports(
     diff: v.thisFy - v.lastFy,
   })).sort((a, b) => b.thisFy - a.thisFy);
 
+  // C1 uses direct historical filters, unlike the shared web/Reports 3-7
+  // prior-entity scope above. Keep these datasets export-only.
+  const c1_byState = includeC1ExportData
+    ? toDeepRows(mergeAmounts(
+      curByState.map((r) => ({ key: r.state as string, amount: r.amount })),
+      c1PriorByState.map((r) => ({ key: r.state as string, amount: r.amount })),
+    ))
+    : [];
+  const c1CustMap = new Map<string, { thisFy: number; lastFy: number; state: string; head: string }>();
+  if (includeC1ExportData) {
+    for (const r of curByCustomer) {
+      const key = r.customer || "";
+      c1CustMap.set(key, { thisFy: Math.round(r.amount), lastFy: 0, state: r.state, head: r.head });
+    }
+    for (const r of c1PriorByCustomer) {
+      const key = r.customer || "";
+      const existing = c1CustMap.get(key) ?? { thisFy: 0, lastFy: 0, state: r.state, head: r.head };
+      existing.lastFy = Math.round(r.amount);
+      c1CustMap.set(key, existing);
+    }
+  }
+  const c1ByCustomer = [...c1CustMap.entries()].map(([customer, value]) => ({
+    customer,
+    state: value.state,
+    head: value.head,
+    thisFy: value.thisFy,
+    lastFy: value.lastFy,
+    diff: value.thisFy - value.lastFy,
+  })).sort((a, b) => b.thisFy - a.thisFy);
+
+  // District is attribution metadata, not a sales join. Resolve it in a
+  // separate query and only retain an exact, unambiguous company match so a
+  // duplicate customer_master row can never multiply a sale amount.
+  const districtsByCustomer = resolveCustomerDistricts(customerMasterRows);
+  const districtFor = (customer: string): string => districtsByCustomer.get(normalizeCustomerKey(customer)) ?? "";
+  const r1_partyByCustomer: Report1PartyRow[] = c1ByCustomer.map((row) => ({
+    ...row,
+    district: districtFor(row.customer),
+  }));
+
+  // Month data is deliberately materialised only for complete, selected
+  // current-FY months. The export uses the absence of a row as the live
+  // formula's blank/future-month signal (never zero or -100%).
+  const stateMonthMap = new Map<string, { state: string; month: string; thisFy: number | null; lastFy: number | null }>();
+  for (const row of c1CurrentByStateMonth) {
+    if (!row.month) continue;
+    const key = `${row.state}||${row.month}`;
+    stateMonthMap.set(key, { state: row.state, month: row.month, thisFy: Math.round(row.amount), lastFy: null });
+  }
+  for (const row of c1PriorByStateMonth) {
+    if (!row.month) continue;
+    const priorIndex = likeMonthsPrior.indexOf(row.month);
+    const currentMonth = priorIndex >= 0 ? likeMonths[priorIndex] : row.month;
+    const key = `${row.state}||${currentMonth}`;
+    const existing = stateMonthMap.get(key) ?? { state: row.state, month: currentMonth, thisFy: null, lastFy: null };
+    existing.lastFy = Math.round(row.amount);
+    stateMonthMap.set(key, existing);
+  }
+  const r2_byStateMonth = [...stateMonthMap.values()]
+    .sort((a, b) => a.state.localeCompare(b.state) || a.month.localeCompare(b.month));
+
+  type PartyMonthAccum = {
+    state: string;
+    customer: string;
+    thisFy: Map<string, number>;
+    lastFy: Map<string, number>;
+  };
+  const partyMonthMap = new Map<string, PartyMonthAccum>();
+  // Prefer the current-FY state for a customer. Prior-FY rows can carry the
+  // historical state after entity resolution, but must still appear under the
+  // selected current-FY state in the drill-down.
+  const currentPartyStates = new Map<string, string>();
+  for (const row of c1CurrentByCustomerMonth) {
+    if (!row.month) continue;
+    if (row.customer) currentPartyStates.set(row.customer, row.state);
+    const key = row.customer || "";
+    const existing = partyMonthMap.get(key) ?? {
+      state: row.state,
+      customer: key,
+      thisFy: new Map<string, number>(),
+      lastFy: new Map<string, number>(),
+    };
+    existing.state = currentPartyStates.get(key) ?? row.state;
+    existing.thisFy.set(row.month, (existing.thisFy.get(row.month) ?? 0) + Math.round(row.amount));
+    partyMonthMap.set(key, existing);
+  }
+  for (const row of c1PriorByCustomerMonth) {
+    if (!row.month) continue;
+    const key = row.customer || "";
+    const existing = partyMonthMap.get(key) ?? {
+      state: currentPartyStates.get(key) ?? row.state,
+      customer: key,
+      thisFy: new Map<string, number>(),
+      lastFy: new Map<string, number>(),
+    };
+    existing.state = currentPartyStates.get(key) ?? existing.state;
+    existing.lastFy.set(row.month, (existing.lastFy.get(row.month) ?? 0) + Math.round(row.amount));
+    partyMonthMap.set(key, existing);
+  }
+  const r2_byPartyMonth: Report2PartyMonthRow[] = [...partyMonthMap.values()]
+    .map((row) => ({
+      state: row.state,
+      customer: row.customer,
+      district: districtFor(row.customer),
+      months: likeMonths.map((month, index) => ({
+        month,
+        thisFy: row.thisFy.get(month) ?? null,
+        lastFy: row.lastFy.get(likeMonthsPrior[index] ?? "") ?? null,
+      })),
+    }))
+    .sort((a, b) => (b.months.reduce((s, m) => s + (m.thisFy ?? 0), 0) - a.months.reduce((s, m) => s + (m.thisFy ?? 0), 0)));
+
   // ── Report 7 — as-of ───────────────────────────────────────────────────────
   const asOfTotal = asOfRows.reduce((s, r) => s + Math.round(r.amount), 0);
   const asOfByGroup = new Map<string, number>();
@@ -436,6 +634,10 @@ export async function buildCompanyReports(
     likeMonthsPrior,
     asOfDate: today,
     r1r2_byState,
+    c1_byState,
+    r1_partyByCustomer: includeC1ExportData ? r1_partyByCustomer : [],
+    r2_byStateMonth: includeC1ExportData ? r2_byStateMonth : [],
+    r2_byPartyMonth: includeC1ExportData ? r2_byPartyMonth : [],
     r3_byGroup,
     r3a_byStateGroup,
     r3b_byPartyGroup,
@@ -538,6 +740,47 @@ async function queryByCustomer(fyStr: string, months: string[], filter?: Company
     head: sql<string>`coalesce(${saleLines.headCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
   }).from(saleLines).where(whereClause(fyStr, months, filter)).groupBy(sql`1, 2, 3`);
+}
+
+async function queryCustomerMasterDistricts(normalizedNames: string[]) {
+  if (normalizedNames.length === 0) return [];
+  const normalizedCompany = sql<string>`upper(regexp_replace(trim(coalesce(${customerMaster.company}, '')), '\\s+', ' ', 'g'))`;
+  const rows: Array<{ company: string; district: string | null }> = [];
+  // Keep each IN list well below Postgres/driver parameter limits. The
+  // normalized expression preserves exact matching while allowing source
+  // company casing and repeated whitespace to vary safely.
+  for (let offset = 0; offset < normalizedNames.length; offset += 500) {
+    const chunk = normalizedNames.slice(offset, offset + 500);
+    const result = await db.select({
+      company: customerMaster.company,
+      district: customerMaster.district,
+    }).from(customerMaster).where(inArray(normalizedCompany, chunk));
+    rows.push(...result);
+  }
+  return rows;
+}
+
+async function queryByStateMonth(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
+  if (months.length === 0) return [];
+  return db.select({
+    state: normStateExpr(),
+    month: saleLines.monthLabel,
+    amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
+  }).from(saleLines)
+    .where(whereClause(fyStr, months, filter))
+    .groupBy(sql`1, 2`);
+}
+
+async function queryByCustomerMonth(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
+  if (months.length === 0) return [];
+  return db.select({
+    customer: sql<string>`coalesce(${saleLines.customer}, '')`,
+    state: normStateExpr(),
+    month: saleLines.monthLabel,
+    amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
+  }).from(saleLines)
+    .where(whereClause(fyStr, months, filter))
+    .groupBy(sql`1, 2, 3`);
 }
 
 // Report 7: totals up to and including asOfDate.
