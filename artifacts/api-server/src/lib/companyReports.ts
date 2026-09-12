@@ -10,11 +10,17 @@
 //   RULE 3 — LIVE DATA: reads from sale_line, which is populated from the live
 //     register chain (SALE SHEET, Sale, State Head Sale, Order Sheet). Taxable
 //     Value (amount column) is the measure; MRP/rate list is never used.
-import { and, eq, inArray, lte, or, isNull, sql } from "drizzle-orm";
-import { db, saleLines, itemMaster, customerMaster } from "@workspace/db";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { db, saleLines, customerMaster } from "@workspace/db";
 import { isMonthComplete } from "./analytics/analytics.js";
 import { priorFy as computePriorFy, fyStartYear } from "./mgmt/names.js";
-import { entityConds, normStateExpr, resolvePriorEntityFilter } from "./saleLineFilter.js";
+import {
+  entityConds,
+  entityCondsAliased,
+  normStateExpr,
+  normStateExprAliased,
+  resolvePriorEntityFilter,
+} from "./saleLineFilter.js";
 
 export { normStateExpr } from "./saleLineFilter.js";
 
@@ -168,6 +174,10 @@ export type ReportRow = {
 
 export type QtyRow = {
   group: string;
+  /** One level below the canonical master. Kept for browser drill-down; the
+   * sales-head workbook deliberately omits the source/raw category. */
+  subcategory: string;
+  /** @deprecated internal source vocabulary; never expose in the report export. */
   groupRaw: string;
   customer: string;
   state: string;
@@ -221,10 +231,12 @@ export type CompanyReportsPayload = {
   r2_byPartyMonth?: Report2PartyMonthRow[];
   // Report 3 — by segment/group, like months
   r3_byGroup: ReportRow[];
+  /** Canonical master → subcategory rows for the drill-down and working data. */
+  r3_bySubcategory?: Array<{ group: string; subcategory: string; thisFy: number; lastFy: number }>;
   // Report 3A — state × group, like months
-  r3a_byStateGroup: Array<{ state: string; group: string; thisFy: number; lastFy: number }>;
+  r3a_byStateGroup: Array<{ state: string; group: string; subcategory: string; thisFy: number; lastFy: number }>;
   // Report 3B — party × group, like months
-  r3b_byPartyGroup: Array<{ customer: string; state: string; group: string; thisFy: number; lastFy: number }>;
+  r3b_byPartyGroup: Array<{ customer: string; state: string; group: string; subcategory: string; thisFy: number; lastFy: number }>;
   // Report 3C — same group aggregation as 3 but showing both like-month and full prior year
   r3c_byGroupFull: Array<{ group: string; thisFyLike: number; lastFyLike: number; lastFyFull: number; growthLike: number | null }>;
   // Report 4 — QUANTITY per group+customer+state (Rule 2: never sum across groups)
@@ -234,6 +246,7 @@ export type CompanyReportsPayload = {
   r5_collectionNote: string;
   // Report 6 — total by group (full prior year for purchase context)
   r6_byGroupFull: Array<{ group: string; thisFyLike: number; lastFyLike: number; lastFyFull: number; growthLike: number | null }>;
+  r6_bySubcategoryFull?: Array<{ group: string; subcategory: string; thisFyLike: number; lastFyLike: number; lastFyFull: number; growthLike: number | null }>;
   // Report 7 — as-of date snapshot
   r7_asOf: {
     date: string;
@@ -249,6 +262,15 @@ export type CompanyReportsPayload = {
 };
 
 export type CompanyReportsBuildOptions = { includeC1ExportData?: boolean };
+
+export type DrillReconciliation = {
+  parentAmount: number;
+  childAmount: number;
+  delta: number;
+  /** Only meaningful when complete; never label a truncated child as unattributed. */
+  unattributed: number | null;
+  complete: boolean;
+};
 
 export function c1ExportDataEnabled(options?: CompanyReportsBuildOptions): boolean {
   return options?.includeC1ExportData === true;
@@ -276,11 +298,11 @@ export async function buildCompanyReports(
     // No complete months yet — return empty but valid shape
     const empty: CompanyReportsPayload = {
       fy, priorFy: priorFyStr, likeMonths: [], likeMonthsPrior: [], asOfDate: today,
-      r1r2_byState: [], r3_byGroup: [], r3a_byStateGroup: [], r3b_byPartyGroup: [],
+      r1r2_byState: [], r3_byGroup: [], r3_bySubcategory: [], r3a_byStateGroup: [], r3b_byPartyGroup: [],
       c1_byState: [], r1_partyByCustomer: [], r2_byStateMonth: [], r2_byPartyMonth: [],
       r3c_byGroupFull: [], r4_byGroupQty: [], r5_byCustomer: [],
       r5_collectionNote: "No collection data source connected.",
-      r6_byGroupFull: [], r7_asOf: { date: today, total: 0, byGroup: [], byState: [], invoiceCount: 0, customerCount: 0, note: "No data" },
+       r6_byGroupFull: [], r6_bySubcategoryFull: [], r7_asOf: { date: today, total: 0, byGroup: [], byState: [], invoiceCount: 0, customerCount: 0, note: "No data" },
       monthlyPrimary: [],
     };
     return empty;
@@ -295,6 +317,8 @@ export async function buildCompanyReports(
     priorByState,
     curByGroup,
     priorByGroup,
+    curBySubcategory,
+    priorBySubcategory,
     curByStateGroup,
     priorByStateGroup,
     curByPartyGroup,
@@ -304,6 +328,7 @@ export async function buildCompanyReports(
     curByCustomer,
     priorByCustomer,
     priorByGroupFull,
+    priorBySubcategoryFull,
     asOfRows,
     monthlyRows,
     monthlyByHead,
@@ -320,6 +345,8 @@ export async function buildCompanyReports(
     // Report 3: by group
     queryByGroup(fy, likeMonths, filter),
     queryByGroup(priorFyStr, likeMonthsPrior, priorFilter),
+    queryRegistryCategories(fy, likeMonths, filter),
+    queryRegistryCategories(priorFyStr, likeMonthsPrior, priorFilter),
     // Report 3A: state × group
     queryByStateGroup(fy, likeMonths, filter),
     queryByStateGroup(priorFyStr, likeMonthsPrior, priorFilter),
@@ -334,8 +361,9 @@ export async function buildCompanyReports(
     queryByCustomer(priorFyStr, likeMonthsPrior, priorFilter),
     // Report 6 (3C): full prior year by group
     queryByGroupFull(priorFyStr, priorFilter),
+    queryRegistryCategories(priorFyStr, undefined, priorFilter),
     // Report 7: as-of
-    queryAsOf(fy, today, filter),
+    queryAsOf(fy, today, filter, likeMonths),
     // Monthly primary (for Combined page)
     queryMonthlyTotal(fy, filter),
     queryMonthlyByHead(fy, filter),
@@ -375,38 +403,62 @@ export async function buildCompanyReports(
   );
   const r3_byGroup = toDeepRows(groupMap);
 
+  // Keep the canonical master as the report's primary grouping while
+  // materialising exactly one drill level below it. This prevents the old
+  // flat 17-category vocabulary from leaking into reports 3/6.
+  const subcategoryMap = new Map<string, { group: string; subcategory: string; thisFy: number; lastFy: number }>();
+  for (const row of curBySubcategory) {
+    const group = row.group ?? "Unmapped";
+    const subcategory = row.subcategory ?? "Unmapped";
+    const key = `${group}||${subcategory}`;
+    const existing = subcategoryMap.get(key) ?? { group, subcategory, thisFy: 0, lastFy: 0 };
+    existing.thisFy += Math.round(Number(row.amount));
+    subcategoryMap.set(key, existing);
+  }
+  for (const row of priorBySubcategory) {
+    const group = row.group ?? "Unmapped";
+    const subcategory = row.subcategory ?? "Unmapped";
+    const key = `${group}||${subcategory}`;
+    const existing = subcategoryMap.get(key) ?? { group, subcategory, thisFy: 0, lastFy: 0 };
+    existing.lastFy += Math.round(Number(row.amount));
+    subcategoryMap.set(key, existing);
+  }
+  const r3_bySubcategory = [...subcategoryMap.values()].sort(
+    (a, b) => b.thisFy - a.thisFy || a.group.localeCompare(b.group) || a.subcategory.localeCompare(b.subcategory),
+  );
+
   // ── Report 3A ──────────────────────────────────────────────────────────────
-  const sgMap = new Map<string, { thisFy: number; lastFy: number }>();
+  const sgMap = new Map<string, { thisFy: number; lastFy: number; subcategory: string }>();
   for (const r of curByStateGroup) {
-    const k = `${r.state}||${r.group}`;
-    sgMap.set(k, { thisFy: Math.round(r.amount), lastFy: 0 });
+    const k = `${r.state}||${r.group}||${r.subcategory}`;
+    sgMap.set(k, { thisFy: Math.round(r.amount), lastFy: 0, subcategory: r.subcategory });
   }
   for (const r of priorByStateGroup) {
-    const k = `${r.state}||${r.group}`;
-    const ex = sgMap.get(k) ?? { thisFy: 0, lastFy: 0 };
+    const k = `${r.state}||${r.group}||${r.subcategory}`;
+    const ex = sgMap.get(k) ?? { thisFy: 0, lastFy: 0, subcategory: r.subcategory };
     ex.lastFy = Math.round(r.amount);
     sgMap.set(k, ex);
   }
   const r3a_byStateGroup = [...sgMap.entries()].map(([k, v]) => {
-    const [state, group] = k.split("||");
-    return { state: state ?? "", group: group ?? "", thisFy: v.thisFy, lastFy: v.lastFy };
+    const [state, group, subcategory] = k.split("||");
+    return { state: state ?? "", group: group ?? "", subcategory: subcategory ?? v.subcategory, thisFy: v.thisFy, lastFy: v.lastFy };
   }).sort((a, b) => b.thisFy - a.thisFy);
 
   // ── Report 3B ──────────────────────────────────────────────────────────────
-  const pgMap = new Map<string, { thisFy: number; lastFy: number; state: string }>();
+  const pgMap = new Map<string, { thisFy: number; lastFy: number; state: string; subcategory: string }>();
   for (const r of curByPartyGroup) {
-    const k = `${r.customer}||${r.group}||${r.state}`;
-    pgMap.set(k, { thisFy: Math.round(r.amount), lastFy: 0, state: r.state });
+    const k = `${r.customer}||${r.group}||${r.state}||${r.subcategory}`;
+    pgMap.set(k, { thisFy: Math.round(r.amount), lastFy: 0, state: r.state, subcategory: r.subcategory });
   }
   for (const r of priorByPartyGroup) {
-    const k = `${r.customer}||${r.group}||${r.state}`;
-    const ex = pgMap.get(k) ?? { thisFy: 0, lastFy: 0, state: r.state };
+    const k = `${r.customer}||${r.group}||${r.state}||${r.subcategory}`;
+    const ex = pgMap.get(k) ?? { thisFy: 0, lastFy: 0, state: r.state, subcategory: r.subcategory };
     ex.lastFy = Math.round(r.amount);
     pgMap.set(k, ex);
   }
   const r3b_byPartyGroup = [...pgMap.entries()].map(([k, v]) => {
-    const [customer, group] = k.split("||");
-    return { customer: customer ?? "", group: group ?? "", state: v.state, thisFy: v.thisFy, lastFy: v.lastFy };
+    const [customer, group, state, subcategory] = k.split("||");
+    return { customer: customer ?? "", group: group ?? "", state: state ?? v.state, subcategory: subcategory ?? v.subcategory, thisFy: v.thisFy, lastFy: v.lastFy };
   }).sort((a, b) => b.thisFy - a.thisFy);
 
   // ── Report 3C + Report 6 — group with full prior year ──────────────────────
@@ -437,13 +489,31 @@ export async function buildCompanyReports(
     growthLike: growthPct(v.thisFyLike, v.lastFyLike),
   })).sort((a, b) => b.thisFyLike - a.thisFyLike);
 
+  const subcategoryFullMap = new Map<string, { group: string; subcategory: string; thisFyLike: number; lastFyLike: number; lastFyFull: number }>();
+  const addSubcategory = (rows: RegistryCategoryRow[], field: "thisFyLike" | "lastFyLike" | "lastFyFull") => {
+    for (const row of rows) {
+      const group = row.group ?? "Unmapped";
+      const subcategory = row.subcategory ?? "Unmapped";
+      const key = `${group}||${subcategory}`;
+      const existing = subcategoryFullMap.get(key) ?? { group, subcategory, thisFyLike: 0, lastFyLike: 0, lastFyFull: 0 };
+      existing[field] += Math.round(Number(row.amount));
+      subcategoryFullMap.set(key, existing);
+    }
+  };
+  addSubcategory(curBySubcategory, "thisFyLike");
+  addSubcategory(priorBySubcategory, "lastFyLike");
+  addSubcategory(priorBySubcategoryFull, "lastFyFull");
+  const r6_bySubcategoryFull = [...subcategoryFullMap.values()]
+    .map((row) => ({ ...row, growthLike: growthPct(row.thisFyLike, row.lastFyLike) }))
+    .sort((a, b) => b.thisFyLike - a.thisFyLike || a.group.localeCompare(b.group) || a.subcategory.localeCompare(b.subcategory));
+
   // ── Report 4 — quantity (Rule 2: never sum across groups) ──────────────────
   type QtyKey = string; // "group||groupRaw||customer||state"
   const qtyMap = new Map<QtyKey, QtyRow>();
   for (const r of curQty) {
-    const k = `${r.group}||${r.groupRaw}||${r.customer}||${r.state}`;
+    const k = `${r.group}||${r.subcategory}||${r.customer}||${r.state}`;
     const ex = qtyMap.get(k) ?? {
-      group: r.group, groupRaw: r.groupRaw, customer: r.customer, state: r.state,
+      group: r.group, subcategory: r.subcategory, groupRaw: r.groupRaw, customer: r.customer, state: r.state,
       qtyThisFy: 0, qtyLastFy: 0, amountThisFy: 0, amountLastFy: 0, unit: r.unit,
     };
     ex.qtyThisFy += r.qty;
@@ -452,9 +522,9 @@ export async function buildCompanyReports(
     qtyMap.set(k, ex);
   }
   for (const r of priorQty) {
-    const k = `${r.group}||${r.groupRaw}||${r.customer}||${r.state}`;
+    const k = `${r.group}||${r.subcategory}||${r.customer}||${r.state}`;
     const ex = qtyMap.get(k) ?? {
-      group: r.group, groupRaw: r.groupRaw, customer: r.customer, state: r.state,
+      group: r.group, subcategory: r.subcategory, groupRaw: r.groupRaw, customer: r.customer, state: r.state,
       qtyThisFy: 0, qtyLastFy: 0, amountThisFy: 0, amountLastFy: 0, unit: r.unit,
     };
     ex.qtyLastFy += r.qty;
@@ -639,6 +709,7 @@ export async function buildCompanyReports(
     r2_byStateMonth: includeC1ExportData ? r2_byStateMonth : [],
     r2_byPartyMonth: includeC1ExportData ? r2_byPartyMonth : [],
     r3_byGroup,
+    r3_bySubcategory,
     r3a_byStateGroup,
     r3b_byPartyGroup,
     r3c_byGroupFull: groupFullRows,
@@ -648,6 +719,7 @@ export async function buildCompanyReports(
       "Collection data not yet connected. Source: PARTY O/S & PAYMENT 26-27 " +
       "(spreadsheet 1oHFpXqVDPRF3Vi3WV9MdNcxkHNjgytLPxXUQgM6o1ok).",
     r6_byGroupFull: groupFullRows,
+    r6_bySubcategoryFull,
     r7_asOf: {
       date: today,
       total: asOfTotal,
@@ -677,38 +749,117 @@ async function queryByState(fyStr: string, months: string[], filter?: CompanyRep
   }).from(saleLines).where(whereClause(fyStr, months, filter)).groupBy(sql`1`);
 }
 
+type RegistryCategoryRow = {
+  group: string | null;
+  subcategory: string | null;
+  amount: number | string;
+};
+
+/**
+ * Category reports intentionally join the reviewed registry rather than
+ * sale_line.group_canon. The latter is the historical 17-category vocabulary
+ * and is retained only as ingest provenance. The lateral lookup also prevents
+ * an item with old and current effective assignments from multiplying a sale
+ * row.
+ */
+async function queryRegistryCategories(
+  fyStr: string,
+  months: string[] | undefined,
+  filter: CompanyReportsFilter | undefined,
+): Promise<RegistryCategoryRow[]> {
+  const monthClause = months?.length
+    ? sql`AND sl.month_label IN (${sql.join(months.map((month) => sql`${month}`), sql`, `)})`
+    : sql``;
+  const result = await db.execute<RegistryCategoryRow>(sql`
+    SELECT
+      COALESCE(r.master_category, 'Unmapped') AS "group",
+      COALESCE(r.canonical_category, 'Unmapped') AS subcategory,
+      COALESCE(SUM(sl.amount::numeric), 0)::float8 AS amount
+    FROM sale_line_current sl
+    LEFT JOIN LATERAL (
+      SELECT rr.master_category, rr.canonical_category
+      FROM canonical_item_category_registry rr
+      WHERE UPPER(BTRIM(rr.item_code)) = UPPER(BTRIM(sl.code))
+        AND (rr.effective_from IS NULL OR rr.effective_from <= COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')))
+        AND (rr.effective_to IS NULL OR COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')) < rr.effective_to)
+      ORDER BY rr.effective_from DESC NULLS LAST, rr.id DESC
+      LIMIT 1
+    ) r ON true
+    WHERE sl.fy = ${fyStr}
+      ${monthClause}
+      ${entityCondsAliased(filter, "sl")}
+    GROUP BY 1, 2
+  `);
+  return result.rows;
+}
+
 async function queryByGroup(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
   if (months.length === 0) return [];
-  return db.select({
-    group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
-    amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(whereClause(fyStr, months, filter)).groupBy(sql`1`);
+  const rows = await queryRegistryCategories(fyStr, months, filter);
+  const grouped = new Map<string, number>();
+  for (const row of rows) grouped.set(row.group ?? "Unmapped", (grouped.get(row.group ?? "Unmapped") ?? 0) + Number(row.amount));
+  return [...grouped.entries()].map(([group, amount]) => ({ group, amount }));
 }
 
 async function queryByGroupFull(fyStr: string, filter?: CompanyReportsFilter) {
-  return db.select({
-    group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
-    amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"), ...entityConds(filter))).groupBy(sql`1`);
+  const rows = await queryRegistryCategories(fyStr, undefined, filter);
+  const grouped = new Map<string, number>();
+  for (const row of rows) grouped.set(row.group ?? "Unmapped", (grouped.get(row.group ?? "Unmapped") ?? 0) + Number(row.amount));
+  return [...grouped.entries()].map(([group, amount]) => ({ group, amount }));
 }
 
 async function queryByStateGroup(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
   if (months.length === 0) return [];
-  return db.select({
-    state: normStateExpr(),
-    group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
-    amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(whereClause(fyStr, months, filter)).groupBy(sql`1, 2`);
+  const monthClause = sql`AND sl.month_label IN (${sql.join(months.map((month) => sql`${month}`), sql`, `)})`;
+  const result = await db.execute<{
+    state: string | null; group: string | null; subcategory: string | null; amount: number | string;
+  }>(sql`
+    SELECT ${normStateExprAliased("sl")} AS state,
+      COALESCE(r.master_category, 'Unmapped') AS "group",
+      COALESCE(r.canonical_category, 'Unmapped') AS subcategory,
+      COALESCE(SUM(sl.amount::numeric), 0)::float8 AS amount
+    FROM sale_line_current sl
+    LEFT JOIN LATERAL (
+      SELECT rr.master_category, rr.canonical_category FROM canonical_item_category_registry rr
+      WHERE UPPER(BTRIM(rr.item_code)) = UPPER(BTRIM(sl.code))
+        AND (rr.effective_from IS NULL OR rr.effective_from <= COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')))
+        AND (rr.effective_to IS NULL OR COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')) < rr.effective_to)
+      ORDER BY rr.effective_from DESC NULLS LAST, rr.id DESC LIMIT 1
+    ) r ON true
+    WHERE sl.fy = ${fyStr} ${monthClause} ${entityCondsAliased(filter, "sl")}
+    GROUP BY 1, 2, 3
+  `);
+  return result.rows.map((row) => ({
+    state: row.state ?? "Unmapped", group: row.group ?? "Unmapped",
+    subcategory: row.subcategory ?? "Unmapped", amount: Number(row.amount),
+  }));
 }
 
 async function queryByPartyGroup(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
   if (months.length === 0) return [];
-  return db.select({
-    customer: sql<string>`coalesce(${saleLines.customer}, '')`,
-    state: normStateExpr(),
-    group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
-    amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(whereClause(fyStr, months, filter)).groupBy(sql`1, 2, 3`);
+  const monthClause = sql`AND sl.month_label IN (${sql.join(months.map((month) => sql`${month}`), sql`, `)})`;
+  const result = await db.execute<{
+    customer: string | null; state: string | null; group: string | null; subcategory: string | null; amount: number | string;
+  }>(sql`
+    SELECT COALESCE(sl.customer, '') AS customer, ${normStateExprAliased("sl")} AS state,
+      COALESCE(r.master_category, 'Unmapped') AS "group",
+      COALESCE(r.canonical_category, 'Unmapped') AS subcategory,
+      COALESCE(SUM(sl.amount::numeric), 0)::float8 AS amount
+    FROM sale_line_current sl
+    LEFT JOIN LATERAL (
+      SELECT rr.master_category, rr.canonical_category FROM canonical_item_category_registry rr
+      WHERE UPPER(BTRIM(rr.item_code)) = UPPER(BTRIM(sl.code))
+        AND (rr.effective_from IS NULL OR rr.effective_from <= COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')))
+        AND (rr.effective_to IS NULL OR COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')) < rr.effective_to)
+      ORDER BY rr.effective_from DESC NULLS LAST, rr.id DESC LIMIT 1
+    ) r ON true
+    WHERE sl.fy = ${fyStr} ${monthClause} ${entityCondsAliased(filter, "sl")}
+    GROUP BY 1, 2, 3, 4
+  `);
+  return result.rows.map((row) => ({
+    customer: row.customer ?? "", state: row.state ?? "Unmapped", group: row.group ?? "Unmapped",
+    subcategory: row.subcategory ?? "Unmapped", amount: Number(row.amount),
+  }));
 }
 
 // Report 4: qty per group+customer+state, broken out by group_raw so WATER TANK
@@ -716,20 +867,37 @@ async function queryByPartyGroup(fyStr: string, months: string[], filter?: Compa
 // RULE 2: results are grouped BY group — caller must never sum qty across groups.
 async function queryQty(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
   if (months.length === 0) return [];
-  const rows = await db.select({
-    group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
-    groupRaw: sql<string>`coalesce(${saleLines.groupRaw}, '')`,
-    customer: sql<string>`coalesce(${saleLines.customer}, '')`,
-    state: normStateExpr(),
-    qty: sql<number>`coalesce(case when max(coalesce(${saleLines.groupRaw}, '')) = 'WATER TANK' then sum(${saleLines.qtyLtr}::numeric) else sum(${saleLines.qty}::numeric) end, 0)::float8`,
-    amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-    unit: sql<string>`case when max(${saleLines.groupRaw}) = 'WATER TANK' then 'Ltr' else coalesce(max(${itemMaster.unit}), '') end`,
-  })
-    .from(saleLines)
-    .leftJoin(itemMaster, eq(saleLines.code, itemMaster.code))
-    .where(whereClause(fyStr, months, filter))
-    .groupBy(sql`1, 2, 3, 4`);
-  return rows;
+  const monthClause = sql`AND sl.month_label IN (${sql.join(months.map((month) => sql`${month}`), sql`, `)})`;
+  const result = await db.execute<{
+    group: string | null; subcategory: string | null; groupRaw: string | null;
+    customer: string | null; state: string | null; qty: number | string;
+    amount: number | string; unit: string | null;
+  }>(sql`
+    SELECT COALESCE(r.master_category, 'Unmapped') AS "group",
+      COALESCE(r.canonical_category, 'Unmapped') AS subcategory,
+      COALESCE(sl.group_raw, '') AS "groupRaw", COALESCE(sl.customer, '') AS customer,
+      ${normStateExprAliased("sl")} AS state,
+      COALESCE(CASE WHEN MAX(COALESCE(sl.group_raw, '')) = 'WATER TANK'
+        THEN SUM(sl.qty_ltr::numeric) ELSE SUM(sl.qty::numeric) END, 0)::float8 AS qty,
+      COALESCE(SUM(sl.amount::numeric), 0)::float8 AS amount,
+      CASE WHEN MAX(sl.group_raw) = 'WATER TANK' THEN 'Ltr' ELSE COALESCE(MAX(im.unit), '') END AS unit
+    FROM sale_line_current sl
+    LEFT JOIN item_master im ON im.code = sl.code
+    LEFT JOIN LATERAL (
+      SELECT rr.master_category, rr.canonical_category FROM canonical_item_category_registry rr
+      WHERE UPPER(BTRIM(rr.item_code)) = UPPER(BTRIM(sl.code))
+        AND (rr.effective_from IS NULL OR rr.effective_from <= COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')))
+        AND (rr.effective_to IS NULL OR COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')) < rr.effective_to)
+      ORDER BY rr.effective_from DESC NULLS LAST, rr.id DESC LIMIT 1
+    ) r ON true
+    WHERE sl.fy = ${fyStr} ${monthClause} ${entityCondsAliased(filter, "sl")}
+    GROUP BY 1, 2, 3, 4, 5
+  `);
+  return result.rows.map((row) => ({
+    group: row.group ?? "Unmapped", subcategory: row.subcategory ?? "Unmapped",
+    groupRaw: row.groupRaw ?? "", customer: row.customer ?? "", state: row.state ?? "Unmapped",
+    qty: Number(row.qty), amount: Number(row.amount), unit: row.unit ?? "",
+  }));
 }
 
 async function queryByCustomer(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
@@ -783,37 +951,70 @@ async function queryByCustomerMonth(fyStr: string, months: string[], filter?: Co
     .groupBy(sql`1, 2, 3`);
 }
 
-// Report 7: totals up to and including asOfDate.
-// Rows with NULL invoice_date fall back to: include if month_label <= asOfMonth.
-async function queryAsOf(fyStr: string, asOfDate: string, filter?: CompanyReportsFilter) {
+// Report 7: totals up to and including asOfDate within the selected fiscal
+// months. Rows with NULL invoice_date are retained only when their month is
+// in that same selected period.
+export function asOfScopedMonths(
+  fyStr: string,
+  asOfDate: string,
+  scopedMonths?: string[],
+): string[] {
   // Derive the month label for the asOf date (e.g. "2026-07-13" → "Jul-26")
   const dt = new Date(asOfDate + "T00:00:00Z");
   const MONTHS_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const asOfMonthLabel = `${MONTHS_ABBR[dt.getUTCMonth()]}-${String(dt.getUTCFullYear()).slice(-2)}`;
 
   const allMonths = fyMonthLabels(fyStr);
-  const monthsUpTo = allMonths.filter((m) => m <= asOfMonthLabel);
+  const allowed = scopedMonths === undefined ? null : new Set(scopedMonths);
+  const asOfIndex = allMonths.indexOf(asOfMonthLabel);
+  if (asOfIndex < 0) return [];
+  return allMonths
+    .slice(0, asOfIndex + 1)
+    .filter((month) => !allowed || allowed.has(month));
+}
 
-  return db.select({
-    group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
-    state: normStateExpr(),
-    customer: sql<string>`coalesce(${saleLines.customer}, '')`,
-    customerKey: sql<string>`coalesce(${saleLines.customer}, '')`,
-    amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-    invoices: sql<number>`count(distinct coalesce(${saleLines.invoiceNo}, ${saleLines.lineUid}))::int`,
-  })
-    .from(saleLines)
-    .where(
-      and(
-        eq(saleLines.fy, fyStr),
-        ...entityConds(filter),
-        or(
-          lte(saleLines.invoiceDate, asOfDate),
-          and(isNull(saleLines.invoiceDate), monthsUpTo.length > 0 ? inArray(saleLines.monthLabel, monthsUpTo) : eq(saleLines.fy, fyStr)),
-        ),
-      ),
-    )
-    .groupBy(sql`1, 2, 3`);
+async function queryAsOf(
+  fyStr: string,
+  asOfDate: string,
+  filter?: CompanyReportsFilter,
+  scopedMonths?: string[],
+) {
+  const monthsUpTo = asOfScopedMonths(fyStr, asOfDate, scopedMonths);
+
+  // Apply the selected fiscal-month membership to both dated and null-date
+  // rows. The invoice-date predicate is an as-of cutoff inside that period;
+  // it must never bypass the selected month scope.
+  const periodClause = monthsUpTo.length
+    ? sql`AND sl.month_label IN (${sql.join(monthsUpTo.map((month) => sql`${month}`), sql`, `)})
+      AND (sl.invoice_date IS NULL OR sl.invoice_date <= ${asOfDate})`
+    : sql`AND false`;
+  const result = await db.execute<{
+    group: string | null; state: string | null; customer: string | null;
+    customerKey: string | null; amount: number | string; invoices: number | string;
+  }>(sql`
+    SELECT COALESCE(r.master_category, 'Unmapped') AS "group",
+      ${normStateExprAliased("sl")} AS state,
+      COALESCE(sl.customer, '') AS customer, COALESCE(sl.customer, '') AS "customerKey",
+      COALESCE(SUM(sl.amount::numeric), 0)::float8 AS amount,
+      COUNT(DISTINCT COALESCE(sl.invoice_no, sl.line_uid))::int AS invoices
+    FROM sale_line_current sl
+    LEFT JOIN LATERAL (
+      SELECT rr.master_category, rr.canonical_category FROM canonical_item_category_registry rr
+      WHERE UPPER(BTRIM(rr.item_code)) = UPPER(BTRIM(sl.code))
+        AND (rr.effective_from IS NULL OR rr.effective_from <= COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')))
+        AND (rr.effective_to IS NULL OR COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')) < rr.effective_to)
+      ORDER BY rr.effective_from DESC NULLS LAST, rr.id DESC LIMIT 1
+    ) r ON true
+    WHERE sl.fy = ${fyStr}
+      ${periodClause}
+      ${entityCondsAliased(filter, "sl")}
+    GROUP BY 1, 2, 3, 4
+  `);
+  return result.rows.map((row) => ({
+    group: row.group ?? "Unmapped", state: row.state ?? "Unmapped",
+    customer: row.customer ?? "", customerKey: row.customerKey ?? "",
+    amount: Number(row.amount), invoices: Number(row.invoices),
+  }));
 }
 
 async function queryMonthlyTotal(fyStr: string, filter?: CompanyReportsFilter) {
@@ -832,7 +1033,7 @@ async function queryMonthlyByHead(fyStr: string, filter?: CompanyReportsFilter) 
 }
 
 
-function applyMonthFilter(
+export function applyMonthFilter(
   likeMonths: string[],
   likeMonthsPrior: string[],
   filter?: CompanyReportsFilter,

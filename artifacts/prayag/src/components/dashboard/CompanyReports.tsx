@@ -6,11 +6,13 @@ import { trunc2 } from "@/lib/trunc";
 //   RULE 1 — LIKE MONTHS: only same calendar months as current FY so far.
 //   RULE 2 — LITRE RULE: Report 4 qty is per-group only, never cross-group total.
 //   RULE 3 — LIVE DATA: sale_line populated from live register chain.
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useLocation, useSearch } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { useGlobalFilter } from "@/data/global-filter-context";
 import { QuotaWaitBanner, quotaDelayMs } from "./quotaWait";
 import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
-import { AlertTriangle, Info, ChevronDown, ChevronUp, Download } from "lucide-react";
+import { AlertTriangle, Info, ChevronDown, ChevronUp, ChevronRight, Home, Download, FileSpreadsheet, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   CompanyReportFilterBar,
@@ -20,6 +22,8 @@ import {
   type EntityFilterValue,
 } from "./CompanyReportFilters";
 import StateFilter from "../ui/StateFilter";
+import { useToast } from "@/hooks/use-toast";
+import { hydrateGlobalFilterFromUrl, serializeGlobalFilterToUrl, HydrationLock, statesEqual } from "@/data/global-filter-codec";
 
 // ── Types (matching server CompanyReportsPayload) ─────────────────────────────
 
@@ -68,14 +72,18 @@ type Payload = {
   likeMonthsPrior: string[];
   asOfDate: string;
   r1r2_byState: ReportRow[];
+  r1_partyByCustomer?: Array<SaleCustomerRow & { district: string }>;
+  r2_byStateMonth?: Array<{ state: string; month: string; thisFy: number | null; lastFy: number | null }>;
   r3_byGroup: ReportRow[];
-  r3a_byStateGroup: Array<{ state: string; group: string; thisFy: number; lastFy: number }>;
-  r3b_byPartyGroup: Array<{ customer: string; state: string; group: string; thisFy: number; lastFy: number }>;
+  r3_bySubcategory?: Array<{ group: string; subcategory: string; thisFy: number; lastFy: number }>;
+  r3a_byStateGroup: Array<{ state: string; group: string; subcategory: string; thisFy: number; lastFy: number }>;
+  r3b_byPartyGroup: Array<{ customer: string; state: string; group: string; subcategory: string; thisFy: number; lastFy: number }>;
   r3c_byGroupFull: GroupFullRow[];
   r4_byGroupQty: QtyRow[];
   r5_byCustomer: SaleCustomerRow[];
   r5_collectionNote: string;
   r6_byGroupFull: GroupFullRow[];
+  r6_bySubcategoryFull?: Array<{ group: string; subcategory: string; thisFyLike: number; lastFyLike: number; lastFyFull: number; growthLike: number | null }>;
   r7_asOf: {
     date: string;
     total: number;
@@ -86,7 +94,6 @@ type Payload = {
     note: string;
   };
   monthlyPrimary?: Array<{ label: string; amount: number }>;
-  /** Cold-start snapshot freshness — see snapshotRefresh.tsx. */
   meta?: { snapshotSavedAt?: number; refreshing?: boolean };
 };
 
@@ -120,12 +127,16 @@ function CompareTable({
   priorFyLabel,
   limit = 30,
   showGrowth = true,
+  onRowClick,
+  parentAmount,
 }: {
   rows: ReportRow[];
   fyLabel: string;
   priorFyLabel: string;
   limit?: number;
   showGrowth?: boolean;
+  onRowClick?: (label: string) => void;
+  parentAmount?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const display = expanded ? rows : rows.slice(0, limit);
@@ -152,7 +163,7 @@ function CompareTable({
         </thead>
         <tbody>
           {display.map((r, i) => (
-            <tr key={i} className="border-b border-border/30 hover:bg-muted/20">
+            <tr key={i} onClick={onRowClick ? () => onRowClick(r.label) : undefined} className={cn("border-b border-border/30 hover:bg-muted/20", onRowClick && "cursor-pointer hover:bg-muted/40 transition-colors")}>
               <td className="py-1.5 px-3 max-w-[180px] truncate">{r.label}</td>
               <td className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(r.thisFy)}</td>
               <td className="py-1.5 px-3 text-right font-mono tabular-nums text-muted-foreground">{fmtCr(r.lastFy)}</td>
@@ -179,6 +190,20 @@ function CompareTable({
             {showGrowth && <td className="py-1.5 px-3" />}
             <td className="py-1.5 px-3" />
           </tr>
+          {parentAmount !== undefined && (
+            <>
+              <tr className="bg-muted/10 font-medium text-muted-foreground">
+                <td className="py-1.5 px-3">Parent Record Total</td>
+                <td className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(parentAmount)}</td>
+                <td colSpan={showGrowth ? 4 : 3} />
+              </tr>
+              <tr className={Math.abs(totalThis - parentAmount) >= 100000 ? "bg-red-500/10 font-semibold text-red-700 dark:text-red-400" : "bg-muted/10 font-medium text-muted-foreground"}>
+                <td className="py-1.5 px-3">Mismatch (Unattributed)</td>
+                <td className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(totalThis - parentAmount)}</td>
+                <td colSpan={showGrowth ? 4 : 3} />
+              </tr>
+            </>
+          )}
         </tfoot>
       </table>
       {rows.length > limit && !expanded && (
@@ -332,446 +357,372 @@ function Report4({ rows, fy, priorFy, likeMonths }: { rows: QtyRow[]; fy: string
   );
 }
 
-// ── Report 3 (with sub-tabs 3A / 3B / 3C) ────────────────────────────────────
 
-function Report3({
-  data,
-  fy,
-  priorFy,
-  likeMonths,
-}: {
-  data: Payload;
-  fy: string;
-  priorFy: string;
-  likeMonths: string[];
-}) {
-  const [sub, setSub] = useState<"overall" | "3a" | "3b" | "3c">("overall");
-  const [stateSelected, setStateSelected] = useState<string[]>([]);
-  const [partyFilter, setPartyFilter]     = useState("");
-  const [groupFilter, setGroupFilter]     = useState("");
+// ── Shared Drill Components ───────────────────────────────────────────────────
 
-  const SUBS = [
-    { id: "overall", label: "3 — Overall" },
-    { id: "3a", label: "3A — State × Group" },
-    { id: "3b", label: "3B — Party × Group" },
-    { id: "3c", label: "3C — Group (Full Prior Year)" },
-  ] as const;
+type ColumnDef<T> = {
+  header: string;
+  align?: "left" | "right";
+  isSumTarget?: boolean;
+  render: (row: T) => React.ReactNode;
+};
 
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
-        {SUBS.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setSub(s.id)}
-            className={cn(
-              "px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
-              sub === s.id
-                ? "bg-primary text-primary-foreground border-primary"
-                : "border-border text-muted-foreground hover:bg-muted",
-            )}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-
-      {sub === "overall" && (
-        <CompareTable
-          rows={data.r3_byGroup}
-          fyLabel={`FY ${fy} (like months)`}
-          priorFyLabel={`FY ${priorFy} (same months)`}
-        />
-      )}
-
-      {sub === "3a" && (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <StateFilter
-              selected={stateSelected}
-              onChange={setStateSelected}
-              label="State"
-            />
-            <input
-              value={groupFilter}
-              onChange={(e) => setGroupFilter(e.target.value)}
-              placeholder="Filter by group..."
-              className="text-xs rounded border border-border/50 bg-background px-2 py-1"
-            />
-          </div>
-          <Report3ATable
-            rows={data.r3a_byStateGroup}
-            fy={fy}
-            priorFy={priorFy}
-            stateSelected={stateSelected}
-            groupFilter={groupFilter}
-          />
-        </div>
-      )}
-
-      {sub === "3b" && (
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            <input
-              value={partyFilter}
-              onChange={(e) => setPartyFilter(e.target.value)}
-              placeholder="Filter by party..."
-              className="flex-1 text-xs rounded border border-border/50 bg-background px-2 py-1"
-            />
-            <input
-              value={groupFilter}
-              onChange={(e) => setGroupFilter(e.target.value)}
-              placeholder="Filter by group..."
-              className="flex-1 text-xs rounded border border-border/50 bg-background px-2 py-1"
-            />
-          </div>
-          <Report3BTable
-            rows={data.r3b_byPartyGroup}
-            fy={fy}
-            priorFy={priorFy}
-            partyFilter={partyFilter}
-            groupFilter={groupFilter}
-          />
-        </div>
-      )}
-
-      {sub === "3c" && (
-        <GroupFullTable rows={data.r3c_byGroupFull} fy={fy} priorFy={priorFy} />
-      )}
-    </div>
-  );
-}
-
-function Report3ATable({
+function DrillTable<T>({
   rows,
-  fy,
-  priorFy,
-  stateSelected,
-  groupFilter,
+  columns,
+  onRowClick,
+  parentAmount,
+  amountKey,
+  limit = 50,
+  isTruncated = false,
+  totalRows,
 }: {
-  rows: Array<{ state: string; group: string; thisFy: number; lastFy: number }>;
-  fy: string;
-  priorFy: string;
-  stateSelected: string[];
-  groupFilter: string;
+  rows: T[];
+  columns: ColumnDef<T>[];
+  onRowClick?: (row: T) => void;
+  parentAmount?: number;
+  amountKey?: (row: T) => number;
+  limit?: number;
+  isTruncated?: boolean;
+  totalRows?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const LIMIT = 50;
-  const filtered = rows
-    .filter(
-      (r) =>
-        (!stateSelected.length || stateSelected.includes(r.state)) &&
-        (!groupFilter || r.group.toLowerCase().includes(groupFilter.toLowerCase())),
-    )
-    .sort((a, b) => b.thisFy - a.thisFy);
-  const display = expanded ? filtered : filtered.slice(0, LIMIT);
+  const display = expanded ? rows : rows.slice(0, limit);
+
+  const sumAmount = amountKey ? rows.reduce((s, r) => s + amountKey(r), 0) : 0;
+  const mismatch = parentAmount !== undefined ? sumAmount - parentAmount : 0;
+  const colSpanTarget = Math.max(1, columns.findIndex(c => c.isSumTarget));
 
   return (
-    <div className="rounded-lg border border-border overflow-auto">
+    <div className="rounded-lg border border-border overflow-auto bg-card">
       <table className="w-full text-xs">
         <thead>
           <tr className="bg-muted/30 border-b border-border">
-            <th className="text-left py-2 px-3 font-medium text-muted-foreground">State</th>
-            <th className="text-left py-2 px-3 font-medium text-muted-foreground">Group</th>
-            <th className="text-right py-2 px-3 font-medium text-muted-foreground">FY {fy}</th>
-            <th className="text-right py-2 px-3 font-medium text-muted-foreground">FY {priorFy}</th>
-            <th className="text-right py-2 px-3 font-medium text-muted-foreground">Diff</th>
+            {columns.map((c, i) => (
+              <th key={i} className={cn("py-2 px-3 font-medium text-muted-foreground", c.align === "right" ? "text-right" : "text-left")}>
+                {c.header}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {display.map((r, i) => {
-            const diff = r.thisFy - r.lastFy;
-            return (
-              <tr key={i} className="border-b border-border/30 hover:bg-muted/20">
-                <td className="py-1.5 px-3 max-w-[140px] truncate">{r.state}</td>
-                <td className="py-1.5 px-3 max-w-[120px] truncate text-muted-foreground">{r.group}</td>
-                <td className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(r.thisFy)}</td>
-                <td className="py-1.5 px-3 text-right font-mono tabular-nums text-muted-foreground">{fmtCr(r.lastFy)}</td>
-                <td className={cn("py-1.5 px-3 text-right font-mono tabular-nums", diff >= 0 ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400")}>
-                  {diff >= 0 ? "+" : ""}{fmtCr(diff)}
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={columns.length} className="py-4 text-center text-muted-foreground">No data for this selection.</td>
+            </tr>
+          )}
+          {display.map((r, i) => (
+            <tr
+              key={i}
+              onClick={onRowClick ? () => onRowClick(r) : undefined}
+              className={cn(
+                "border-b border-border/30",
+                onRowClick ? "cursor-pointer hover:bg-muted/40 transition-colors" : "hover:bg-muted/20"
+              )}
+            >
+              {columns.map((c, j) => (
+                <td key={j} className={cn("py-1.5 px-3", c.align === "right" && "text-right font-mono tabular-nums")}>
+                  {c.render(r)}
                 </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {filtered.length > LIMIT && !expanded && (
-        <button className="w-full py-2 text-xs text-muted-foreground hover:text-foreground border-t border-border/30" onClick={() => setExpanded(true)}>
-          Show all {filtered.length} rows
-        </button>
-      )}
-    </div>
-  );
-}
-
-function Report3BTable({
-  rows,
-  fy,
-  priorFy,
-  partyFilter,
-  groupFilter,
-}: {
-  rows: Array<{ customer: string; state: string; group: string; thisFy: number; lastFy: number }>;
-  fy: string;
-  priorFy: string;
-  partyFilter: string;
-  groupFilter: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const LIMIT = 50;
-  const filtered = rows
-    .filter(
-      (r) =>
-        (!partyFilter || r.customer.toLowerCase().includes(partyFilter.toLowerCase())) &&
-        (!groupFilter || r.group.toLowerCase().includes(groupFilter.toLowerCase())),
-    )
-    .sort((a, b) => b.thisFy - a.thisFy);
-  const display = expanded ? filtered : filtered.slice(0, LIMIT);
-
-  return (
-    <div className="rounded-lg border border-border overflow-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="bg-muted/30 border-b border-border">
-            <th className="text-left py-2 px-3 font-medium text-muted-foreground">Party</th>
-            <th className="text-left py-2 px-3 font-medium text-muted-foreground">State</th>
-            <th className="text-left py-2 px-3 font-medium text-muted-foreground">Group</th>
-            <th className="text-right py-2 px-3 font-medium text-muted-foreground">FY {fy}</th>
-            <th className="text-right py-2 px-3 font-medium text-muted-foreground">FY {priorFy}</th>
-            <th className="text-right py-2 px-3 font-medium text-muted-foreground">Diff</th>
-          </tr>
-        </thead>
-        <tbody>
-          {display.map((r, i) => {
-            const diff = r.thisFy - r.lastFy;
-            return (
-              <tr key={i} className="border-b border-border/30 hover:bg-muted/20">
-                <td className="py-1.5 px-3 max-w-[160px] truncate">{r.customer || "—"}</td>
-                <td className="py-1.5 px-3 max-w-[100px] truncate text-muted-foreground">{r.state}</td>
-                <td className="py-1.5 px-3 max-w-[100px] truncate text-muted-foreground">{r.group}</td>
-                <td className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(r.thisFy)}</td>
-                <td className="py-1.5 px-3 text-right font-mono tabular-nums text-muted-foreground">{fmtCr(r.lastFy)}</td>
-                <td className={cn("py-1.5 px-3 text-right font-mono tabular-nums", diff >= 0 ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400")}>
-                  {diff >= 0 ? "+" : ""}{fmtCr(diff)}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {filtered.length > LIMIT && !expanded && (
-        <button className="w-full py-2 text-xs text-muted-foreground hover:text-foreground border-t border-border/30" onClick={() => setExpanded(true)}>
-          Show all {filtered.length} rows
-        </button>
-      )}
-    </div>
-  );
-}
-
-function GroupFullTable({ rows, fy, priorFy }: { rows: GroupFullRow[]; fy: string; priorFy: string }) {
-  if (rows.length === 0) return <p className="text-xs text-muted-foreground py-4">No data.</p>;
-  return (
-    <div className="rounded-lg border border-border overflow-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="bg-muted/30 border-b border-border">
-            <th className="text-left py-2 px-3 font-medium text-muted-foreground">Group</th>
-            <th className="text-right py-2 px-3 font-medium text-muted-foreground">{fy} (like months)</th>
-            <th className="text-right py-2 px-3 font-medium text-muted-foreground">{priorFy} (same months)</th>
-            <th className="text-right py-2 px-3 font-medium text-muted-foreground">{priorFy} (full year)</th>
-            <th className="text-right py-2 px-3 font-medium text-muted-foreground">Growth (like months)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} className="border-b border-border/30 hover:bg-muted/20">
-              <td className="py-1.5 px-3">{r.group}</td>
-              <td className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(r.thisFyLike)}</td>
-              <td className="py-1.5 px-3 text-right font-mono tabular-nums text-muted-foreground">{fmtCr(r.lastFyLike)}</td>
-              <td className="py-1.5 px-3 text-right font-mono tabular-nums text-muted-foreground">{fmtCr(r.lastFyFull)}</td>
-              <td className={cn("py-1.5 px-3 text-right font-mono tabular-nums", growthColor(r.growthLike))}>
-                {fmtPct(r.growthLike)}
-              </td>
+              ))}
             </tr>
           ))}
         </tbody>
-        <tfoot>
-          <tr className="bg-muted/30 border-t border-border font-semibold">
-            <td className="py-1.5 px-3">Total</td>
-            <td className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(rows.reduce((s, r) => s + r.thisFyLike, 0))}</td>
-            <td className="py-1.5 px-3 text-right font-mono tabular-nums text-muted-foreground">{fmtCr(rows.reduce((s, r) => s + r.lastFyLike, 0))}</td>
-            <td className="py-1.5 px-3 text-right font-mono tabular-nums text-muted-foreground">{fmtCr(rows.reduce((s, r) => s + r.lastFyFull, 0))}</td>
-            <td className="py-1.5 px-3" />
-          </tr>
-        </tfoot>
+        {amountKey && (
+          <tfoot>
+            <tr className="bg-muted/30 border-t border-border font-semibold">
+              <td colSpan={colSpanTarget} className="py-1.5 px-3 text-muted-foreground">Total</td>
+              {columns.slice(colSpanTarget).map((c, i) => {
+                if (c.isSumTarget) return <td key={i} className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(sumAmount)}</td>;
+                return <td key={i} />;
+              })}
+            </tr>
+            {parentAmount !== undefined && (
+              <>
+                <tr className="bg-muted/10 font-medium text-muted-foreground">
+                  <td colSpan={colSpanTarget} className="py-1.5 px-3">Parent Record Total</td>
+                  {columns.slice(colSpanTarget).map((c, i) => {
+                    if (c.isSumTarget) return <td key={i} className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(parentAmount)}</td>;
+                    return <td key={i} />;
+                  })}
+                </tr>
+                <tr className={!isTruncated && Math.abs(mismatch) >= 100000 ? "bg-red-500/10 font-semibold text-red-700 dark:text-red-400" : "bg-muted/10 font-medium text-muted-foreground"}>
+                  <td colSpan={colSpanTarget} className="py-1.5 px-3">{isTruncated ? "Mismatch (Truncated)" : "Mismatch (Unattributed)"}</td>
+                  {columns.slice(colSpanTarget).map((c, i) => {
+                    if (c.isSumTarget) return <td key={i} className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(mismatch)}</td>;
+                    return <td key={i} />;
+                  })}
+                </tr>
+              </>
+            )}
+          </tfoot>
+        )}
       </table>
-    </div>
-  );
-}
-
-// ── Report 5 ──────────────────────────────────────────────────────────────────
-
-function Report5({ rows, collectionNote, fy, priorFy }: { rows: SaleCustomerRow[]; collectionNote: string; fy: string; priorFy: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const LIMIT = 50;
-  const display = expanded ? rows : rows.slice(0, LIMIT);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-500/5 p-2.5 text-xs text-amber-800 dark:text-amber-300">
-        <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-        <span><strong>Collection column:</strong> {collectionNote}</span>
-      </div>
-      {rows.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No data.</p>
-      ) : (
-        <div className="rounded-lg border border-border overflow-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-muted/30 border-b border-border">
-                <th className="text-left py-2 px-3 font-medium text-muted-foreground">Customer</th>
-                <th className="text-left py-2 px-3 font-medium text-muted-foreground">State</th>
-                <th className="text-left py-2 px-3 font-medium text-muted-foreground">State Head</th>
-                <th className="text-right py-2 px-3 font-medium text-muted-foreground">Sale FY {fy}</th>
-                <th className="text-right py-2 px-3 font-medium text-muted-foreground">Sale FY {priorFy}</th>
-                <th className="text-right py-2 px-3 font-medium text-muted-foreground">Diff</th>
-                <th className="text-right py-2 px-3 font-medium text-muted-foreground text-amber-600">Collection</th>
-              </tr>
-            </thead>
-            <tbody>
-              {display.map((r, i) => (
-                <tr key={i} className="border-b border-border/30 hover:bg-muted/20">
-                  <td className="py-1.5 px-3 max-w-[160px] truncate">{r.customer || "—"}</td>
-                  <td className="py-1.5 px-3 max-w-[100px] truncate text-muted-foreground">{r.state}</td>
-                  <td className="py-1.5 px-3 max-w-[100px] truncate text-muted-foreground">{r.head}</td>
-                  <td className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(r.thisFy)}</td>
-                  <td className="py-1.5 px-3 text-right font-mono tabular-nums text-muted-foreground">{fmtCr(r.lastFy)}</td>
-                  <td className={cn("py-1.5 px-3 text-right font-mono tabular-nums", r.diff >= 0 ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400")}>
-                    {r.diff >= 0 ? "+" : ""}{fmtCr(r.diff)}
-                  </td>
-                  <td className="py-1.5 px-3 text-right text-muted-foreground italic text-[10px]">—</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {rows.length > LIMIT && !expanded && (
-            <button className="w-full py-2 text-xs text-muted-foreground hover:text-foreground border-t border-border/30" onClick={() => setExpanded(true)}>
-              Show all {rows.length} customers
-            </button>
-          )}
+      {rows.length > limit && !expanded && (
+        <button
+          className="w-full py-2 text-xs text-muted-foreground hover:text-foreground border-t border-border/30 transition-colors"
+          onClick={() => setExpanded(true)}
+        >
+          Show all {rows.length} {isTruncated ? `(of ${totalRows} total)` : "rows"}
+        </button>
+      )}
+      {isTruncated && expanded && (
+        <div className="w-full py-2 text-xs text-center text-muted-foreground border-t border-border/30">
+          Showing maximum {rows.length} rows (out of {totalRows} matching items)
         </div>
       )}
     </div>
   );
 }
 
-// ── Report 7 ──────────────────────────────────────────────────────────────────
-
-function Report7({ asOf, fy }: { asOf: Payload["r7_asOf"]; fy: string }) {
-  const isMonthOnlyFy = fy === "2023-24";
+function DrillBreadcrumbs({ reportLabel, drillPath, onNavigate }: { reportLabel: string; drillPath: string[]; onNavigate: (index: number) => void; }) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <div className="text-xs text-muted-foreground">As-of date: <strong className="text-foreground">{asOf.date}</strong></div>
-        <div className="text-xs text-muted-foreground">{asOf.note}</div>
-      </div>
-      {isMonthOnlyFy && (
-        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-300">
-          FY2023-24 is month-only: the frozen source has 137,619 rows but no
-          invoice date or invoice identifier. The Invoice Count below is a
-          line-based fallback, not a distinct invoice count; daily and weekly
-          analysis is unavailable.
+    <div className="flex flex-wrap items-center gap-2 text-sm mb-4 bg-muted/30 px-3 py-2 rounded-lg border border-border">
+      <button onClick={() => onNavigate(-1)} className={cn("flex items-center gap-1.5 font-medium transition-colors", drillPath.length === 0 ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+        <Home className="h-4 w-4" /> {reportLabel}
+      </button>
+      {drillPath.map((segment, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <ChevronRight className="h-4 w-4 text-muted-foreground/50" />
+          <button onClick={() => onNavigate(i)} className={cn("font-medium transition-colors max-w-[200px] truncate", i === drillPath.length - 1 ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+            {segment}
+          </button>
         </div>
-      )}
-      <div className="flex flex-wrap gap-3">
-        {[
-          { label: "Total Sale", value: fmtCr(asOf.total) },
-          { label: isMonthOnlyFy ? "Invoice Count*" : "Invoice Count", value: asOf.invoiceCount.toLocaleString("en-IN") },
-          { label: "Customers", value: asOf.customerCount.toLocaleString("en-IN") },
-        ].map((tile) => (
-          <div key={tile.label} className="flex-1 min-w-[130px] rounded-lg border border-border bg-card p-3">
-            <p className="text-xs text-muted-foreground">{tile.label}</p>
-            <p className="text-xl font-semibold font-mono mt-0.5">{tile.value}</p>
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">By Group</p>
-          <div className="rounded-lg border border-border overflow-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-muted/30 border-b border-border">
-                  <th className="text-left py-2 px-3 font-medium text-muted-foreground">Group</th>
-                  <th className="text-right py-2 px-3 font-medium text-muted-foreground">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {asOf.byGroup.map((r, i) => (
-                  <tr key={i} className="border-b border-border/30 hover:bg-muted/20">
-                    <td className="py-1.5 px-3">{r.group}</td>
-                    <td className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(r.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">By State</p>
-          <div className="rounded-lg border border-border overflow-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-muted/30 border-b border-border">
-                  <th className="text-left py-2 px-3 font-medium text-muted-foreground">State</th>
-                  <th className="text-right py-2 px-3 font-medium text-muted-foreground">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {asOf.byState.map((r, i) => (
-                  <tr key={i} className="border-b border-border/30 hover:bg-muted/20">
-                    <td className="py-1.5 px-3">{r.state}</td>
-                    <td className="py-1.5 px-3 text-right font-mono tabular-nums">{fmtCr(r.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+      ))}
     </div>
   );
 }
 
-// ── Tab navigation ────────────────────────────────────────────────────────────
+function DiffCell({ value }: { value: number }) {
+  if (value === 0) return <span className="text-muted-foreground">—</span>;
+  return <span className={value > 0 ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400"}>
+    {value > 0 ? "+" : ""}{fmtCr(value)}
+  </span>;
+}
 
-type ReportId = "1" | "2" | "3" | "4" | "5" | "6" | "7";
+function GrowthCell({ value }: { value: number | null }) {
+  return <span className={growthColor(value)}>{fmtPct(value)}</span>;
+}
+
+function R4ItemDrill({ fy, priorFy, state, customer, group, months, entityFilter }: { fy: string; priorFy: string; state: string; customer: string; group: string; months: string; entityFilter: EntityFilterValue }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["r4items", fy, state, customer, group, months, entityFilter.heads],
+    queryFn: async () => {
+      const q = new URLSearchParams();
+      q.set("fy", fy);
+      q.set("state", state);
+      q.set("customers", JSON.stringify([customer]));
+      q.set("group", group);
+      if (months) q.set("months", months);
+      if (entityFilter.heads.length > 0) q.set("heads", JSON.stringify(entityFilter.heads));
+      const url = `/api/company-reports/r4/items?${q.toString()}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch items");
+      return res.json() as Promise<{
+        rows: Array<{
+          code: string; itemName: string; group: string; subcategory: string;
+          qtyThisFy: number; qtyLastFy: number;
+          amountThisFy: number; amountLastFy: number;
+        }>;
+        truncated: boolean;
+        totalRows: number;
+        reconciliation: { parentAmount: number; childAmount: number; delta: number; unattributed: number | null; complete: boolean };
+      }>;
+    }
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground" role="status" aria-live="polite">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        <span>Loading items...</span>
+      </div>
+    );
+  }
+  if (error) return <div className="py-8 text-center text-sm text-destructive">Failed to load items.</div>;
+  if (!data) return null;
+
+  return (
+    <DrillTable
+      rows={data.rows}
+      isTruncated={data.truncated}
+      totalRows={data.totalRows}
+      parentAmount={data.reconciliation.parentAmount}
+      amountKey={(r) => r.amountThisFy}
+      columns={[
+        { header: "Item Code", render: r => <span className="text-muted-foreground">{r.code}</span> },
+        { header: "Name", render: r => r.itemName },
+        { header: "Sub-category", render: r => <span className="text-[11px] text-muted-foreground">{r.subcategory}</span> },
+        { header: `Qty FY ${fy}`, align: "right", render: r => r.qtyThisFy > 0 ? r.qtyThisFy.toLocaleString("en-IN") : "—" },
+        { header: `Qty FY ${priorFy}`, align: "right", render: r => r.qtyLastFy > 0 ? r.qtyLastFy.toLocaleString("en-IN") : "—" },
+        { header: `Amount FY ${fy}`, align: "right", isSumTarget: true, render: r => r.amountThisFy > 0 ? fmtCr(r.amountThisFy) : "—" },
+        { header: `Amount FY ${priorFy}`, align: "right", render: r => r.amountLastFy > 0 ? fmtCr(r.amountLastFy) : "—" },
+      ]}
+    />
+  );
+}
+
+function R7PartyDrill({ fy, asOf, type, value, entityFilter, months }: { fy: string; asOf: string; type: "state" | "group"; value: string; entityFilter: EntityFilterValue; months: string }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["r7parties", fy, asOf, type, value, entityFilter.heads, entityFilter.states, entityFilter.customers, months],
+    queryFn: async () => {
+      const q = new URLSearchParams();
+      q.set("fy", fy);
+      q.set("asOf", asOf);
+      q.set(type, value);
+      if (entityFilter.heads.length > 0) q.set("heads", JSON.stringify(entityFilter.heads));
+      if (entityFilter.states.length > 0) q.set("states", JSON.stringify(entityFilter.states));
+      if (entityFilter.customers.length > 0) q.set("customers", JSON.stringify(entityFilter.customers));
+      if (months) q.set("months", months);
+      const url = `/api/company-reports/r7/parties?${q.toString()}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch parties");
+      return res.json() as Promise<{
+        rows: Array<{ customer: string; state: string; group: string; amount: number }>;
+        reconciliation: { parentAmount: number; childAmount: number; delta: number };
+      }>;
+    }
+  });
+
+  if (isLoading) return <div className="py-8 text-center text-sm text-muted-foreground">Loading parties...</div>;
+  if (error) return <div className="py-8 text-center text-sm text-destructive">Failed to load parties.</div>;
+  if (!data) return null;
+
+  return (
+    <DrillTable
+      rows={data.rows}
+      parentAmount={data.reconciliation.parentAmount}
+      amountKey={(r) => r.amount}
+      columns={[
+        { header: "Party", render: r => r.customer },
+        { header: "State", render: r => <span className="text-muted-foreground">{r.state}</span> },
+        { header: "Group", render: r => <span className="text-muted-foreground">{r.group}</span> },
+        { header: "Amount", align: "right", isSumTarget: true, render: r => fmtCr(r.amount) },
+      ]}
+    />
+  );
+}
+
+// ── Master Router Component ───────────────────────────────────────────────────
+
+type ReportId = "1" | "2" | "3" | "3a" | "3b" | "4" | "5" | "6" | "7";
 
 const TABS: { id: ReportId; label: string; description: string }[] = [
-  { id: "1", label: "Report 1", description: "Sale by state — last year vs this year" },
-  { id: "2", label: "Report 2", description: "Growth by state — sorted by growth %" },
-  { id: "3", label: "Report 3", description: "Segment-wise (+ 3A state-wise, 3B party-wise, 3C full prior year)" },
-  { id: "4", label: "Report 4", description: "Quantity by group — qty per party per state (one group at a time)" },
-  { id: "5", label: "Report 5", description: "Sale and collection by customer (daily)" },
-  { id: "6", label: "Report 6", description: "Total purchase by group — like months vs full prior year" },
-  { id: "7", label: "Report 7", description: "As-of date snapshot" },
+  { id: "1", label: "Report 1", description: "State → Party" },
+  { id: "2", label: "Report 2", description: "State → Month (Growth sorted)" },
+  { id: "3", label: "Report 3", description: "Master → Sub-category" },
+  { id: "3a", label: "Report 3A", description: "State → Master → Sub-category" },
+  { id: "3b", label: "Report 3B", description: "State → Party → Master" },
+  { id: "4", label: "Report 4", description: "State → Party → Group → Item (Qty/Amount)" },
+  { id: "5", label: "Report 5", description: "Customer → Group" },
+  { id: "6", label: "Report 6", description: "Master → Sub-category (Full Prior Year)" },
+  { id: "7", label: "Report 7", description: "As-of date snapshot (State/Group → Party)" },
 ];
 
-// ── Main component ────────────────────────────────────────────────────────────
-
 export default function CompanyReports() {
-  // FY comes from the global filter bar (page is FY_ONLY) — a second local
-  // selector previously disagreed with the global one and left stale-year
-  // figures on screen.
-  const { fy, periodMode, effectivePeriodFrom, effectivePrimaryPeriodTo, effectivePeriodLabel } = useGlobalFilter();
+  const { fy, periodMode, monthIdx, rangeFrom, rangeTo, applyGlobalFilterState, effectivePeriodFrom, effectivePrimaryPeriodTo, effectivePeriodLabel } = useGlobalFilter();
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeReport, setActiveReport] = useState<ReportId>("1");
-  const [entityFilter, setEntityFilter] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
 
-  // Sub-year period → explicit month labels for the server. YTD / Full Year
-  // send no months param (server default = all complete like months).
+  const [location, setLocation] = useLocation();
+  const searchString = useSearch();
+  const searchParams = useMemo(() => new URLSearchParams(searchString), [searchString]);
+
+  const hydrationLock = useMemo(() => new HydrationLock(), []);
+
+  const currentStateRef = useRef({ fy, periodMode, monthIdx, rangeFrom, rangeTo });
+  currentStateRef.current = { fy, periodMode, monthIdx, rangeFrom, rangeTo };
+
+  // Window popstate hydration listener
+  useEffect(() => {
+    const handlePopState = () => {
+      const currentParams = new URLSearchParams(window.location.search);
+      if (currentParams.has("fy")) {
+        const urlState = hydrateGlobalFilterFromUrl(currentParams);
+        if (!statesEqual(urlState, currentStateRef.current)) {
+          hydrationLock.setPending(urlState, currentStateRef.current);
+          applyGlobalFilterState(urlState);
+        }
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+
+    // Initial mount hydration
+    const currentParams = new URLSearchParams(window.location.search);
+    if (currentParams.has("fy")) {
+      const urlState = hydrateGlobalFilterFromUrl(currentParams);
+      if (!statesEqual(urlState, currentStateRef.current)) {
+        hydrationLock.setPending(urlState, currentStateRef.current);
+        applyGlobalFilterState(urlState);
+      }
+    } else {
+      const nextParams = new URLSearchParams(currentParams);
+      if (serializeGlobalFilterToUrl(nextParams, currentStateRef.current)) {
+        setLocation(window.location.pathname + "?" + nextParams.toString(), { replace: true });
+      }
+    }
+
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [applyGlobalFilterState, setLocation, hydrationLock]);
+
+  // Context -> URL synchronization effect
+  useEffect(() => {
+    const currentState = { fy, periodMode, monthIdx, rangeFrom, rangeTo };
+
+    if (hydrationLock.shouldBlockSync(currentState)) {
+      return;
+    }
+
+    // Normal context change -> write to URL
+    const nextParams = new URLSearchParams(window.location.search);
+    const changed = serializeGlobalFilterToUrl(nextParams, currentState);
+    if (changed) {
+      setLocation(window.location.pathname + "?" + nextParams.toString(), { replace: true });
+    }
+  }, [fy, periodMode, monthIdx, rangeFrom, rangeTo, setLocation, hydrationLock]);
+
+  const activeReport = (searchParams.get("report") as ReportId) || "1";
+  const drillPath = useMemo(() => searchParams.getAll("drill"), [searchParams]);
+  const { toast } = useToast();
+
+  const setActiveReport = useCallback((newReport: string, replace = false) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("report", newReport);
+    nextParams.delete("drill");
+    setLocation(window.location.pathname + "?" + nextParams.toString(), { replace });
+  }, [searchParams, setLocation]);
+
+  const onDrill = useCallback((segment: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.append("drill", segment);
+    setLocation(window.location.pathname + "?" + nextParams.toString());
+  }, [searchParams, setLocation]);
+
+  const handleNavigate = useCallback((index: number, replace = false) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("drill");
+    drillPath.slice(0, index + 1).forEach(p => nextParams.append("drill", p));
+    setLocation(window.location.pathname + "?" + nextParams.toString(), { replace });
+  }, [searchParams, drillPath, setLocation]);
+
+  const entityFilter = useMemo<EntityFilterValue>(() => {
+    const parse = (k: string) => {
+      try { const v = JSON.parse(searchParams.get(k) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+    };
+    return { heads: parse("heads"), states: parse("states"), customers: parse("customers") };
+  }, [searchParams]);
+
+  const setEntityFilter = useCallback((next: EntityFilterValue) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (next.heads.length) nextParams.set("heads", JSON.stringify(next.heads)); else nextParams.delete("heads");
+    if (next.states.length) nextParams.set("states", JSON.stringify(next.states)); else nextParams.delete("states");
+    if (next.customers.length) nextParams.set("customers", JSON.stringify(next.customers)); else nextParams.delete("customers");
+    nextParams.delete("drill"); // clear drill on filter change
+    setLocation(window.location.pathname + "?" + nextParams.toString());
+  }, [searchParams, setLocation]);
+
   const monthsParam = useMemo(() => {
     if (periodMode === "ytd" || periodMode === "full") return "";
     const fyStart = parseInt(fy.split("-")[0], 10);
@@ -782,21 +733,76 @@ export default function CompanyReports() {
       const yy = m <= 9 ? fyStart : fyStart + 1;
       labels.push(`${NAMES[m - 1]}-${String(yy).slice(-2)}`);
     }
-    return labels.length > 0 ? `&months=${encodeURIComponent(labels.join(","))}` : "";
+    return labels.length > 0 ? labels.join(",") : "";
   }, [periodMode, fy, effectivePeriodFrom, effectivePrimaryPeriodTo]);
 
   const filterQuery = useMemo(
-    () => `${monthsParam}${entityFilterQuery(entityFilter)}`,
+    () => `${monthsParam ? `&months=${encodeURIComponent(monthsParam)}` : ""}${entityFilterQuery(entityFilter)}`,
     [monthsParam, entityFilter],
   );
   const filtersActive = monthsParam !== "" || hasEntityFilter(entityFilter);
-  // True while Google Sheets is briefly rate-limiting reads (503 quota);
-  // the effect auto-retries after the server's retryAfter hint.
+
+  useEffect(() => {
+    if (!data) return;
+    let validLength = 0;
+
+    let validReport = activeReport;
+    if (!["1", "2", "3", "3a", "3b", "4", "5", "6", "7"].includes(validReport)) {
+      validReport = "1";
+    }
+
+    if (drillPath.length > 0) {
+      if (validReport === "1" || validReport === "2") {
+        validLength = data.r1r2_byState.some(r => r.label === drillPath[0]) ? 1 : 0;
+      } else if (validReport === "3") {
+        validLength = data.r3_byGroup.some(r => r.label === drillPath[0]) ? 1 : 0;
+      } else if (validReport === "3a") {
+        if (data.r3a_byStateGroup.some(r => r.state === drillPath[0])) {
+          validLength = 1;
+          if (drillPath.length > 1 && data.r3a_byStateGroup.some(r => r.state === drillPath[0] && r.group === drillPath[1])) validLength = 2;
+        }
+      } else if (validReport === "3b") {
+        if (data.r3b_byPartyGroup.some(r => r.state === drillPath[0])) {
+          validLength = 1;
+          if (drillPath.length > 1 && data.r3b_byPartyGroup.some(r => r.state === drillPath[0] && r.customer === drillPath[1])) {
+            validLength = 2;
+          }
+        }
+      } else if (validReport === "4") {
+        if (data.r4_byGroupQty.some(r => r.state === drillPath[0])) {
+          validLength = 1;
+          if (drillPath.length > 1 && data.r4_byGroupQty.some(r => r.state === drillPath[0] && r.customer === drillPath[1])) {
+            validLength = 2;
+            if (drillPath.length > 2 && data.r4_byGroupQty.some(r => r.state === drillPath[0] && r.customer === drillPath[1] && r.group === drillPath[2])) {
+              validLength = 3;
+            }
+          }
+        }
+      } else if (validReport === "5") {
+        validLength = data.r5_byCustomer.some(r => r.customer === drillPath[0]) ? 1 : 0;
+      } else if (validReport === "6") {
+        validLength = data.r6_byGroupFull.some(r => r.group === drillPath[0]) ? 1 : 0;
+      } else if (validReport === "7") {
+        if (drillPath[0].startsWith("group:")) {
+          validLength = data.r7_asOf.byGroup.some(r => r.group === drillPath[0].slice(6)) ? 1 : 0;
+        } else if (drillPath[0].startsWith("state:")) {
+          validLength = data.r7_asOf.byState.some(r => r.state === drillPath[0].slice(6)) ? 1 : 0;
+        }
+      }
+    }
+
+    if (validReport !== activeReport) {
+      toast({ title: "Invalid report", description: "Report not found, redirecting to Report 1.", variant: "destructive" });
+      setActiveReport("1", true);
+    } else if (drillPath.length > validLength) {
+      toast({ title: "Drill path reset", description: "The previously selected rows are no longer present in the current filter scope.", variant: "destructive" });
+      handleNavigate(validLength - 1, true);
+    }
+  }, [data, activeReport, drillPath, handleNavigate, setActiveReport, toast]);
+
   const [quotaWait, setQuotaWait] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
 
-  // Cold-start snapshot: while meta.refreshing is true the server is rebuilding
-  // in the background — poll silently and swap the fresh figures in.
   const dataUrl = `/api/company-reports?fy=${encodeURIComponent(fy)}${filterQuery}`;
   useSnapshotRefresh(data?.meta, dataUrl, (fresh) => setData(fresh as Payload));
 
@@ -804,31 +810,23 @@ export default function CompanyReports() {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     setError(null);
-    // Never leave the previous year's figures on screen while the new year loads.
     setData(null);
     fetch(dataUrl)
       .then((r) => {
         if (!r.ok)
-          return r
-            .json()
-            .then((e: { error?: string; quota?: boolean; retryAfter?: number }) => {
-              if (r.status === 503 && e.quota) {
-                // Google Sheets read quota window — show a friendly wait
-                // state and retry automatically once the window resets.
-                setQuotaWait(true);
-                setLoading(false);
-                retryTimer = setTimeout(
-                  () => setRetryTick((t) => t + 1),
-                  quotaDelayMs(e.retryAfter),
-                );
-                return null;
-              }
-              throw new Error(e.error ?? r.statusText);
-            });
+          return r.json().then((e: { error?: string; quota?: boolean; retryAfter?: number }) => {
+            if (r.status === 503 && e.quota) {
+              setQuotaWait(true);
+              setLoading(false);
+              retryTimer = setTimeout(() => setRetryTick((t) => t + 1), quotaDelayMs(e.retryAfter));
+              return null;
+            }
+            throw new Error(e.error ?? r.statusText);
+          });
         return r.json() as Promise<Payload>;
       })
       .then((d) => {
-        if (d === null) return; // quota wait — retry scheduled
+        if (d === null) return;
         setQuotaWait(false);
         setData(d);
         setLoading(false);
@@ -839,18 +837,6 @@ export default function CompanyReports() {
     };
   }, [dataUrl, retryTick]);
 
-  // Report 2: same data as Report 1 but sorted by growth
-  const report2Rows = useMemo((): ReportRow[] => {
-    if (!data) return [];
-    return [...data.r1r2_byState]
-      .sort((a, b) => {
-        if (a.growthPct == null && b.growthPct == null) return 0;
-        if (a.growthPct == null) return 1;
-        if (b.growthPct == null) return -1;
-        return b.growthPct - a.growthPct;
-      });
-  }, [data]);
-
   const likeMonthsLabel = useMemo(() => {
     if (!data || data.likeMonths.length === 0) return "";
     const first = data.likeMonths[0].slice(0, 3);
@@ -858,22 +844,13 @@ export default function CompanyReports() {
     return first === last ? first : `${first}–${last}`;
   }, [data]);
 
-  // Year-on-year headline — stated explicitly rather than left to be inferred
-  // from the tables. Summed from the same r1r2 dataset every report page
-  // reconciles to (all pages read sale_line, invoice-line level; the prior
-  // year is served from the anchor-frozen register).
-  const headline = useMemo(() => {
-    if (!data || data.likeMonths.length === 0 || data.r1r2_byState.length === 0) return null;
-    const thisFy = data.r1r2_byState.reduce((s, r) => s + r.thisFy, 0);
-    const lastFy = data.r1r2_byState.reduce((s, r) => s + r.lastFy, 0);
-    const growthPct = lastFy > 0 ? ((thisFy / lastFy) - 1) * 100 : null;
-    return { thisFy, lastFy, growthPct };
-  }, [data]);
+  const priorFy = data?.priorFy || "";
+  const activeTabObj = TABS.find((t) => t.id === activeReport);
 
   return (
-    <div className="space-y-5 p-4">
+    <div className="space-y-6 pb-20">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold">Company Reports 1–7</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -881,18 +858,27 @@ export default function CompanyReports() {
             {data && likeMonthsLabel ? ` Comparing ${likeMonthsLabel} FY ${fy} vs FY ${data.priorFy}.` : ""}
           </p>
         </div>
-        <a
-          href={`/api/company-reports/export?fy=${encodeURIComponent(fy)}${filterQuery}`}
-          download
-          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/40"
-          data-testid="button-export-excel"
-        >
-          <Download className="h-3.5 w-3.5" />
-          Export Excel
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={`/api/company-reports/export?fy=${encodeURIComponent(fy)}${filterQuery}`}
+            download
+            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted shadow-sm transition-colors"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download report
+          </a>
+          <a
+            href={`/api/company-reports/working-data?fy=${encodeURIComponent(fy)}${filterQuery}`}
+            download
+            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted shadow-sm transition-colors"
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5" />
+            Download working data
+          </a>
+        </div>
       </div>
 
-      {/* Entity filters — State Head → State → Distributor (cascading) */}
+      {/* Entity filters */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <CompanyReportFilterBar fy={fy} value={entityFilter} onChange={setEntityFilter} />
         {periodMode !== "ytd" && periodMode !== "full" && (
@@ -907,57 +893,21 @@ export default function CompanyReports() {
         </p>
       )}
 
-      {/* Loading / error */}
-      {loading && <div className="py-12 text-center text-sm text-muted-foreground">Loading reports...</div>}
-      <SnapshotBanner meta={data?.meta} />
-      {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-company-reports" />}
-      {error && <div className="py-6 text-center text-sm text-destructive">{error}</div>}
+      {/* State */}
+      {quotaWait && <QuotaWaitBanner testId="quota-wait" />}
+      {error && (
+        <div className="rounded-md border border-red-200 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">
+          Failed to load company reports: {error}
+        </div>
+      )}
+      {!data && loading && !quotaWait && (
+        <div className="py-12 text-center text-sm text-muted-foreground">Loading primary sales data...</div>
+      )}
 
-      {!loading && data && (
+      {/* Body */}
+      {data && (
         <>
-          {/* Year-on-year headline — the number that gets quoted, stated with
-              its basis. Level label per glossary: primary sale register,
-              invoice-line level (NOT the retailer-level secondary register). */}
-          {headline && (
-            <div className="rounded-lg border border-border bg-card px-4 py-3">
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span className="text-sm font-semibold">
-                  {likeMonthsLabel} FY {data.fy}: {fmtCr(headline.thisFy)}
-                </span>
-                <span className="text-sm text-muted-foreground">
-                  vs {fmtCr(headline.lastFy)} in {likeMonthsLabel} FY {data.priorFy}
-                </span>
-                {headline.growthPct != null && (
-                  <span
-                    className={cn(
-                      "text-sm font-semibold tabular-nums",
-                      headline.growthPct >= 0
-                        ? "text-green-600 dark:text-green-400"
-                        : "text-red-600 dark:text-red-400",
-                    )}
-                  >
-                    {headline.growthPct >= 0 ? "up" : "down"}{" "}
-                    {trunc2(Math.abs(headline.growthPct))}% on like months
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Basis: primary sale register (Prayag → distributors, invoice-line
-                level). All report pages below reconcile to these totals. FY{" "}
-                {data.priorFy} figure comes from the anchor-frozen register.
-                Retailer-level secondary figures are a different measure and are
-                never mixed into this number.
-              </p>
-            </div>
-          )}
-
-          {/* Like-months notice */}
-          <LikeMonthsBadge
-            months={data.likeMonths}
-            priorMonths={data.likeMonthsPrior}
-            fy={data.fy}
-            priorFy={data.priorFy}
-          />
+          <SnapshotBanner meta={data.meta} />
 
           {data.likeMonths.length === 0 && (
             <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-500/5 p-3 text-xs text-amber-800 dark:text-amber-300">
@@ -986,79 +936,470 @@ export default function CompanyReports() {
             </div>
           </div>
 
-          {/* Report description */}
-          <p className="text-xs text-muted-foreground">
-            {TABS.find((t) => t.id === activeReport)?.description}
-          </p>
+          <p className="text-xs text-muted-foreground">{activeTabObj?.description}</p>
 
           {/* Report content */}
-          {activeReport === "1" && (
-            <CompareTable
-              rows={data.r1r2_byState}
-              fyLabel={`FY ${fy}${likeMonthsLabel ? ` (${likeMonthsLabel})` : ""}`}
-              priorFyLabel={`FY ${data.priorFy}${likeMonthsLabel ? ` (${likeMonthsLabel})` : ""}`}
-            />
-          )}
+          {drillPath.length > 0 && <DrillBreadcrumbs reportLabel={activeTabObj?.label || "Report"} drillPath={drillPath} onNavigate={handleNavigate} />}
 
-          {activeReport === "2" && (
-            <CompareTable
-              rows={report2Rows}
-              fyLabel={`FY ${fy}${likeMonthsLabel ? ` (${likeMonthsLabel})` : ""}`}
-              priorFyLabel={`FY ${data.priorFy}${likeMonthsLabel ? ` (${likeMonthsLabel})` : ""}`}
-              showGrowth
-            />
-          )}
+          {activeReport === "1" && (() => {
+            if (drillPath.length === 0) {
+              return <CompareTable rows={data.r1r2_byState} fyLabel={`FY ${fy}${likeMonthsLabel ? ` (${likeMonthsLabel})` : ""}`} priorFyLabel={`FY ${data.priorFy}${likeMonthsLabel ? ` (${likeMonthsLabel})` : ""}`} onRowClick={(val) => data.r1_partyByCustomer?.some(c => c.state === val) ? onDrill(val) : undefined} />;
+            }
+            if (drillPath.length === 1) {
+              const state = drillPath[0];
+              const parentRow = data.r1r2_byState.find(r => r.label === state);
+              const rows = data.r1_partyByCustomer?.filter(r => r.state === state) ?? [];
+              return <DrillTable
+                rows={rows}
+                parentAmount={parentRow?.thisFy}
+                amountKey={r => r.thisFy}
+                columns={[
+                  { header: "Party", render: r => r.customer || "—" },
+                  { header: "District", render: r => <span className="text-muted-foreground">{r.district || "—"}</span> },
+                  { header: `FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.thisFy) },
+                  { header: `FY ${priorFy}`, align: "right", render: r => fmtCr(r.lastFy) },
+                  { header: "Diff", align: "right", render: r => <DiffCell value={r.diff} /> },
+                ]}
+              />;
+            }
+            return null;
+          })()}
 
-          {activeReport === "3" && (
-            <Report3
-              data={data}
-              fy={fy}
-              priorFy={data.priorFy}
-              likeMonths={data.likeMonths}
-            />
-          )}
+          {activeReport === "2" && (() => {
+            if (drillPath.length === 0) {
+              const rows = [...data.r1r2_byState].sort((a, b) => {
+                if (a.growthPct == null && b.growthPct == null) return 0;
+                if (a.growthPct == null) return 1;
+                if (b.growthPct == null) return -1;
+                return b.growthPct - a.growthPct;
+              });
+              return <CompareTable rows={rows} fyLabel={`FY ${fy}${likeMonthsLabel ? ` (${likeMonthsLabel})` : ""}`} priorFyLabel={`FY ${data.priorFy}${likeMonthsLabel ? ` (${likeMonthsLabel})` : ""}`} showGrowth onRowClick={(val) => data.r2_byStateMonth?.some(c => c.state === val) ? onDrill(val) : undefined} />;
+            }
+            if (drillPath.length === 1) {
+              const state = drillPath[0];
+              const parentRow = data.r1r2_byState.find(r => r.label === state);
+              const rows = data.r2_byStateMonth?.filter(r => r.state === state) ?? [];
+              return <DrillTable
+                rows={rows}
+                parentAmount={parentRow?.thisFy}
+                amountKey={r => r.thisFy || 0}
+                columns={[
+                  { header: "Month", render: r => r.month },
+                  { header: `FY ${fy}`, align: "right", isSumTarget: true, render: r => r.thisFy != null ? fmtCr(r.thisFy) : "—" },
+                  { header: `FY ${priorFy}`, align: "right", render: r => r.lastFy != null ? fmtCr(r.lastFy) : "—" },
+                  { header: "Diff", align: "right", render: r => <DiffCell value={(r.thisFy || 0) - (r.lastFy || 0)} /> },
+                  { header: "Growth", align: "right", render: r => <GrowthCell value={r.lastFy ? (((r.thisFy || 0) / r.lastFy) - 1) * 100 : null} /> },
+                ]}
+              />;
+            }
+            return null;
+          })()}
 
-          {activeReport === "4" && (
-            <Report4
-              rows={data.r4_byGroupQty}
-              fy={fy}
-              priorFy={data.priorFy}
-              likeMonths={data.likeMonths}
-            />
-          )}
+          {activeReport === "3" && (() => {
+            if (drillPath.length === 0) {
+              return <CompareTable rows={data.r3_byGroup} fyLabel={`FY ${fy}`} priorFyLabel={`FY ${priorFy}`} onRowClick={(val) => data.r3_bySubcategory?.some(c => c.group === val) ? onDrill(val) : undefined} />;
+            }
+            if (drillPath.length === 1) {
+              const group = drillPath[0];
+              const parentRow = data.r3_byGroup.find(r => r.label === group);
+              const rows = data.r3_bySubcategory?.filter(r => r.group === group) ?? [];
+              return <DrillTable
+                rows={rows}
+                parentAmount={parentRow?.thisFy}
+                amountKey={r => r.thisFy}
+                columns={[
+                  { header: "Sub-category", render: r => r.subcategory },
+                  { header: `FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.thisFy) },
+                  { header: `FY ${priorFy}`, align: "right", render: r => fmtCr(r.lastFy) },
+                  { header: "Diff", align: "right", render: r => <DiffCell value={r.thisFy - r.lastFy} /> },
+                  { header: "Growth", align: "right", render: r => <GrowthCell value={r.lastFy ? ((r.thisFy / r.lastFy) - 1) * 100 : null} /> },
+                ]}
+              />;
+            }
+            return null;
+          })()}
 
-          {activeReport === "5" && (
-            <Report5
-              rows={data.r5_byCustomer}
-              collectionNote={data.r5_collectionNote}
-              fy={fy}
-              priorFy={data.priorFy}
-            />
-          )}
+          {activeReport === "3a" && (() => {
+            if (drillPath.length === 0) {
+              const rowsMap = new Map<string, { state: string, thisFy: number, lastFy: number }>();
+              for (const r of data.r3a_byStateGroup) {
+                const ex = rowsMap.get(r.state) ?? { state: r.state, thisFy: 0, lastFy: 0 };
+                ex.thisFy += r.thisFy;
+                ex.lastFy += r.lastFy;
+                rowsMap.set(r.state, ex);
+              }
+              const rows = Array.from(rowsMap.values()).sort((a,b) => b.thisFy - a.thisFy);
+              return <DrillTable
+                rows={rows}
+                onRowClick={r => data.r3a_byStateGroup.some(c => c.state === r.state && c.group) ? onDrill(r.state) : undefined}
+                amountKey={r => r.thisFy}
+                columns={[
+                  { header: "State", render: r => r.state },
+                  { header: `FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.thisFy) },
+                  { header: `FY ${priorFy}`, align: "right", render: r => fmtCr(r.lastFy) },
+                  { header: "Diff", align: "right", render: r => <DiffCell value={r.thisFy - r.lastFy} /> },
+                ]}
+              />;
+            }
+            if (drillPath.length === 1) {
+              const state = drillPath[0];
+              const parentAmount = data.r3a_byStateGroup.filter(r => r.state === state).reduce((s, r) => s + r.thisFy, 0);
+              const rowsMap = new Map<string, { group: string, thisFy: number, lastFy: number }>();
+              for (const r of data.r3a_byStateGroup) {
+                if (r.state === state) {
+                  const ex = rowsMap.get(r.group) ?? { group: r.group, thisFy: 0, lastFy: 0 };
+                  ex.thisFy += r.thisFy;
+                  ex.lastFy += r.lastFy;
+                  rowsMap.set(r.group, ex);
+                }
+              }
+              const rows = Array.from(rowsMap.values()).sort((a,b) => b.thisFy - a.thisFy);
+              return <DrillTable
+                rows={rows}
+                onRowClick={r => data.r3a_byStateGroup.some(c => c.state === state && c.group === r.group && c.subcategory) ? onDrill(r.group) : undefined}
+                parentAmount={parentAmount}
+                amountKey={r => r.thisFy}
+                columns={[
+                  { header: "Master Group", render: r => r.group },
+                  { header: `FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.thisFy) },
+                  { header: `FY ${priorFy}`, align: "right", render: r => fmtCr(r.lastFy) },
+                  { header: "Diff", align: "right", render: r => <DiffCell value={r.thisFy - r.lastFy} /> },
+                ]}
+              />;
+            }
+            if (drillPath.length === 2) {
+              const state = drillPath[0];
+              const group = drillPath[1];
+              const parentAmount = data.r3a_byStateGroup.filter(r => r.state === state && r.group === group).reduce((s, r) => s + r.thisFy, 0);
+              const rows = data.r3a_byStateGroup.filter(r => r.state === state && r.group === group).sort((a,b) => b.thisFy - a.thisFy);
+              return <DrillTable
+                rows={rows}
+                parentAmount={parentAmount}
+                amountKey={r => r.thisFy}
+                columns={[
+                  { header: "Sub-category", render: r => r.subcategory },
+                  { header: `FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.thisFy) },
+                  { header: `FY ${priorFy}`, align: "right", render: r => fmtCr(r.lastFy) },
+                  { header: "Diff", align: "right", render: r => <DiffCell value={r.thisFy - r.lastFy} /> },
+                ]}
+              />;
+            }
+            return null;
+          })()}
 
-          {activeReport === "6" && (
-            <GroupFullTable
-              rows={data.r6_byGroupFull}
-              fy={fy}
-              priorFy={data.priorFy}
-            />
-          )}
+          {activeReport === "3b" && (() => {
+            if (drillPath.length === 0) {
+              const rowsMap = new Map<string, { state: string, thisFy: number, lastFy: number }>();
+              for (const r of data.r3b_byPartyGroup) {
+                const ex = rowsMap.get(r.state) ?? { state: r.state, thisFy: 0, lastFy: 0 };
+                ex.thisFy += r.thisFy;
+                ex.lastFy += r.lastFy;
+                rowsMap.set(r.state, ex);
+              }
+              const rows = Array.from(rowsMap.values()).sort((a,b) => b.thisFy - a.thisFy);
+              return <DrillTable
+                rows={rows}
+                onRowClick={r => data.r3b_byPartyGroup.some(c => c.state === r.state && c.customer) ? onDrill(r.state) : undefined}
+                amountKey={r => r.thisFy}
+                columns={[
+                  { header: "State", render: r => r.state },
+                  { header: `FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.thisFy) },
+                  { header: `FY ${priorFy}`, align: "right", render: r => fmtCr(r.lastFy) },
+                  { header: "Diff", align: "right", render: r => <DiffCell value={r.thisFy - r.lastFy} /> },
+                ]}
+              />;
+            }
+            if (drillPath.length === 1) {
+              const state = drillPath[0];
+              const parentAmount = data.r3b_byPartyGroup.filter(r => r.state === state).reduce((s, r) => s + r.thisFy, 0);
+              const rowsMap = new Map<string, { customer: string, thisFy: number, lastFy: number }>();
+              for (const r of data.r3b_byPartyGroup) {
+                if (r.state === state) {
+                  const ex = rowsMap.get(r.customer) ?? { customer: r.customer, thisFy: 0, lastFy: 0 };
+                  ex.thisFy += r.thisFy;
+                  ex.lastFy += r.lastFy;
+                  rowsMap.set(r.customer, ex);
+                }
+              }
+              const rows = Array.from(rowsMap.values()).sort((a,b) => b.thisFy - a.thisFy);
+              return <DrillTable
+                rows={rows}
+                onRowClick={r => data.r3b_byPartyGroup.some(c => c.state === state && c.customer === r.customer && c.group) ? onDrill(r.customer) : undefined}
+                parentAmount={parentAmount}
+                amountKey={r => r.thisFy}
+                columns={[
+                  { header: "Party", render: r => r.customer },
+                  { header: `FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.thisFy) },
+                  { header: `FY ${priorFy}`, align: "right", render: r => fmtCr(r.lastFy) },
+                  { header: "Diff", align: "right", render: r => <DiffCell value={r.thisFy - r.lastFy} /> },
+                ]}
+              />;
+            }
+            if (drillPath.length === 2) {
+              const state = drillPath[0];
+              const customer = drillPath[1];
+              const parentAmount = data.r3b_byPartyGroup.filter(r => r.state === state && r.customer === customer).reduce((s, r) => s + r.thisFy, 0);
+              const rowsMap = new Map<string, { group: string, thisFy: number, lastFy: number }>();
+              for (const r of data.r3b_byPartyGroup) {
+                if (r.state === state && r.customer === customer) {
+                  const ex = rowsMap.get(r.group) ?? { group: r.group, thisFy: 0, lastFy: 0 };
+                  ex.thisFy += r.thisFy;
+                  ex.lastFy += r.lastFy;
+                  rowsMap.set(r.group, ex);
+                }
+              }
+              const rows = Array.from(rowsMap.values()).sort((a,b) => b.thisFy - a.thisFy);
+              return <DrillTable
+                rows={rows}
+                parentAmount={parentAmount}
+                amountKey={r => r.thisFy}
+                columns={[
+                  { header: "Master Group", render: r => r.group },
+                  { header: `FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.thisFy) },
+                  { header: `FY ${priorFy}`, align: "right", render: r => fmtCr(r.lastFy) },
+                  { header: "Diff", align: "right", render: r => <DiffCell value={r.thisFy - r.lastFy} /> },
+                ]}
+              />;
+            }
+            return null;
+          })()}
 
-          {activeReport === "7" && (
-            <Report7 asOf={data.r7_asOf} fy={fy} />
-          )}
+          {activeReport === "4" && (() => {
+            if (drillPath.length === 0) {
+              const rowsMap = new Map<string, { state: string, amountThisFy: number, amountLastFy: number }>();
+              for (const r of data.r4_byGroupQty) {
+                const ex = rowsMap.get(r.state) ?? { state: r.state, amountThisFy: 0, amountLastFy: 0 };
+                ex.amountThisFy += r.amountThisFy;
+                ex.amountLastFy += r.amountLastFy;
+                rowsMap.set(r.state, ex);
+              }
+              const rows = Array.from(rowsMap.values()).sort((a,b) => b.amountThisFy - a.amountThisFy);
+              return (
+                <div className="space-y-4">
+                  <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-500/5 p-2.5 text-xs text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    <span>
+                      <strong>Rule 2 — Litre rule:</strong> quantity is shown per group only. Water tanks are in litres; everything else is in pieces.
+                      Never sum quantity across groups — the total would be meaningless.
+                    </span>
+                  </div>
+                  <DrillTable
+                    rows={rows}
+                    onRowClick={r => data.r4_byGroupQty.some(c => c.state === r.state && c.customer) ? onDrill(r.state) : undefined}
+                    amountKey={r => r.amountThisFy}
+                    columns={[
+                      { header: "State", render: r => r.state },
+                      { header: `Amount FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.amountThisFy) },
+                      { header: `Amount FY ${priorFy}`, align: "right", render: r => fmtCr(r.amountLastFy) },
+                    ]}
+                  />
+                </div>
+              );
+            }
+            if (drillPath.length === 1) {
+              const state = drillPath[0];
+              const parentAmount = data.r4_byGroupQty.filter(r => r.state === state).reduce((s, r) => s + r.amountThisFy, 0);
+              const rowsMap = new Map<string, { customer: string, amountThisFy: number, amountLastFy: number }>();
+              for (const r of data.r4_byGroupQty) {
+                if (r.state === state) {
+                  const ex = rowsMap.get(r.customer) ?? { customer: r.customer, amountThisFy: 0, amountLastFy: 0 };
+                  ex.amountThisFy += r.amountThisFy;
+                  ex.amountLastFy += r.amountLastFy;
+                  rowsMap.set(r.customer, ex);
+                }
+              }
+              const rows = Array.from(rowsMap.values()).sort((a,b) => b.amountThisFy - a.amountThisFy);
+              return <DrillTable
+                rows={rows}
+                onRowClick={r => data.r4_byGroupQty.some(c => c.state === state && c.customer === r.customer && c.group) ? onDrill(r.customer) : undefined}
+                parentAmount={parentAmount}
+                amountKey={r => r.amountThisFy}
+                columns={[
+                  { header: "Party", render: r => r.customer },
+                  { header: `Amount FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.amountThisFy) },
+                  { header: `Amount FY ${priorFy}`, align: "right", render: r => fmtCr(r.amountLastFy) },
+                ]}
+              />;
+            }
+            if (drillPath.length === 2) {
+              const state = drillPath[0];
+              const customer = drillPath[1];
+              const parentAmount = data.r4_byGroupQty.filter(r => r.state === state && r.customer === customer).reduce((s, r) => s + r.amountThisFy, 0);
+              const rowsMap = new Map<string, { group: string, amountThisFy: number, amountLastFy: number, qtyThisFy: number, qtyLastFy: number, unit: string }>();
+              for (const r of data.r4_byGroupQty) {
+                if (r.state === state && r.customer === customer) {
+                  const ex = rowsMap.get(r.group) ?? { group: r.group, amountThisFy: 0, amountLastFy: 0, qtyThisFy: 0, qtyLastFy: 0, unit: r.unit };
+                  ex.amountThisFy += r.amountThisFy;
+                  ex.amountLastFy += r.amountLastFy;
+                  ex.qtyThisFy += r.qtyThisFy;
+                  ex.qtyLastFy += r.qtyLastFy;
+                  if (!ex.unit) ex.unit = r.unit;
+                  rowsMap.set(r.group, ex);
+                }
+              }
+              const rows = Array.from(rowsMap.values()).sort((a,b) => b.amountThisFy - a.amountThisFy);
+              return <DrillTable
+                rows={rows}
+                onRowClick={r => data.r4_byGroupQty.some(c => c.state === state && c.customer === customer && c.group === r.group) ? onDrill(r.group) : undefined}
+                parentAmount={parentAmount}
+                amountKey={r => r.amountThisFy}
+                columns={[
+                  { header: "Group", render: r => r.group },
+                  { header: `Qty FY ${fy}`, align: "right", render: r => r.qtyThisFy > 0 ? fmtQty(r.qtyThisFy, r.unit) : "—" },
+                  { header: `Qty FY ${priorFy}`, align: "right", render: r => r.qtyLastFy > 0 ? fmtQty(r.qtyLastFy, r.unit) : "—" },
+                  { header: `Amount FY ${fy}`, align: "right", isSumTarget: true, render: r => r.amountThisFy > 0 ? fmtCr(r.amountThisFy) : "—" },
+                  { header: `Amount FY ${priorFy}`, align: "right", render: r => r.amountLastFy > 0 ? fmtCr(r.amountLastFy) : "—" },
+                ]}
+              />;
+            }
+            if (drillPath.length === 3) {
+              return <R4ItemDrill fy={fy} priorFy={priorFy} state={drillPath[0]} customer={drillPath[1]} group={drillPath[2]} months={monthsParam} entityFilter={entityFilter} />;
+            }
+            return null;
+          })()}
 
-          {/* Verification anchors */}
-          {fy === "2026-27" && data.likeMonths.length > 0 && (
-            <div className="rounded-md bg-muted/30 border border-border p-3 space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Verification anchors — FY 2026-27 like months</p>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs text-muted-foreground">
-                <span>Report 1: Sunil Patel (Gujarat) = ₹79,78,394.92</span>
-                <span>Report 3 PTMT like months: check per-party filter</span>
-                <span>Report 4 Universal Pipe PTMT: 5,006 → 7,107 pcs (reference)</span>
-              </div>
-            </div>
-          )}
+          {activeReport === "5" && (() => {
+            if (drillPath.length === 0) {
+              return (
+                <div className="space-y-4">
+                  <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-500/5 p-2.5 text-xs text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    <span><strong>Collection column:</strong> {data.r5_collectionNote}</span>
+                  </div>
+                  <DrillTable
+                    rows={data.r5_byCustomer}
+                    onRowClick={r => data.r3b_byPartyGroup.some(c => c.customer === r.customer && c.group) ? onDrill(r.customer) : undefined}
+                    amountKey={r => r.thisFy}
+                    columns={[
+                      { header: "Customer", render: r => r.customer || "—" },
+                      { header: "State", render: r => <span className="text-muted-foreground">{r.state}</span> },
+                      { header: "State Head", render: r => <span className="text-muted-foreground">{r.head}</span> },
+                      { header: `Sale FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.thisFy) },
+                      { header: `Sale FY ${priorFy}`, align: "right", render: r => fmtCr(r.lastFy) },
+                      { header: "Diff", align: "right", render: r => <DiffCell value={r.diff} /> },
+                      { header: "Collection", align: "right", render: r => <span className="italic text-[10px] text-muted-foreground">—</span> },
+                    ]}
+                  />
+                </div>
+              );
+            }
+            if (drillPath.length === 1) {
+              const customer = drillPath[0];
+              const parentAmount = data.r5_byCustomer.find(r => r.customer === customer)?.thisFy;
+              const rowsMap = new Map<string, { group: string, thisFy: number, lastFy: number }>();
+              for (const r of data.r3b_byPartyGroup) {
+                if (r.customer === customer) {
+                  const ex = rowsMap.get(r.group) ?? { group: r.group, thisFy: 0, lastFy: 0 };
+                  ex.thisFy += r.thisFy;
+                  ex.lastFy += r.lastFy;
+                  rowsMap.set(r.group, ex);
+                }
+              }
+              const rows = Array.from(rowsMap.values()).sort((a,b) => b.thisFy - a.thisFy);
+              return <DrillTable
+                rows={rows}
+                parentAmount={parentAmount}
+                amountKey={r => r.thisFy}
+                columns={[
+                  { header: "Group", render: r => r.group },
+                  { header: `FY ${fy}`, align: "right", isSumTarget: true, render: r => fmtCr(r.thisFy) },
+                  { header: `FY ${priorFy}`, align: "right", render: r => fmtCr(r.lastFy) },
+                  { header: "Diff", align: "right", render: r => <DiffCell value={r.thisFy - r.lastFy} /> },
+                ]}
+              />;
+            }
+            return null;
+          })()}
+
+          {activeReport === "6" && (() => {
+            if (drillPath.length === 0) {
+              return <CompareTable rows={data.r6_byGroupFull.map(r => ({ label: r.group, thisFy: r.thisFyLike, lastFy: r.lastFyLike, diff: r.thisFyLike - r.lastFyLike, growthPct: r.growthLike, sharePct: 0 }))} fyLabel={`${fy} (like months)`} priorFyLabel={`${data.priorFy} (same months)`} onRowClick={(val) => data.r6_bySubcategoryFull?.some(c => c.group === val) ? onDrill(val) : undefined} />;
+            }
+            if (drillPath.length === 1) {
+              const group = drillPath[0];
+              const parentAmount = data.r6_byGroupFull.find(r => r.group === group)?.thisFyLike;
+              const rows = data.r6_bySubcategoryFull?.filter(r => r.group === group) ?? [];
+              return <DrillTable
+                rows={rows}
+                parentAmount={parentAmount}
+                amountKey={r => r.thisFyLike}
+                columns={[
+                  { header: "Sub-category", render: r => r.subcategory },
+                  { header: `${fy} (like months)`, align: "right", isSumTarget: true, render: r => fmtCr(r.thisFyLike) },
+                  { header: `${data.priorFy} (same months)`, align: "right", render: r => fmtCr(r.lastFyLike) },
+                  { header: `${data.priorFy} (full year)`, align: "right", render: r => <span className="text-muted-foreground">{fmtCr(r.lastFyFull)}</span> },
+                  { header: "Growth", align: "right", render: r => <GrowthCell value={r.growthLike} /> },
+                ]}
+              />;
+            }
+            return null;
+          })()}
+
+          {activeReport === "7" && (() => {
+            if (drillPath.length === 0) {
+              const isMonthOnlyFy = fy === "2023-24";
+              return (
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3">
+                    <div className="text-xs text-muted-foreground">As-of date: <strong className="text-foreground">{data.r7_asOf.date}</strong></div>
+                    <div className="text-xs text-muted-foreground">{data.r7_asOf.note}</div>
+                  </div>
+                  {isMonthOnlyFy && (
+                    <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-300">
+                      FY2023-24 is month-only: the frozen source has 137,619 rows but no
+                      invoice date or invoice identifier. The Invoice Count below is a
+                      line-based fallback, not a distinct invoice count; daily and weekly
+                      analysis is unavailable.
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-3">
+                    {[
+                      { label: "Total Sale", value: fmtCr(data.r7_asOf.total) },
+                      { label: isMonthOnlyFy ? "Invoice Count*" : "Invoice Count", value: data.r7_asOf.invoiceCount.toLocaleString("en-IN") },
+                      { label: "Customers", value: data.r7_asOf.customerCount.toLocaleString("en-IN") },
+                    ].map((tile) => (
+                      <div key={tile.label} className="flex-1 min-w-[130px] rounded-lg border border-border bg-card p-3 shadow-sm">
+                        <p className="text-xs text-muted-foreground">{tile.label}</p>
+                        <p className="text-xl font-semibold font-mono mt-0.5">{tile.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">By Group</p>
+                      <DrillTable
+                        rows={data.r7_asOf.byGroup}
+                        onRowClick={r => onDrill(`group:${r.group}`)}
+                        amountKey={r => r.amount}
+                        columns={[
+                          { header: "Group", render: r => r.group },
+                          { header: "Amount", align: "right", isSumTarget: true, render: r => fmtCr(r.amount) }
+                        ]}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">By State</p>
+                      <DrillTable
+                        rows={data.r7_asOf.byState}
+                        onRowClick={r => onDrill(`state:${r.state}`)}
+                        amountKey={r => r.amount}
+                        columns={[
+                          { header: "State", render: r => r.state },
+                          { header: "Amount", align: "right", isSumTarget: true, render: r => fmtCr(r.amount) }
+                        ]}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            if (drillPath.length === 1) {
+              const isGroup = drillPath[0].startsWith("group:");
+              const val = drillPath[0].slice(6);
+              return <R7PartyDrill fy={fy} asOf={data.r7_asOf.date} type={isGroup ? "group" : "state"} value={val} entityFilter={entityFilter} months={monthsParam} />;
+            }
+            return null;
+          })()}
         </>
       )}
     </div>

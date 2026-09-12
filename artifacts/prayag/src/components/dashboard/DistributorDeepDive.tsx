@@ -85,6 +85,9 @@ type DistributorBrandNet = {
 type WhitespaceHint = {
   type: "range_depth" | "lost_brand" | "peer_whitespace";
   brand: string;
+  masterCategory: string | null;
+  sourceSegment: string;
+  /** Legacy API alias; now carries the canonical master label. */
   broadSegment: string;
   evidence: string;
   peerNames?: string[];
@@ -94,13 +97,20 @@ type WhitespaceHint = {
 type DistributorSkuSpread = {
   isLiveYear: boolean;
   liveYearNote?: string;
+  totalMasterCategories: number;
+  /** Legacy API alias. */
   totalBroadSegments: number;
   recentFy?: string;
   totalNet?: number;
   distinctBrands?: number;
+  masterCategoriesCovered?: number;
   broadSegmentsCovered?: number;
   netByBrand?: DistributorBrandNet[];
+  netByMasterCategory?: DistributorBrandNet[];
   netByBroadSegment?: DistributorBrandNet[];
+  netBySourceSegment?: Array<DistributorBrandNet & { masterCategory: string | null }>;
+  unmappedNet?: number;
+  unmappedSourceSegments?: string[];
   crossSellDepth?: number;
   concentrationHhi?: number;
   matchedRetailers?: number;
@@ -851,7 +861,8 @@ function SkuSpreadPanel({
   }
 
   const brands = spread.netByBrand ?? [];
-  const broadSegs = spread.netByBroadSegment ?? [];
+  const masterSegs = spread.netByMasterCategory ?? spread.netByBroadSegment ?? [];
+  const sourceSegs = spread.netBySourceSegment ?? [];
   const whitespace = spread.whitespace ?? [];
   const totalNet = spread.totalNet ?? 0;
   const maxBrandNet = brands[0]?.net ?? 1;
@@ -877,11 +888,11 @@ function SkuSpreadPanel({
         {/* Coverage tiles */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-md border border-border px-3 py-2">
-            <div className="text-xs text-muted-foreground">Broad segments</div>
+            <div className="text-xs text-muted-foreground">Business categories</div>
             <div className="font-bold text-lg tabular-nums">
-              {spread.broadSegmentsCovered ?? 0}
+              {spread.masterCategoriesCovered ?? spread.broadSegmentsCovered ?? 0}
               <span className="text-sm font-normal text-muted-foreground">
-                {" "}of {spread.totalBroadSegments}
+                {" "}of {spread.totalMasterCategories ?? spread.totalBroadSegments ?? 6}
               </span>
             </div>
           </div>
@@ -909,14 +920,14 @@ function SkuSpreadPanel({
           </div>
         </div>
 
-        {/* Broad segment bars */}
-        {broadSegs.length > 0 && (
+        {/* Canonical six-master bars */}
+        {masterSegs.length > 0 && (
           <div>
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-              NET by broad segment — {spread.recentFy}
+              NET by business category — {spread.recentFy}
             </div>
             <div className="space-y-1.5">
-              {broadSegs.map((seg) => (
+              {masterSegs.map((seg) => (
                 <div key={seg.segment} className="flex items-center gap-2">
                   <div className="w-32 shrink-0 text-xs truncate text-right text-muted-foreground">
                     {seg.segment}
@@ -934,6 +945,39 @@ function SkuSpreadPanel({
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Source-segment evidence remains a drill/detail view, not a second
+            top-level taxonomy. */}
+        {sourceSegs.length > 0 && (
+          <details className="border-t border-border/60 pt-3">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Source segment detail
+            </summary>
+            <div className="mt-2 space-y-1">
+              {sourceSegs.map((seg) => (
+                <div key={seg.segment} className="flex items-center gap-2 text-xs">
+                  <span className="w-40 shrink-0 truncate text-muted-foreground">{seg.segment}</span>
+                  <span className="text-muted-foreground">→</span>
+                  <span className={seg.masterCategory ? "font-medium" : "text-amber-700 dark:text-amber-300"}>
+                    {seg.masterCategory ?? "Unmapped"}
+                  </span>
+                  <span className="ml-auto tabular-nums">{formatCompact(seg.net)}</span>
+                  <span className="w-12 text-right text-muted-foreground">{trunc2(seg.pct)}%</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+        {(spread.unmappedNet ?? 0) > 0 && (
+          <div className="rounded-md border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+            {formatCompact(spread.unmappedNet ?? 0)} remains unmapped because its source
+            segment has no reviewed canonical-registry assignment.
+            {spread.unmappedSourceSegments?.length
+              ? ` Source: ${spread.unmappedSourceSegments.join(", ")}.`
+              : ""}
+            {" "}Expand “Source segment detail” to reconcile the amount.
           </div>
         )}
 
@@ -990,7 +1034,9 @@ function SkuSpreadPanel({
                       {WHITESPACE_TYPE_LABEL[h.type]}
                     </span>
                     <span className="font-medium">{h.brand}</span>
-                    <span className="text-[10px] opacity-70 shrink-0">{h.broadSegment}</span>
+                    <span className="text-[10px] opacity-70 shrink-0">
+                      {h.masterCategory ?? "Unmapped"} · source: {h.sourceSegment}
+                    </span>
                   </div>
                   <div className="mt-0.5 opacity-80">{h.evidence}</div>
                 </div>

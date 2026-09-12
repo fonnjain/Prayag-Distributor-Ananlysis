@@ -18,11 +18,16 @@ import { and, eq, sql } from "drizzle-orm";
 import { db, saleLines } from "@workspace/db";
 import {
   buildCompanyReports,
+  applyMonthFilter,
+  asOfScopedMonths,
+  computeLikeMonths,
   hasActiveFilter,
   normStateExpr,
   type CompanyReportsFilter,
   type CompanyReportsPayload,
 } from "../lib/companyReports.js";
+import { priorFy as getPriorFy } from "../lib/mgmt/names.js";
+import { entityCondsAliased, normStateExprAliased } from "../lib/saleLineFilter.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
@@ -39,31 +44,256 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_LABEL_RE = /^[A-Z][a-z]{2}-\d{2}$/;
 
 export function parseJsonArray(raw: unknown): string[] | undefined {
-  if (typeof raw !== "string" || raw === "") return undefined;
-  try {
-    const v = JSON.parse(raw);
-    if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
-      return v.length > 0 ? v.slice(0, 500) : undefined;
-    }
-  } catch { /* fall through */ }
-  return undefined;
+  const tokens = Array.isArray(raw) ? raw : [raw];
+  const values: string[] = [];
+  for (const token of tokens) {
+    if (typeof token !== "string" || token === "") continue;
+    try {
+      const decoded: unknown = JSON.parse(token);
+      if (Array.isArray(decoded)) {
+        values.push(...decoded.filter((value): value is string => typeof value === "string"));
+        continue;
+      }
+    } catch { /* accept repeated plain query values below */ }
+    values.push(token);
+  }
+  const unique = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+  return unique.length > 0 ? unique.slice(0, 500) : undefined;
 }
 
-/** Parse + validate filter params shared by the data and export routes.
- *  Returns null (after responding 400) on invalid input. */
-function parseFilter(query: Record<string, unknown>, res: import("express").Response): CompanyReportsFilter | undefined | null {
-  const months = typeof query.months === "string" && query.months !== ""
-    ? query.months.split(",").map((m) => m.trim()).filter(Boolean)
-    : undefined;
-  if (months && (months.length > 12 || months.some((m) => !MONTH_LABEL_RE.test(m)))) {
+function parseMonths(raw: unknown): string[] | undefined {
+  // Do not use parseJsonArray here: its general-purpose 500-value cap and
+  // deduplication would let an invalid or 13th month disappear before
+  // validation. Month validation must see every submitted token first.
+  const tokens = Array.isArray(raw) ? raw : [raw];
+  const values: string[] = [];
+  for (const token of tokens) {
+    if (typeof token !== "string" || token === "") continue;
+    try {
+      const decoded: unknown = JSON.parse(token);
+      if (Array.isArray(decoded)) {
+        values.push(...decoded.filter((value): value is string => typeof value === "string"));
+        continue;
+      }
+    } catch { /* accept repeated plain query values below */ }
+    values.push(token);
+  }
+  const months = values.flatMap((value) => value.split(",").map((month) => month.trim()).filter(Boolean));
+  return months.length > 0 ? months : undefined;
+}
+
+function canonicalFilter(filter: CompanyReportsFilter | undefined): CompanyReportsFilter | undefined {
+  if (!filter) return undefined;
+  const unique = (values?: string[]) => values?.length ? [...new Set(values.map((value) => value.trim()).filter(Boolean))] : undefined;
+  const normalized = {
+    months: unique(filter.months),
+    heads: unique(filter.heads),
+    states: unique(filter.states),
+    customers: unique(filter.customers),
+  };
+  return hasActiveFilter(normalized) ? normalized : undefined;
+}
+
+export function parseCompanyReportsFilter(query: Record<string, unknown>): {
+  filter: CompanyReportsFilter | undefined;
+  invalidMonths: boolean;
+} {
+  const months = parseMonths(query.months);
+  return {
+    filter: canonicalFilter({
+      months,
+      heads: parseJsonArray(query.heads),
+      states: parseJsonArray(query.states),
+      customers: parseJsonArray(query.customers),
+    }),
+    invalidMonths: Boolean(months && (months.length > 12 || months.some((m) => !MONTH_LABEL_RE.test(m)))),
+  };
+}
+
+/** Parse + validate filter params shared by the data and export routes. */
+function parseFilter(
+  query: Record<string, unknown>,
+  res: import("express").Response,
+): CompanyReportsFilter | undefined | null {
+  const parsed = parseCompanyReportsFilter(query);
+  if (parsed.invalidMonths) {
     res.status(400).json({ error: "Invalid months — expected comma-separated labels like Apr-26" });
     return null;
   }
-  const heads = parseJsonArray(query.heads);
-  const states = parseJsonArray(query.states);
-  const customers = parseJsonArray(query.customers);
-  const filter: CompanyReportsFilter = { months, heads, states, customers };
-  return hasActiveFilter(filter) ? filter : undefined;
+  return parsed.filter;
+}
+
+type DrillPeriod = {
+  currentMonths: string[];
+  priorMonths: string[];
+  mode: "complete-like-months" | "selected-complete-like-months";
+};
+
+async function resolveDrillPeriod(fy: string, requestedMonths?: string[]): Promise<DrillPeriod> {
+  const like = await computeLikeMonths(fy);
+  const selected = applyMonthFilter(like.current, like.prior, requestedMonths?.length ? { months: requestedMonths } : undefined);
+  return {
+    currentMonths: selected.likeMonths,
+    priorMonths: selected.likeMonthsPrior,
+    mode: requestedMonths?.length ? "selected-complete-like-months" : "complete-like-months",
+  };
+}
+
+export const DRILL_ROW_LIMIT = 5_000;
+
+export function report4Reconciliation(
+  totalRows: number,
+  parentAmount: number,
+  childAmount: number,
+): {
+  parentAmount: number;
+  childAmount: number;
+  delta: number;
+  unattributed: number | null;
+  complete: boolean;
+} {
+  const complete = totalRows <= DRILL_ROW_LIMIT;
+  const delta = childAmount - parentAmount;
+  return {
+    parentAmount,
+    childAmount,
+    delta,
+    unattributed: complete ? delta : null,
+    complete,
+  };
+}
+
+function scopedText(query: Record<string, unknown>, key: string): string | undefined {
+  const value = query[key];
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : undefined;
+}
+
+export function registryJoinForDrill() {
+  // Join the bounded period/entity rowset to effective registry candidates and
+  // discard lower-priority candidates with NOT EXISTS. This avoids a
+  // per-sale-row LATERAL lookup; PostgreSQL can plan the candidate join as a
+  // hash/index join and only evaluates the precedence check for matches.
+  return sql`
+    LEFT JOIN canonical_item_category_registry r
+      ON UPPER(BTRIM(r.item_code)) = UPPER(BTRIM(sl.code))
+      AND (r.effective_from IS NULL OR r.effective_from <= COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')))
+      AND (r.effective_to IS NULL OR COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')) < r.effective_to)
+      AND NOT EXISTS (
+        SELECT 1
+        FROM canonical_item_category_registry r2
+        WHERE UPPER(BTRIM(r2.item_code)) = UPPER(BTRIM(r.item_code))
+          AND (r2.effective_from IS NULL OR r2.effective_from <= COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')))
+          AND (r2.effective_to IS NULL OR COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')) < r2.effective_to)
+          AND (
+            (r2.effective_from IS NOT NULL AND r.effective_from IS NULL)
+            OR (r2.effective_from > r.effective_from)
+            OR (r2.effective_from IS NOT DISTINCT FROM r.effective_from AND r2.id > r.id)
+          )
+      )
+  `;
+}
+
+function drillPeriodClause(fy: string, priorFy: string, period: DrillPeriod) {
+  if (!period.currentMonths.length) return sql`AND false`;
+  return sql`AND ((sl.fy = ${fy} AND sl.month_label IN (${sql.join(period.currentMonths.map((month) => sql`${month}`), sql`, `)}))
+    OR (sl.fy = ${priorFy} AND sl.month_label IN (${sql.join(period.priorMonths.map((month) => sql`${month}`), sql`, `)})))`;
+}
+
+/**
+ * Report 4's expensive level is item code. It is deliberately a single
+ * grouped query (rather than one request per group/customer), bounded before
+ * JSON serialization, with parent/child reconciliation values attached.
+ */
+async function report4Items(
+  fy: string,
+  filter: CompanyReportsFilter | undefined,
+  group: string | undefined,
+  period: DrillPeriod,
+) {
+  const priorFy = getPriorFy(fy);
+  const groupClause = group ? sql`AND COALESCE(r.master_category, 'Unmapped') = ${group}` : sql``;
+  const result = await db.execute<{
+    code: string; itemName: string | null; group: string; subcategory: string;
+    amountThisFy: number | string; amountLastFy: number | string;
+    qtyThisFy: number | string; qtyLastFy: number | string;
+    totalRows: number | string; totalAmount: number | string;
+  }>(sql`
+    SELECT sl.code, MAX(im.item_name) AS "itemName",
+      COALESCE(r.master_category, 'Unmapped') AS "group",
+      COALESCE(r.canonical_category, 'Unmapped') AS subcategory,
+      COALESCE(SUM(sl.amount::numeric) FILTER (WHERE sl.fy = ${fy}), 0)::float8 AS "amountThisFy",
+      COALESCE(SUM(sl.amount::numeric) FILTER (WHERE sl.fy = ${priorFy}), 0)::float8 AS "amountLastFy",
+      COALESCE(SUM(CASE WHEN sl.fy = ${fy} AND sl.group_raw = 'WATER TANK' THEN sl.qty_ltr::numeric
+        WHEN sl.fy = ${fy} THEN sl.qty::numeric ELSE 0 END), 0)::float8 AS "qtyThisFy",
+      COALESCE(SUM(CASE WHEN sl.fy = ${priorFy} AND sl.group_raw = 'WATER TANK' THEN sl.qty_ltr::numeric
+        WHEN sl.fy = ${priorFy} THEN sl.qty::numeric ELSE 0 END), 0)::float8 AS "qtyLastFy",
+      COUNT(*) OVER ()::int AS "totalRows",
+      SUM(SUM(sl.amount::numeric) FILTER (WHERE sl.fy = ${fy})) OVER ()::float8 AS "totalAmount"
+    FROM sale_line_current sl
+    LEFT JOIN item_master im ON im.code = sl.code
+    ${registryJoinForDrill()}
+      WHERE 1=1 ${drillPeriodClause(fy, priorFy, period)}
+      ${entityCondsAliased(filter, "sl")} ${groupClause}
+    GROUP BY sl.code, r.master_category, r.canonical_category
+    ORDER BY "amountThisFy" DESC, sl.code
+    LIMIT ${DRILL_ROW_LIMIT}
+  `);
+  const rows = result.rows.map((row) => ({
+    code: row.code, itemName: row.itemName ?? "", group: row.group,
+    subcategory: row.subcategory,
+    qtyThisFy: Number(row.qtyThisFy), qtyLastFy: Number(row.qtyLastFy),
+    amountThisFy: Number(row.amountThisFy), amountLastFy: Number(row.amountLastFy),
+  }));
+  const totalRows = Number(result.rows[0]?.totalRows ?? rows.length);
+  const childAmount = rows.reduce((sum, row) => sum + row.amountThisFy, 0);
+  const parentAmount = Number(result.rows[0]?.totalAmount ?? childAmount);
+  return {
+    rows, limit: DRILL_ROW_LIMIT, totalRows, truncated: totalRows > DRILL_ROW_LIMIT,
+    reconciliation: report4Reconciliation(totalRows, parentAmount, childAmount),
+    source: "sale_line_current + canonical_item_category_registry + item_master; taxable amount, registry-effective item assignment",
+  };
+}
+
+async function report7Parties(
+  fy: string,
+  asOf: string,
+  filter: CompanyReportsFilter | undefined,
+  group: string | undefined,
+  state: string | undefined,
+  period: DrillPeriod,
+) {
+  const groupClause = group ? sql`AND COALESCE(r.master_category, 'Unmapped') = ${group}` : sql``;
+  const stateClause = state ? sql`AND ${normStateExprAliased("sl")} = ${state}` : sql``;
+  const selectedMonths = period.currentMonths.length
+    ? sql`AND sl.month_label IN (${sql.join(period.currentMonths.map((value) => sql`${value}`), sql`, `)})`
+    : sql`AND false`;
+  const result = await db.execute<{
+    customer: string; state: string; group: string; amount: number | string;
+    totalRows: number | string; totalAmount: number | string;
+  }>(sql`
+    SELECT COALESCE(sl.customer, '') AS customer, ${normStateExprAliased("sl")} AS state,
+      COALESCE(r.master_category, 'Unmapped') AS "group",
+      COALESCE(SUM(sl.amount::numeric), 0)::float8 AS amount,
+      COUNT(*) OVER ()::int AS "totalRows",
+      SUM(SUM(sl.amount::numeric)) OVER ()::float8 AS "totalAmount"
+    FROM sale_line_current sl
+    ${registryJoinForDrill()}
+    WHERE sl.fy = ${fy}
+      AND (sl.invoice_date IS NULL OR sl.invoice_date <= ${asOf})
+      ${selectedMonths} ${entityCondsAliased(filter, "sl")} ${groupClause} ${stateClause}
+    GROUP BY 1, 2, 3
+    ORDER BY amount DESC, customer
+    LIMIT ${DRILL_ROW_LIMIT}
+  `);
+  const rows = result.rows.map((row) => ({ customer: row.customer, state: row.state, group: row.group, amount: Number(row.amount) }));
+  const totalRows = Number(result.rows[0]?.totalRows ?? rows.length);
+  const childAmount = rows.reduce((sum, row) => sum + row.amount, 0);
+  const parentAmount = Number(result.rows[0]?.totalAmount ?? childAmount);
+  return {
+    rows, limit: DRILL_ROW_LIMIT, totalRows, truncated: totalRows > DRILL_ROW_LIMIT,
+    reconciliation: { parentAmount, childAmount, delta: childAmount - parentAmount, complete: totalRows <= DRILL_ROW_LIMIT },
+    source: "sale_line_current + canonical_item_category_registry; taxable amount through as-of date",
+  };
 }
 
 router.get("/company-reports", async (req, res) => {
@@ -84,7 +314,7 @@ router.get("/company-reports", async (req, res) => {
     if (rawAsOf !== undefined || filter) {
       // Explicit as-of date or active filters — always build live, never
       // cache or snapshot (the key space would be unbounded).
-      const payload = await buildCompanyReports(rawFy, rawAsOf, filter);
+      const payload = await buildCompanyReports(rawFy, rawAsOf, filter, { includeC1ExportData: true });
       res.json(payload);
       return;
     }
@@ -93,9 +323,10 @@ router.get("/company-reports", async (req, res) => {
     const payload = await serveWithSnapshot({
       // v2: month-completeness rule fixed (Oct-24-style months no longer
       // dropped) — versioned key forces frozen-FY snapshots to rebuild once.
-      key: `company-reports|v3|${rawFy}`,
+      // v4 includes R1 party/R2 month drill data in the normal web payload.
+      key: `company-reports|v4|${rawFy}`,
       ttlMs: COMPANY_REPORTS_TTL_MS,
-      build: () => buildCompanyReports(rawFy, undefined),
+      build: () => buildCompanyReports(rawFy, undefined, undefined, { includeC1ExportData: true }),
       log: req.log,
       frozen: isFrozen(rawFy),
     });
@@ -149,6 +380,74 @@ router.get("/company-reports/filters", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "company-reports filters error");
     res.status(500).json({ error: "Failed to load filter options" });
+  }
+});
+
+// Browser drill endpoints. Aliases keep the resource names readable to the
+// page while allowing older clients to use the report-number spelling.
+router.get(["/company-reports/report4/items", "/company-reports/r4/items"], async (req, res) => {
+  const rawFy = typeof req.query.fy === "string" ? req.query.fy : currentOpenFy();
+  if (!FY_RE.test(rawFy)) return res.status(400).json({ error: "Invalid fy — expected YYYY-YY" });
+  const filter = parseFilter(req.query as Record<string, unknown>, res);
+  if (filter === null) return;
+  const state = scopedText(req.query as Record<string, unknown>, "state");
+  try {
+    const period = await resolveDrillPeriod(rawFy, filter?.months);
+    return res.json({
+      fy: rawFy,
+      scope: {
+        state,
+        distributor: filter?.customers?.[0] ?? null,
+        group: scopedText(req.query as Record<string, unknown>, "group"),
+        period,
+      },
+      ...(await report4Items(rawFy, state ? { ...filter, states: [state] } : filter, scopedText(req.query as Record<string, unknown>, "group"), period)),
+    });
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err }, "company-reports report 4 item drill error");
+    return res.status(500).json({ error: "Failed to load Report 4 item drill-down" });
+  }
+});
+
+router.get(["/company-reports/report7/parties", "/company-reports/r7/parties"], async (req, res) => {
+  const rawFy = typeof req.query.fy === "string" ? req.query.fy : currentOpenFy();
+  const asOf = typeof req.query.asOf === "string" ? req.query.asOf : new Date().toISOString().slice(0, 10);
+  if (!FY_RE.test(rawFy) || !DATE_RE.test(asOf)) {
+    return res.status(400).json({ error: "Invalid fy or asOf" });
+  }
+  const filter = parseFilter(req.query as Record<string, unknown>, res);
+  if (filter === null) return;
+  try {
+    const resolvedPeriod = await resolveDrillPeriod(rawFy, filter?.months);
+    const currentMonths = asOfScopedMonths(rawFy, asOf, resolvedPeriod.currentMonths);
+    const period: DrillPeriod = {
+      ...resolvedPeriod,
+      currentMonths,
+      priorMonths: currentMonths.map((month) => {
+        const index = resolvedPeriod.currentMonths.indexOf(month);
+        return resolvedPeriod.priorMonths[index] ?? "";
+      }).filter(Boolean),
+    };
+    return res.json({
+      fy: rawFy, asOf,
+      scope: {
+        state: scopedText(req.query as Record<string, unknown>, "state"),
+        distributor: filter?.customers?.[0] ?? null,
+        group: scopedText(req.query as Record<string, unknown>, "group"),
+        period,
+      },
+      ...(await report7Parties(
+        rawFy, asOf, filter,
+        scopedText(req.query as Record<string, unknown>, "group"),
+        scopedText(req.query as Record<string, unknown>, "state"),
+        period,
+      )),
+    });
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err }, "company-reports report 7 party drill error");
+    return res.status(500).json({ error: "Failed to load Report 7 party drill-down" });
   }
 });
 
@@ -298,6 +597,7 @@ function buildReport1(
     { width: 14 }, { width: 14 }, { width: 3 }, { width: 3 },
     { width: 24 }, { width: 38 }, { width: 20 }, { width: 20 }, { width: 20 }, { width: 14 }, { width: 14 },
   ];
+  ws.getCell("B3").value = "Grand Total / State";
   ws.getCell("B4").value = "State";
   ws.getCell("C4").value = `Prior FY (${p.priorFy})`;
   ws.getCell("D4").value = `Current FY (${p.fy})`;
@@ -402,7 +702,9 @@ function buildReport2(
 ): void {
   const rows = p.c1_byState ?? p.r1r2_byState;
   const state = selectedState(p, filter);
-  const months = fyMonthLabelsForExport(p.fy);
+  // The payload already contains the selected complete/current period. Never
+  // add future FY month pairs merely because the workbook has room for them.
+  const months = p.likeMonths;
   const stateMonths = p.r2_byStateMonth ?? [];
   const parties = capPartiesByState(p.r2_byPartyMonth ?? []);
   const selectedParties = parties.filter((row) => row.state === state);
@@ -412,7 +714,9 @@ function buildReport2(
   for (let col = 3; col <= 7; col++) ws.getColumn(col).width = 20;
   ws.getColumn(10).width = 38;
   ws.getColumn(11).width = 24;
-  for (let col = 12; col < 48; col++) ws.getColumn(col).width = 16;
+  const report2LastCol = 12 + months.length * 3 - 1;
+  for (let col = 12; col <= report2LastCol; col++) ws.getColumn(col).width = 16;
+  ws.getCell("B2").value = "Grand Total / State";
   ws.getCell("B3").value = "State";
   ws.getCell("C3").value = `Prior FY (${p.priorFy})`;
   ws.getCell("D3").value = `Current FY (${p.fy})`;
@@ -550,7 +854,7 @@ function buildReport2(
     });
   }
   styleReportRange(ws, 3, Math.max(stateEnd, partyEnd), 2, 7);
-  styleReportRange(ws, 3, partyEnd, 10, 47);
+  styleReportRange(ws, 3, partyEnd, 10, report2LastCol);
   ws.getRow(2).font = { bold: true };
   ws.views = [{ state: "frozen", ySplit: 3 }];
 }
@@ -566,17 +870,13 @@ function columnLetter(column: number): string {
   return out;
 }
 
-function fyMonthLabelsForExport(fy: string): string[] {
-  const startYear = Number(fy.slice(0, 4));
-  const labels = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-  return labels.map((month, index) => `${month}-${String(index < 9 ? startYear : startYear + 1).slice(-2)}`);
-}
-
 function toPriorMonthLabel(month: string): string {
   return `${month.slice(0, 4)}${String(Number(month.slice(4)) - 1).padStart(2, "0")}`;
 }
 
-export async function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyReportsFilter): Promise<ExcelJS.Workbook> {
+/** Full workbook, including verification helpers and the as-of snapshot.
+ * This is intentionally only used by the separate working-data download. */
+export async function buildWorkingDataWorkbook(p: CompanyReportsPayload, filter?: CompanyReportsFilter): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Prayag Sales Intelligence";
   wb.calcProperties.fullCalcOnLoad = true;
@@ -621,17 +921,34 @@ export async function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyRe
     { header: "Growth %", key: "growthPct" },
     { header: "Share %", key: "sharePct" },
   ];
-  addSheet(wb, "R3 By Group", compareCols, p.r3_byGroup as unknown as Array<Record<string, unknown>>);
+  const r3Rows = (p.r3_bySubcategory?.length
+    ? p.r3_bySubcategory.map((row) => ({
+      label: row.group,
+      subcategory: row.subcategory,
+      thisFy: row.thisFy,
+      lastFy: row.lastFy,
+      diff: row.thisFy - row.lastFy,
+      growthPct: row.lastFy === 0 ? null : ((row.thisFy - row.lastFy) / Math.abs(row.lastFy)) * 100,
+      sharePct: 0,
+    }))
+    : p.r3_byGroup) as unknown as Array<Record<string, unknown>>;
+  addSheet(wb, "R3 By Group", [
+    { header: "Master group", key: "label", width: 30 },
+    { header: "Sub-category", key: "subcategory", width: 26 },
+    ...compareCols.slice(1),
+  ], r3Rows);
   addSheet(wb, "R3A State x Group", [
     { header: "State", key: "state", width: 24 },
-    { header: "Group", key: "group", width: 24 },
+    { header: "Master group", key: "group", width: 24 },
+    { header: "Sub-category", key: "subcategory", width: 24 },
     { header: `This FY`, key: "thisFy" },
     { header: `Last FY`, key: "lastFy" },
   ], p.r3a_byStateGroup as unknown as Array<Record<string, unknown>>);
   addSheet(wb, "R3B Party x Group", [
     { header: "Party", key: "customer", width: 36 },
     { header: "State", key: "state", width: 22 },
-    { header: "Group", key: "group", width: 22 },
+    { header: "Master group", key: "group", width: 22 },
+    { header: "Sub-category", key: "subcategory", width: 22 },
     { header: `This FY`, key: "thisFy" },
     { header: `Last FY`, key: "lastFy" },
   ], p.r3b_byPartyGroup as unknown as Array<Record<string, unknown>>);
@@ -655,12 +972,13 @@ export async function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyRe
     { header: "Diff", key: "diff" },
   ], p.r5_byCustomer as unknown as Array<Record<string, unknown>>);
   addSheet(wb, "R6 By Group (full prior)", [
-    { header: "Group", key: "group", width: 24 },
+    { header: "Master group", key: "group", width: 24 },
+    { header: "Sub-category", key: "subcategory", width: 24 },
     { header: "This FY (like months)", key: "thisFyLike", width: 22 },
     { header: "Last FY (like months)", key: "lastFyLike", width: 22 },
     { header: "Last FY (full year)", key: "lastFyFull", width: 22 },
     { header: "Growth % (like)", key: "growthLike" },
-  ], p.r6_byGroupFull as unknown as Array<Record<string, unknown>>);
+  ], (p.r6_bySubcategoryFull?.length ? p.r6_bySubcategoryFull : p.r6_byGroupFull) as unknown as Array<Record<string, unknown>>);
 
   const r7 = wb.addWorksheet("R7 As-of Snapshot");
   r7.columns = [{ width: 30 }, { width: 24 }];
@@ -685,8 +1003,8 @@ export async function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyRe
   addR7("By state", "Amount", true);
   for (const s of p.r7_asOf.byState) addR7(s.state, s.amount);
 
-  // Helper sheets are deliberately last and veryHidden; visible report order
-  // remains Info, Report 1, Report 2, then the unchanged Reports 3-7.
+  // Helper sheets are deliberately last and veryHidden in the working-data
+  // workbook; the sales-head wrapper below removes them.
   const visibleOrder = [
     "Info", "Report 1", "Report 2", "R3 By Group", "R3A State x Group",
     "R3B Party x Group", "R4 Quantity", "R5 By Customer",
@@ -699,6 +1017,104 @@ export async function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyRe
   });
 
   return wb;
+}
+
+/**
+ * Sales-head workbook. Verification dumps and the metadata snapshot live only
+ * behind Download working data. Formula cells which depended on those hidden
+ * ranges are frozen to their already-computed cached values before the helper
+ * sheets are removed, so the default file never contains broken references.
+ */
+export async function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyReportsFilter): Promise<ExcelJS.Workbook> {
+  const wb = await buildWorkingDataWorkbook(p, filter);
+  for (const sheet of ["Report 1", "Report 2"]) {
+    const ws = wb.getWorksheet(sheet);
+    if (!ws) continue;
+    ws.eachRow((row) => row.eachCell((cell) => {
+      const value = cell.value;
+      if (value && typeof value === "object" && "formula" in value &&
+          String((value as { formula?: string }).formula).includes("Export Data")) {
+        const result = (value as { result?: string | number | boolean | null }).result;
+        cell.value = result ?? "";
+      }
+    }));
+  }
+  // Remove the deliberately non-analytic columns/sheets from the deliverable.
+  const r4 = wb.getWorksheet("R4 Quantity");
+  if (r4) r4.spliceColumns(2, 1); // Group (raw) is source provenance, not analysis.
+  const r1 = wb.getWorksheet("Report 1");
+  // ExcelJS does not consistently move populated cells/formula caches when
+  // two consecutive spliceColumns calls remove the old spacer columns.
+  // Snapshot the detail blocks and place them at their compact destinations
+  // explicitly; this keeps the selected party/month values intact.
+  const r1Detail = r1 ? snapshotCells(r1, 10, 16) : null;
+  if (r1) {
+    r1.spliceColumns(1, 1);
+    r1.spliceColumns(7, 2); // blank spacer columns
+    restoreShiftedCells(r1, r1Detail, 7);
+  }
+  const r2 = wb.getWorksheet("Report 2");
+  const r2LastSourceColumn = 12 + p.likeMonths.length * 3 - 1;
+  const r2Detail = r2 ? snapshotCells(r2, 10, Math.max(11, r2LastSourceColumn)) : null;
+  if (r2) {
+    r2.spliceColumns(1, 1);
+    r2.spliceColumns(7, 2); // blank spacer columns
+    restoreShiftedCells(r2, r2Detail, 7);
+  }
+  // Dropdowns need the hidden helper ranges. The sales-head file is a
+  // filtered snapshot, so do not leave validations pointing at removed sheets.
+  for (const ws of [r1, r2]) clearDataValidations(ws);
+  for (const name of ["R7 As-of Snapshot", "Export Data R1", "Export Data R2"]) {
+    const sheet = wb.getWorksheet(name);
+    if (sheet) wb.removeWorksheet(sheet.id);
+  }
+  for (const sheet of wb.worksheets) clearDataValidations(sheet);
+  const visibleOrder = [
+    "Info", "Report 1", "Report 2", "R3 By Group", "R3A State x Group",
+    "R3B Party x Group", "R4 Quantity", "R5 By Customer", "R6 By Group (full prior)",
+  ];
+  visibleOrder.forEach((name, index) => {
+    const sheet = wb.getWorksheet(name);
+    if (sheet) (sheet as unknown as { orderNo: number }).orderNo = index + 1;
+  });
+  return wb;
+}
+
+type CellSnapshot = Array<Array<ExcelJS.CellValue>>;
+
+function snapshotCells(ws: ExcelJS.Worksheet, firstColumn: number, lastColumn: number): CellSnapshot {
+  const result: CellSnapshot = [];
+  for (let row = 1; row <= ws.rowCount; row++) {
+    const values: ExcelJS.CellValue[] = [];
+    for (let column = firstColumn; column <= lastColumn; column++) values.push(ws.getCell(row, column).value);
+    result.push(values);
+  }
+  return result;
+}
+
+function restoreShiftedCells(
+  ws: ExcelJS.Worksheet,
+  snapshot: CellSnapshot | null,
+  destinationFirstColumn: number,
+): void {
+  if (!snapshot) return;
+  for (let row = 0; row < snapshot.length; row++) {
+    for (let index = 0; index < snapshot[row].length; index++) {
+      ws.getCell(row + 1, destinationFirstColumn + index).value = snapshot[row][index] ?? null;
+    }
+  }
+}
+
+function clearDataValidations(ws: ExcelJS.Worksheet | undefined): void {
+  if (!ws) return;
+  // ExcelJS 4.4 exposes validation metadata at runtime through a private
+  // worksheet member, but intentionally omits that field from Worksheet's
+  // public type. Keep this narrow internal cast at the boundary and replace
+  // the map so no undefined keys left by DataValidations.remove() serialize.
+  const internal = ws as unknown as {
+    dataValidations?: { model?: Record<string, unknown> };
+  };
+  if (internal.dataValidations?.model) internal.dataValidations.model = {};
 }
 
 // Explicit test seam name for consumers that do not need the route itself.
@@ -735,6 +1151,44 @@ router.get("/company-reports/export", async (req, res) => {
     if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "company-reports export error");
     res.status(500).json({ error: "Export failed" });
+  } finally {
+    activeExports--;
+  }
+});
+
+/** Verification-oriented download. The ordinary export intentionally contains
+ * only the sales-head sheets; this opt-in file retains helper ranges, raw
+ * category provenance and the R7 as-of reconciliation snapshot. */
+router.get("/company-reports/working-data", async (req, res) => {
+  const rawFy = typeof req.query.fy === "string" ? req.query.fy : currentOpenFy();
+  const rawAsOf = typeof req.query.asOf === "string" ? req.query.asOf : undefined;
+  if (!FY_RE.test(rawFy)) {
+    res.status(400).json({ error: "Invalid fy — expected YYYY-YY" });
+    return;
+  }
+  if (rawAsOf !== undefined && !DATE_RE.test(rawAsOf)) {
+    res.status(400).json({ error: "Invalid asOf — expected YYYY-MM-DD" });
+    return;
+  }
+  const filter = parseFilter(req.query as Record<string, unknown>, res);
+  if (filter === null) return;
+  if (activeExports >= MAX_CONCURRENT_EXPORTS) {
+    res.status(429).json({ error: "Another export is already running — try again in a few seconds." });
+    return;
+  }
+  activeExports++;
+  try {
+    const payload = await buildCompanyReports(rawFy, rawAsOf, filter, { includeC1ExportData: true });
+    const wb = await buildWorkingDataWorkbook(payload, filter);
+    const buf = await wb.xlsx.writeBuffer();
+    const suffix = filter ? "_filtered" : "";
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="Company_Reports_Working_Data_${rawFy}${suffix}_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.send(Buffer.from(buf));
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err }, "company-reports working-data export error");
+    res.status(500).json({ error: "Working-data export failed" });
   } finally {
     activeExports--;
   }

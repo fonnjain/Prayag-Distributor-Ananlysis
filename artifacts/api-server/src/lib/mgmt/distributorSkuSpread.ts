@@ -9,12 +9,12 @@
 // line names (e.g. "CPVC DURALIFE", "SWR DRAINTECH"). The secondary register
 // does NOT store individual item codes — brand_canon is the finest granularity.
 //
-// Broad segment = one of the 17 categories in group_map.json. Derived from
-// brand_canon via a keyword-first lookup table built from the known universe.
+// Source segment = one of the legacy categories in group_map.json. It is
+// retained only as evidence and rolled into the six reviewed master categories.
 //
 // Whitespace ranked easiest → hardest:
-//   1. range_depth  — brand_canons the distributor does NOT sell inside broad
-//                     segments it ALREADY participates in.
+//   1. range_depth  — brand_canons the distributor does NOT sell inside master
+//                     categories it ALREADY participates in.
 //   2. lost_brand   — brand_canons present in the prior closed FY but absent
 //                     in the most recent closed FY.
 //   3. peer_whitespace — brands that comparable distributors (same state head)
@@ -28,8 +28,77 @@ import { logger } from "../logger.js";
 import type { DistributorGroup } from "./distributorDeepDive.js";
 import { secondaryCoverageNote } from "./skuSpread.js";
 import { getRetailerRegistry, normRetailerName } from "./retailerRegistry.js";
+import categoryRegistry from "../../config/prompt68-category-registry.json";
 
-// ─── Broad segment universe (17 categories, from group_map.json keys) ─────────
+// ─── Canonical business taxonomy ─────────────────────────────────────────────
+//
+// Distributor secondary rows are stored at brand_canon (product-line) level,
+// rather than item-code level.  The reviewed Prompt 68 registry is therefore
+// used as the authority for translating the legacy source-segment vocabulary:
+// each legacy segment below is paired with its registry subcategory, and the
+// registry supplies the six-master assignment.  Do not add a keyword mapping
+// here unless its source-segment evidence is documented in this table.
+
+export const CANONICAL_MASTER_CATEGORIES = [
+  "PLUMBING",
+  "PTMT",
+  "C P",
+  "SANITARYWARE",
+  "SINK",
+  "HARDWARE",
+] as const;
+
+export type CanonicalMasterCategory = (typeof CANONICAL_MASTER_CATEGORIES)[number];
+
+const REGISTRY_SUBCATEGORY_TO_MASTER = new Map<string, CanonicalMasterCategory>();
+for (const assignment of categoryRegistry.assignments) {
+  const subcategory = assignment.subcategory.trim().toUpperCase();
+  const master = assignment.master_category as CanonicalMasterCategory;
+  if (!CANONICAL_MASTER_CATEGORIES.includes(master)) continue;
+  const previous = REGISTRY_SUBCATEGORY_TO_MASTER.get(subcategory);
+  if (previous && previous !== master) {
+    throw new Error(
+      `Prompt 68 category registry maps ${subcategory} to both ${previous} and ${master}`,
+    );
+  }
+  REGISTRY_SUBCATEGORY_TO_MASTER.set(subcategory, master);
+}
+
+/**
+ * Legacy source segment → reviewed registry subcategory.
+ *
+ * The values intentionally use the source vocabulary represented by
+ * group_map.json and the secondary brand classifier below.  Their master
+ * assignment is never hard-coded: it is resolved through the registry map
+ * above.  In particular, WATER TANK resolves to PLUMBING.
+ */
+export const LEGACY_BROAD_TO_REGISTRY_SUBCATEGORY: Readonly<Record<string, string>> = {
+  "WATER TANK": "WATER TANK",
+  AGRI: "AGRI",
+  UPVC: "UPVC",
+  CPVC: "CPVC",
+  SWR: "SWR",
+  PPR: "PPR",
+  HDPE: "HDPE PIPE",
+  "Garden Pipe": "GARDEN PIPE",
+  COLUMN: "COLUMN",
+  "Corrugated Pipe": "CORRUGATED PIPE",
+  "PTMT / Faucets": "PTMT",
+  CISTERN: "CISTERN",
+  "CP (Chrome-Plated)": "C P",
+  Sink: "SINK",
+  Sanitaryware: "SANITARYWARE",
+  "Connection / Waste": "CONNECTION",
+  Hardware: "HARDWARE",
+};
+
+export function masterForLegacyBroadSegment(
+  broadSegment: string,
+): CanonicalMasterCategory | null {
+  const subcategory = LEGACY_BROAD_TO_REGISTRY_SUBCATEGORY[broadSegment];
+  if (!subcategory) return null;
+  return REGISTRY_SUBCATEGORY_TO_MASTER.get(subcategory) ?? null;
+}
 
 export const ALL_BROAD_SEGMENTS: readonly string[] = [
   "WATER TANK",
@@ -51,7 +120,9 @@ export const ALL_BROAD_SEGMENTS: readonly string[] = [
   "Hardware",
 ] as const;
 
-export const TOTAL_BROAD_SEGMENTS = ALL_BROAD_SEGMENTS.length; // 17
+/** @deprecated use CANONICAL_MASTER_CATEGORIES/TOTAL_MASTER_CATEGORIES. */
+export const TOTAL_BROAD_SEGMENTS = CANONICAL_MASTER_CATEGORIES.length;
+export const TOTAL_MASTER_CATEGORIES = CANONICAL_MASTER_CATEGORIES.length;
 
 // Exact-match table for known secondary brand_canon values.
 const BRAND_TO_BROAD: Record<string, string> = {
@@ -115,6 +186,10 @@ export function brandToBroad(brand: string): string {
   return "(other)";
 }
 
+export function brandToMasterCategory(brand: string): CanonicalMasterCategory | null {
+  return masterForLegacyBroadSegment(brandToBroad(brand));
+}
+
 // Ordered FYs — most recent last so priorFy derivation is trivial.
 // FY2026-27 is included: the PSCode_3 register was backfilled into
 // secondary_register_line at brand level (source='pscode3_brand_rollup').
@@ -128,10 +203,20 @@ export type DistributorSegmentNet = {
   pct: number;
 };
 
+export type DistributorSourceSegmentNet = DistributorSegmentNet & {
+  /** Legacy source segment retained as evidence beneath the master rollup. */
+  masterCategory: CanonicalMasterCategory | null;
+};
+
 export type WhitespaceHint = {
   type: "range_depth" | "lost_brand" | "peer_whitespace";
   brand: string;              // brand_canon being suggested
-  broadSegment: string;       // mapped broad segment
+  /** Canonical business grouping for the suggested line, or Unmapped. */
+  masterCategory: CanonicalMasterCategory | null;
+  /** Legacy source segment retained as drill/detail evidence. */
+  sourceSegment: string;
+  /** @deprecated frontend compatibility alias; now carries the master label. */
+  broadSegment: string;
   evidence: string;           // human-readable evidence string
   peerNames?: string[];       // peer distributor names (peer_whitespace only)
   peerNet?: number;           // combined NET at peers in the most recent FY
@@ -140,14 +225,26 @@ export type WhitespaceHint = {
 export type DistributorSkuSpread = {
   isLiveYear: boolean;
   liveYearNote?: string;
-  totalBroadSegments: number;           // denominator — always 17
+  /** Canonical master denominator — always six. */
+  totalMasterCategories: number;
+  /** @deprecated use totalMasterCategories. */
+  totalBroadSegments: number;
   // All fields below are present only when isLiveYear=false and matchedRetailers>0
   recentFy?: string;
   totalNet?: number;
   distinctBrands?: number;              // distinct brand_canon values in recentFy
-  broadSegmentsCovered?: number;        // distinct broad segments in recentFy
+  masterCategoriesCovered?: number;     // distinct canonical masters in recentFy
+  /** @deprecated use masterCategoriesCovered. */
+  broadSegmentsCovered?: number;
   netByBrand?: DistributorSegmentNet[]; // top brand_canons by net (recentFy)
-  netByBroadSegment?: DistributorSegmentNet[]; // aggregated by broad segment (recentFy)
+  netByMasterCategory?: DistributorSegmentNet[]; // six-master rollup (recentFy)
+  /** @deprecated use netByMasterCategory. */
+  netByBroadSegment?: DistributorSegmentNet[];
+  /** Legacy source-segment rollup kept as drill/detail evidence. */
+  netBySourceSegment?: DistributorSourceSegmentNet[];
+  /** Positive NET whose source segment has no reviewed registry mapping. */
+  unmappedNet?: number;
+  unmappedSourceSegments?: string[];
   crossSellDepth?: number;              // avg distinct brand_canons per retailer
   concentrationHhi?: number;           // HHI (0–10000)
   matchedRetailers?: number;           // D1 retailers that appeared in secondary data
@@ -177,6 +274,67 @@ type DistAgg = {
   retailerBrands: Map<string, Set<string>>;
   matchedRetailers: number;
 };
+
+export type CanonicalMasterRollup = {
+  netByMasterCategory: DistributorSegmentNet[];
+  netBySourceSegment: DistributorSourceSegmentNet[];
+  unmappedNet: number;
+  unmappedSourceSegments: string[];
+  masterCategoriesCovered: number;
+};
+
+/**
+ * Roll brand-level source evidence into the six reviewed masters.
+ *
+ * The source rollup is returned alongside the master totals so a reviewer can
+ * reconcile every rupee.  Unknown source segments are deliberately not
+ * forced into a master: they remain visible in unmappedNet and
+ * unmappedSourceSegments.
+ */
+export function rollupCanonicalMasters(
+  brandNetMap: ReadonlyMap<string, number>,
+  totalNet: number = [...brandNetMap.values()].reduce((sum, net) => sum + net, 0),
+): CanonicalMasterRollup {
+  const masterNet = new Map<CanonicalMasterCategory, number>();
+  const sourceNet = new Map<string, { net: number; masterCategory: CanonicalMasterCategory | null }>();
+  let unmappedNet = 0;
+
+  for (const [brand, net] of brandNetMap) {
+    const sourceSegment = brandToBroad(brand);
+    const masterCategory = masterForLegacyBroadSegment(sourceSegment);
+    const source = sourceNet.get(sourceSegment) ?? { net: 0, masterCategory };
+    source.net += net;
+    sourceNet.set(sourceSegment, source);
+    if (masterCategory) {
+      masterNet.set(masterCategory, (masterNet.get(masterCategory) ?? 0) + net);
+    } else {
+      unmappedNet += net;
+    }
+  }
+
+  const pct = (net: number) => (totalNet > 0 ? Math.round((net / totalNet) * 1000) / 10 : 0);
+  const netByMasterCategory = [...masterNet.entries()]
+    .map(([segment, net]) => ({ segment, net, pct: pct(net) }))
+    .sort((a, b) => b.net - a.net);
+  const netBySourceSegment = [...sourceNet.entries()]
+    .map(([segment, value]) => ({
+      segment,
+      net: value.net,
+      pct: pct(value.net),
+      masterCategory: value.masterCategory,
+    }))
+    .sort((a, b) => b.net - a.net);
+
+  return {
+    netByMasterCategory,
+    netBySourceSegment,
+    unmappedNet,
+    unmappedSourceSegments: netBySourceSegment
+      .filter((row) => row.masterCategory === null)
+      .map((row) => row.segment),
+    masterCategoriesCovered: netByMasterCategory.length,
+  };
+}
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
@@ -277,6 +435,7 @@ export async function loadDistributorSkuSpread(
     for (const g of distGroups) {
       (g as DistributorGroup & { skuSpread?: DistributorSkuSpread }).skuSpread = {
         isLiveYear: false,
+        totalMasterCategories: TOTAL_MASTER_CATEGORIES,
         totalBroadSegments: TOTAL_BROAD_SEGMENTS,
         matchedRetailers: 0,
       };
@@ -351,6 +510,7 @@ export async function loadDistributorSkuSpread(
     if (!agg || agg.matchedRetailers === 0) {
       spreads.set(g.normKey, {
         isLiveYear: false,
+        totalMasterCategories: TOTAL_MASTER_CATEGORIES,
         totalBroadSegments: TOTAL_BROAD_SEGMENTS,
         matchedRetailers: 0,
       });
@@ -373,14 +533,20 @@ export async function loadDistributorSkuSpread(
       // Has secondary history but nothing in recentFy — show prior FY instead
       spreads.set(g.normKey, {
         isLiveYear: false,
+        totalMasterCategories: TOTAL_MASTER_CATEGORIES,
         totalBroadSegments: TOTAL_BROAD_SEGMENTS,
         matchedRetailers: agg.matchedRetailers,
         recentFy,
         totalNet: 0,
         distinctBrands: 0,
+        masterCategoriesCovered: 0,
         broadSegmentsCovered: 0,
         netByBrand: [],
+        netByMasterCategory: [],
         netByBroadSegment: [],
+        netBySourceSegment: [],
+        unmappedNet: 0,
+        unmappedSourceSegments: [],
         crossSellDepth: 0,
         concentrationHhi: 0,
         whitespace: [],
@@ -401,23 +567,8 @@ export async function loadDistributorSkuSpread(
     const soldBrands = new Set(brandNetMap.keys());
     distBrandsInRecentFy.set(g.normKey, soldBrands);
 
-    // Broad segment rollup
-    const broadNetMap = new Map<string, number>();
-    for (const [brand, net] of brandNetMap) {
-      const broad = brandToBroad(brand);
-      broadNetMap.set(broad, (broadNetMap.get(broad) ?? 0) + net);
-    }
-    const netByBroadSegment: DistributorSegmentNet[] = [...broadNetMap.entries()]
-      .map(([segment, net]) => ({
-        segment,
-        net,
-        pct: Math.round((net / totalNet) * 1000) / 10,
-      }))
-      .sort((a, b) => b.net - a.net);
-
-    const broadSegmentsCovered = new Set(
-      [...soldBrands].map(brandToBroad).filter((b) => b !== "(other)"),
-    ).size;
+    // Canonical six-master rollup plus source-segment evidence.
+    const canonicalRollup = rollupCanonicalMasters(brandNetMap, totalNet);
 
     // Cross-sell depth (avg distinct brand_canons per retailer, all FYs)
     const retailerBrandCounts = [...agg.retailerBrands.values()].map((s) => s.size);
@@ -442,13 +593,19 @@ export async function loadDistributorSkuSpread(
     spreads.set(g.normKey, {
       isLiveYear: false,
       liveYearNote: coverageNote,
+      totalMasterCategories: TOTAL_MASTER_CATEGORIES,
       totalBroadSegments: TOTAL_BROAD_SEGMENTS,
       recentFy,
       totalNet: Math.round(totalNet),
       distinctBrands: soldBrands.size,
-      broadSegmentsCovered,
+      masterCategoriesCovered: canonicalRollup.masterCategoriesCovered,
+      broadSegmentsCovered: canonicalRollup.masterCategoriesCovered,
       netByBrand,
-      netByBroadSegment,
+      netByMasterCategory: canonicalRollup.netByMasterCategory,
+      netByBroadSegment: canonicalRollup.netByMasterCategory,
+      netBySourceSegment: canonicalRollup.netBySourceSegment,
+      unmappedNet: canonicalRollup.unmappedNet,
+      unmappedSourceSegments: canonicalRollup.unmappedSourceSegments,
       crossSellDepth,
       concentrationHhi,
       matchedRetailers: agg.matchedRetailers,
@@ -477,19 +634,26 @@ export async function loadDistributorSkuSpread(
 
     const agg = distAggs.get(g.normKey)!;
     const mySoldBrands = distBrandsInRecentFy.get(g.normKey) ?? new Set<string>();
-    const myBroadSegments = new Set([...mySoldBrands].map(brandToBroad));
+    const myMasterCategories = new Set(
+      [...mySoldBrands]
+        .map(brandToMasterCategory)
+        .filter((master): master is CanonicalMasterCategory => master !== null),
+    );
     const hints: WhitespaceHint[] = [];
 
-    // 1. Range depth: broad segments I'm in → brand_canons I'm missing
+    // 1. Range depth: master categories I'm in → brand_canons I'm missing
     for (const [broad, brandsAny] of broadToBrandsAnywhere) {
-      if (!myBroadSegments.has(broad)) continue; // not in this segment yet
+      const masterCategory = masterForLegacyBroadSegment(broad);
+      if (!masterCategory || !myMasterCategories.has(masterCategory)) continue; // not in this master yet
       for (const [brand, peerNet] of brandsAny) {
         if (mySoldBrands.has(brand)) continue; // already sell it
         hints.push({
           type: "range_depth",
           brand,
-          broadSegment: broad,
-          evidence: `already sells in ${broad} but not this line`,
+          masterCategory,
+          sourceSegment: broad,
+          broadSegment: masterCategory,
+          evidence: `already sells in ${masterCategory} (${broad}) but not this line`,
           peerNet,
         });
       }
@@ -501,10 +665,14 @@ export async function loadDistributorSkuSpread(
         const priorNet = fyMap.get(priorFy) ?? 0;
         const recentNet = fyMap.get(recentFy) ?? 0;
         if (priorNet > 0 && recentNet === 0) {
+          const sourceSegment = brandToBroad(brand);
+          const masterCategory = masterForLegacyBroadSegment(sourceSegment);
           hints.push({
             type: "lost_brand",
             brand,
-            broadSegment: brandToBroad(brand),
+            masterCategory,
+            sourceSegment,
+            broadSegment: masterCategory ?? sourceSegment,
             evidence: `sold in ${priorFy} (${fmtL(priorNet)}) but not in ${recentFy}`,
           });
         }
@@ -531,11 +699,16 @@ export async function loadDistributorSkuSpread(
     for (const [brand, { net: peerNet, peers }] of peerNetByBrand) {
       // Avoid duplicating range_depth suggestions
       if (hints.some((h) => h.type === "range_depth" && h.brand === brand)) continue;
+      const sourceSegment = brandToBroad(brand);
+      const masterCategory = masterForLegacyBroadSegment(sourceSegment);
+      if (!masterCategory) continue;
       hints.push({
         type: "peer_whitespace",
         brand,
-        broadSegment: brandToBroad(brand),
-        evidence: `peer${peers.length > 1 ? "s" : ""} ${peers.slice(0, 3).join(", ")} sell${peers.length === 1 ? "s" : ""} this (${fmtL(peerNet)} combined)`,
+        masterCategory,
+        sourceSegment,
+        broadSegment: masterCategory,
+        evidence: `peer${peers.length > 1 ? "s" : ""} ${peers.slice(0, 3).join(", ")} sell${peers.length === 1 ? "s" : ""} this (${masterCategory}; ${sourceSegment}; ${fmtL(peerNet)} combined)`,
         peerNames: peers,
         peerNet: Math.round(peerNet),
       });

@@ -1,6 +1,6 @@
 // Global date filter context — shared FY + period selection across all pages.
 // Components subscribe with useGlobalFilter(); the filter bar is in GlobalFilterBar.tsx.
-import { createContext, useContext, useState, useEffect, useMemo, type ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useMemo, type ReactNode } from "react";
 import { useLocation } from "wouter";
 import { getCapabilityForPath, type PeriodCapability } from "./period-capability";
 
@@ -161,6 +161,8 @@ export interface GlobalFilterContextValue {
    * label generated documents with the period they actually cover.
    */
   periodCapability: PeriodCapability;
+  /** Atomically apply multiple global filter state values */
+  applyGlobalFilterState: (state: Partial<{ fy: string; periodMode: PeriodMode; monthIdx: FiscalMonthIdx; rangeFrom: FiscalMonthIdx; rangeTo: FiscalMonthIdx }>) => void;
 }
 
 const GlobalFilterContext = createContext<GlobalFilterContextValue | null>(null);
@@ -173,13 +175,33 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
   const [rangeTo, setRangeTo] = useState<FiscalMonthIdx>(2);
   const [availableFys, setAvailableFys] = useState<string[]>([DEFAULT_FY, "2025-26", "2024-25", "2023-24"]);
 
+  const fyRef = React.useRef(fy);
+  fyRef.current = fy;
+
+  const applyGlobalFilterState = React.useCallback((state: Partial<{ fy: string; periodMode: PeriodMode; monthIdx: FiscalMonthIdx; rangeFrom: FiscalMonthIdx; rangeTo: FiscalMonthIdx }>) => {
+    if (state.fy !== undefined && state.fy !== fyRef.current && state.monthIdx !== undefined) {
+      suppressMonthReset.current = true;
+    }
+    if (state.fy !== undefined) setFy(state.fy);
+    if (state.periodMode !== undefined) setPeriodMode(state.periodMode);
+    if (state.monthIdx !== undefined) setMonthIdx(state.monthIdx);
+    if (state.rangeFrom !== undefined) setRangeFrom(state.rangeFrom);
+    if (state.rangeTo !== undefined) setRangeTo(state.rangeTo);
+  }, []);
+
   // Derive the current page's period capability from the wouter location.
   // This requires GlobalFilterProvider to be inside WouterRouter (see App.tsx).
   const [location] = useLocation();
   const periodCapability = useMemo(() => getCapabilityForPath(location), [location]);
 
-  // Reset monthIdx to last complete month when FY changes.
+  // Reset monthIdx to last complete month when FY changes interactively,
+  // but suppress if FY was updated via applyGlobalFilterState along with a specific month.
+  const suppressMonthReset = React.useRef(false);
   useEffect(() => {
+    if (suppressMonthReset.current) {
+      suppressMonthReset.current = false;
+      return;
+    }
     setMonthIdx(lastCompleteFiscalMonthIdx(fy));
   }, [fy]);
 
@@ -319,6 +341,7 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
     effectivePrimaryPeriodTo,
     isFyClosedValue,
     periodCapability,
+    applyGlobalFilterState,
   };
 
   return (
