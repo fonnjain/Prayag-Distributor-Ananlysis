@@ -1,0 +1,195 @@
+# Replit Prompt 70 — Fix the State Head Dashboard export
+
+**Date:** 12 September 2026
+**Follows:** the read-only diagnostic, whose conclusions are accepted.
+**Scope:** Four sections, each its own diff and publish. Formatting is last.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## The diagnosis, in one line
+
+`loadOrderFile(fy)` searches Drive for a FY2026-27 workbook, finds none, returns
+null — and nothing falls back to the database. `?? 0` then turns missing evidence
+into zero, and Head Summary reports **189 registered members, zero active, zero
+sale**.
+
+Production holds ₹100.94 Cr of order booking in `secondary_order_line`, ₹77.44 Cr
+in `secondary_head_month`, and ₹136.70 Cr of primary sales. None is consulted.
+
+FY2025-26 works through the identical code path, so the join is functional and
+the defect is purely the missing source.
+
+---
+
+## Section A — the fallback. This fixes most of it.
+
+```
+Code change. Show the diff before applying.
+
+When loadOrderFile returns null for a fiscal year, fall back to the database
+rather than treating the year as having no data.
+
+  order booking   -> secondary_order_line
+  monthly plan    -> secondary_head_month
+
+REQUIREMENTS
+
+1. NEVER SILENTLY ZERO. The current `?? 0` converts missing evidence into a
+   measured zero. Distinguish three states everywhere:
+
+     has data          -> the figure
+     source unavailable -> blank, greyed, with the reason
+     genuinely zero     -> 0
+
+   A member with no orders and a member whose source could not be read must
+   not look identical.
+
+2. RECORD WHICH SOURCE WAS USED. Every figure should be traceable to Drive
+   workbook, secondary_order_line, or secondary_head_month. Put it in the
+   Info tab.
+
+3. The join is normSecKey on team-member name. Keep it for now - Section C
+   improves it. Do not switch join keys in this change.
+
+4. Do not change FY2025-26 behaviour. It works through the Drive path and
+   must keep working. Print FY2025-26 Head Summary before and after; it must
+   be identical.
+
+AFTER APPLYING, print:
+  - Head Summary for FY2026-27: registered, active, active %, sale per head
+  - the same for FY2025-26, unchanged
+  - which source each column resolved from
+  - the SECONDARY ORDER BOOKING REPORT fill rate, currently 9.2%
+  - how many of the 47 suppressed Missing Data fields now populate
+```
+
+---
+
+## Section B — stop calling order booking "Sales"
+
+```
+Code change. Naming only. No figures change.
+
+The legacy loader sets lineSale = lineAmount, so every "Sales" and "Sales
+Received" column in this export is ORDER BOOKING under a different name.
+
+This is the same defect already corrected in the SKU surfaces, and here it
+reaches a state head as a column headed Sales.
+
+1. Rename every such column to ORDER BOOKING - on the sheet, in headers, and
+   in the Missing Data tab.
+
+     "Sales 26-27"                -> "Order Booking 26-27"
+     "Sale Report 26-27"          -> "Order Booking (reported)"
+     monthly "Sales Received"     -> monthly "Order Booked"
+     "Target Achievement (Sale)"  -> "Target Achievement (Order Booking)"
+
+2. DO NOT populate any genuine Sales Received column from order booking.
+   Where real dispatch evidence does not exist per member, leave it blank
+   and greyed with the reason.
+
+   secondary_head_month.received_amount IS genuine received value - Rs 94.86
+   Cr for FY2026-27. If a column is fed from there, it may keep the Sales
+   name. State which columns those are.
+
+3. Add one line to the Info tab: "Order booking is what retailers ordered.
+   It is not dispatch and not comparable with primary sales."
+
+Do not change any number. This is wording and column headings.
+```
+
+---
+
+## Section C — fix the name matching
+
+```
+Code change. One function, then re-measure.
+
+normSecKey lowercases and strips non-alphanumerics but RETAINS parenthetical
+text. So "Ravi Kumar P (Off Roll)" normalises to "ravikumarpoffroll" and can
+never match a roster entry.
+
+The FY2025-26 gap is 58 order-file names absent from the roster and 46
+roster names absent from the order file. The diagnostic is right that this
+is not 104 distinct people.
+
+1. Strip parenthetical text before normalising. "(Off Roll)", "(Rudrapur)"
+   and similar are annotations, not part of the name.
+
+2. Re-measure the 58/46 gap and print the new figures.
+
+3. Print what remains unmatched after the change, both directions, with net
+   amount. Rajat Chowdhury at Rs 98.34 L and Karuppasamy R at Rs 93.32 L are
+   the two largest today.
+
+4. Do NOT add fuzzy matching, initials expansion or manual aliases in this
+   change. Strip the parentheses, measure, and report. Anything further is a
+   separate decision.
+```
+
+---
+
+## Section D — formatting. Only after A, B and C.
+
+```
+Code change. Presentation only, once the sheets have content.
+
+1. NUMBER FORMATS - the rule already applied to Secondary Orders and Red
+   Alerts:
+     >= 1,00,00,000  Rs 2.72 Cr    two decimals
+     >= 1,00,000     Rs 27.24 L    two decimals
+     >= 1,000        Rs 27,244     grouped, no decimals
+   Percentages as percentages, two decimals. Counts as grouped integers.
+
+2. STRUCTURE
+   - freeze the header row and the member-name column on every sheet
+   - repeating header rows on print
+   - consistent column widths; no column wider than its content needs
+   - the 99-column monthly sheet: show only months within the selected
+     period. Twelve blocks for a five-month period is why it reads at 9%
+     fill
+
+3. THE GREY CONVENTION - keep it and make it mean one thing
+   Light grey = value unknown, source unavailable. Not zero.
+   Every greyed block keeps its reason in the Missing Data tab.
+   A cell that is genuinely zero is shown as 0, not grey.
+
+4. INFO TAB - add to what is already there:
+     FY, period, filters applied
+     which source each dataset came from
+     provisional months (already present and correct)
+     generated timestamp
+
+5. Do not change any figure, query or column meaning.
+
+AFTER APPLYING, print the rendered header row and first three data rows of
+each sheet, and confirm no figure moved.
+```
+
+---
+
+## Notes
+
+- **Section A alone fixes most of this.** One fallback restores Head Summary, the
+  monthly blocks, and most of the 47 suppressed fields.
+- **Section B is small and matters most to whoever reads the export.** A column
+  headed Sales that contains order booking will be acted on. The distinction has
+  already been corrected in the SKU surfaces; this is the same fix in the last
+  place it is wrong.
+- **Section C is deliberately narrow.** Strip the parentheses, measure, report.
+  Fuzzy matching and alias tables are a separate decision and should not ride
+  along with a one-line normalisation fix.
+- **Requirement A1 is the principle underneath all of it.** This project has spent
+  weeks separating "zero" from "unknown". The export currently collapses them, and
+  that is what produced twelve state heads with no sales.
+
+## Still genuinely missing after all four sections
+
+**Finished-goods cost.** `cost_master` has the right columns and zero rows, so GP
+Margin stays empty. The GP MARGIN workbooks now exist for both years — blocked
+only on the PTMT January–April BOM question.
+
+**T.A. bill and expense export**, planned order counts, SFA and GPS evidence, and
+independent per-member dispatch. None has a source anywhere.
