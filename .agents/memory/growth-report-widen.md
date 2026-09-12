@@ -1,27 +1,33 @@
 ---
-name: Growth Report WIDEN (state-head deepDive)
-description: How the state-head WIDEN lever is sized and deduplicated in aiGrowthReport.ts
+name: Growth Report secondary opportunity basis
+description: Durable population, period, omission, and deduplication rules for WIDEN and ACTIVATE
 ---
 
-# Growth Report WIDEN — state-head (deepDive) branch
+# Growth Report WIDEN and ACTIVATE basis
 
-State-head scope sizes each distributor's brand gap vs the peer-median distinct-brand
-count from the Sheets deep dive (`d.skuSpread.distinctBrands`):
-`perCodeQuarterly = (medianNet / max(1, months/3)) / peerMedianBrands`;
-`valueHigh = gapBrands × perCodeQuarterly × rangeUptake`; `valueLow = valueHigh/2`.
-Pinned by `widenDeepDiveSizing` (exported) + `aiGrowthReport.widen.test.ts`.
+**Rule:** WIDEN must monetize a secondary distributor range gap with median
+positive signed secondary NET per distributor from the same eligible population,
+FY, geography, and loaded period. ACTIVATE must monetize dormant secondary
+retailers with median positive signed secondary NET per retailer from that same
+retailer cohort and period.
 
-**Rule: WIDEN must be deduplicated by entity NAME against CLOSE/RECOVER/ACTIVATE.**
-**Why:** the state-head deep dive lists distributors under the SAME names sale_line
-uses for customers, so an account claimed by a higher-precedence lever would be
-double-counted. The growth-report guard's "no entity under multiple lever tags"
-check fails otherwise. (Company/state SQL path is distributor-only, no overlap.)
+**Why:** Mixing secondary counts with a primary-customer median materially
+overstates both opportunities. Filtering positive rows before aggregation also
+inflates NET by discarding returns and credit adjustments.
 
-**Numeric guard needs a code-generated ₹ figure in the narrative.** Claude's prose
-is intentionally digit-free, so `guard.checked` was 0. Fix: append
-`executiveSummary.deduplicationNote` (always carries ₹ Cr) to the guarded body and
-add pre/postDedup totals to the guard payload allowlist.
+**How to apply:** Aggregate all signed rows first, then retain positive
+distributor/retailer aggregates. Keep state-head WIDEN on its existing brand
+vocabulary and company/state WIDEN on its existing segment vocabulary. Normalize
+quarterly values using actual loaded-month coverage, not an assumed 12 months.
 
-**Cold-cache gotcha:** deep dive can return distributors with no skuSpread attached;
-WIDEN then renders `notAvailable` even when real gaps exist. A warm/full load
-produces entries. (Follow-up: guard should warm then assert WIDEN populated.)
+**Rule:** If the matched rows, peer group, median, or period coverage is missing,
+emit null and omit the entity/lever from narrative ranking; never convert missing
+basis into a numeric zero.
+
+**Why:** Zero is a business result. Missing evidence is an availability state and
+must not be included in totals or narrated as a calculated opportunity.
+
+**How to apply:** Payload basis metadata must name population, entity, source,
+period, and geography. Keep the half-to-full estimate range and assumptions
+visible. Preserve precedence CLOSE > RECOVER > ACTIVATE > WIDEN and deduplicate
+distributor names against higher-priority levers.
