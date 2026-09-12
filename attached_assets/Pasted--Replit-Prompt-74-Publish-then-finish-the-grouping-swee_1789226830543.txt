@@ -1,0 +1,112 @@
+# Replit Prompt 74 — Publish, then finish the grouping sweep
+
+**Date:** 12 September 2026
+**Scope:** Section A is a publish. Section B is read-only.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Section A — commit, push, publish
+
+The Report 2 drill display fixes are verified locally but not committed. Eleven
+focused tests passed, typecheck passed, independent review found no blocking
+issues — and none of it is in the repository or in production.
+
+```
+Commit, push and publish the Report 2 drill display change.
+
+After publishing, print:
+  - the deployed commit, and confirmation it matches origin/main
+  - the Report 2 drill for KARNATAKA as rendered: months in fiscal order,
+    growth at one decimal, Apr-26 showing "new" rather than an em dash
+  - one drill level showing Mismatch (Truncated), or confirmation that none
+    currently exceeds the 5,000-item cap
+  - confirmation no figure or API calculation changed
+```
+
+---
+
+## Section B — the grouping sweep, C2 from Prompt 73
+
+`R7 As-of Snapshot` was found on the old flat 17 categories and corrected. The
+sweep for other surfaces was never reported.
+
+The decision is **master grouping everywhere** — six masters from
+`canonical_item_category_registry`, with sub-category as the level below:
+
+**PLUMBING · PTMT · C P · SANITARYWARE · SINK · HARDWARE**
+
+Water tank sits inside PLUMBING.
+
+```
+Read-only. Change nothing. This is a survey.
+
+B1. List EVERY surface that groups products, and say which taxonomy it uses:
+
+      - master grouping from canonical_item_category_registry
+      - the old flat 17 from sale_line.group_canon
+      - segment_canon from the secondary tables
+      - MRP Division or Category
+      - CRM Category Name from the Product-Wise export
+      - something else
+
+    Cover: Overview, Growth, Momentum, Regional, Products, SKU Deep Dive,
+    Sales Deep Dive, Distributor Deep Dive, Company Reports 1-7, Comparison,
+    Secondary Orders, Secondary Performance, Pending Orders, Targets, MRP
+    pages, Market Survey, Alerts, Warning System, Data Health, and every AI
+    payload family.
+
+B2. For each one still on the old 17, state what changes if it moves -
+    which figures shift, and whether any breakdown disappears or merges.
+
+    The CP case is the sharp one: the old grouping has "CP (Chrome-Plated)"
+    as one category; the master grouping has C P with three sub-categories.
+    Anything grouping by the old value keeps working but says something
+    different from its neighbours.
+
+B3. Which surfaces group by segment_canon rather than a product category at
+    all? secondary_sku_line and secondary_register_line use segment, which
+    is a different axis. Those may be correct as they are - confirm rather
+    than assume, and say which.
+
+B4. Is there anywhere that MIXES taxonomies in one view - one column from
+    the registry and another from group_canon? That would be the worst case
+    and worth finding now.
+
+B5. Sequence the remaining moves by risk: which are display-only, which
+    change a figure, and which feed an alert or a scheme.
+
+    Anything feeding scheme eligibility needs its own decision -
+    scheme_item_group is a separate 22-value vocabulary and a category
+    remap must not silently change who qualifies.
+
+Report only. Change nothing, and do not move any surface in this prompt.
+```
+
+---
+
+## Notes
+
+- **Section A first**, because verified-but-uncommitted work is the state that gets
+  lost. The same pattern earlier this week left 45 commits unpushed across
+  fourteen deploys.
+- **B4 is the one I would read first.** A single view drawing one column from the
+  registry and another from `group_canon` would produce a table that does not add
+  up, and it would be very hard to spot from the screen.
+- **B5's scheme caveat is not theoretical.** Scheme eligibility runs on
+  `scheme_item_group.item_group`, a separate 22-value vocabulary. If a category
+  remap can shift a slab or a nudge, that is money moving because someone
+  retagged a product — and it needs an explicit barrier rather than an assumption.
+
+## Where Company Reports stands after this
+
+Drill-down live on all seven reports with shareable URLs and browser history.
+Reconciliation visible at every level, with unattributed and truncated
+differences labelled separately. Export trimmed to analysis sheets, with raw
+verification data behind a separate download. Master grouping applied throughout,
+and Report 2's month drill now reads chronologically with honest growth
+formatting.
+
+The sweep in Section B is the last piece of making the taxonomy consistent rather
+than merely correct in the places we happened to look.
