@@ -40,6 +40,20 @@ export type TargetRow = {
   updatedAt: string;
 };
 
+export type TargetSourceProvenance = {
+  success: boolean;
+  rowCount: number;
+  contributedRows: number;
+  overlays: number;
+  error: string | null;
+};
+
+export type TargetPipelineLoad = {
+  targets: Map<string, TargetRow>;
+  targetMaster: TargetSourceProvenance;
+  memberTargets: TargetSourceProvenance;
+};
+
 type StoredRow = TargetRow & { sheetRow: number };
 
 const NUM_COLS = 58;
@@ -128,26 +142,68 @@ async function loadStoredRows(): Promise<StoredRow[]> {
 }
 
 export async function loadTargetsForFy(fy: string): Promise<Map<string, TargetRow>> {
+  const result = await loadTargetsForFyWithProvenance(fy);
+  if (!result.memberTargets.success) {
+    throw new Error(result.memberTargets.error ?? "member_targets read failed.");
+  }
+  return result.targets;
+}
+
+export async function loadTargetsForFyWithProvenance(
+  fy: string,
+): Promise<TargetPipelineLoad> {
   // Sheet is the read-only seed; DB rows (explicit user saves) overlay it and
   // win per member. Known curl-test rows in the sheet are discarded — they
   // were confirmed as API tests, not real targets (Aug 2026 decision).
-  const [stored, dbRows] = await Promise.all([
-    loadStoredRows().catch((err) => {
-      // Degraded: Sheets seed unavailable — serve DB-only rather than fail,
-      // but make the outage visible in the server log.
-      console.error("[targets] Target Master sheet read failed; serving DB-only", err);
-      return [] as StoredRow[];
-    }),
-    loadDbTargetsForFy(fy),
-  ]);
+  let stored: StoredRow[] = [];
+  let targetMasterError: string | null = null;
+  try {
+    stored = await loadStoredRows();
+  } catch (err) {
+    targetMasterError = err instanceof Error ? err.message : String(err);
+    // Degraded: Sheets seed unavailable — serve DB-only rather than fail,
+    // but make the outage visible in the server log.
+    console.error("[targets] Target Master sheet read failed; serving DB-only", err);
+  }
+  let dbRows = new Map<string, TargetRow>();
+  let dbError: string | null = null;
+  try {
+    dbRows = await loadDbTargetsForFy(fy);
+  } catch (err) {
+    dbError = err instanceof Error ? err.message : String(err);
+  }
   const map = new Map<string, TargetRow>();
+  const sheetKeys = new Set<string>();
+  let sheetRowCount = 0;
   for (const row of stored) {
     if (row.fy !== fy) continue;
     if (row.updatedBy.toLowerCase().startsWith("curl-test")) continue;
+    sheetRowCount++;
+    sheetKeys.add(normName(row.teamMember));
     map.set(normName(row.teamMember), row);
   }
+  let dbOverlays = 0;
+  for (const key of dbRows.keys()) {
+    if (map.has(key)) dbOverlays++;
+  }
   for (const [key, row] of dbRows) map.set(key, row);
-  return map;
+  return {
+    targets: map,
+    targetMaster: {
+      success: targetMasterError == null,
+      rowCount: sheetRowCount,
+      contributedRows: [...sheetKeys].filter((key) => !dbRows.has(key)).length,
+      overlays: 0,
+      error: targetMasterError,
+    },
+    memberTargets: {
+      success: dbError == null,
+      rowCount: dbRows.size,
+      contributedRows: dbRows.size,
+      overlays: dbOverlays,
+      error: dbError,
+    },
+  };
 }
 
 // --- Validation -----------------------------------------------------------

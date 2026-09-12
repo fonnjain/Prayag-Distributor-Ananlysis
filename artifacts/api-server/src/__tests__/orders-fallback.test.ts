@@ -3,8 +3,8 @@
 // (a live-source failure that must not short-circuit the fallback). Covers:
 //   (1) folder listing throws + an uploaded xlsx copy exists  -> load succeeds
 //       from the uploaded source via the same content-based parser.
-//   (2) folder listing throws + no uploaded copy              -> status detail
-//       surfaces the real folder-listing reason (not a generic no-file).
+//   (2) a database fallback failure preserves both the Drive and database
+//       reasons without relying on ambient database contents.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +18,7 @@ vi.mock("../lib/registers/sheetsApi.js", async (importOriginal) => {
 
 import ExcelJS from "exceljs";
 import {
+  databaseFallbackFailureDetail,
   loadOrderFile,
   getOrderLoadStatus,
   invalidateOrderCache,
@@ -81,14 +82,15 @@ describe("order file upload fallback when the Drive folder listing fails", () =>
     expect(st?.status).toBe("ok");
   });
 
-  it("surfaces the folder-listing failure reason when no uploaded copy exists", async () => {
-    const agg = await loadOrderFile(FY);
-
-    expect(agg).toBeNull();
-    const st = getOrderLoadStatus(FY);
-    expect(st?.status).toBe("error");
-    expect(st?.detail).toContain("Could not list the order-booking Drive folder");
+  it("preserves both source failure reasons when the database fallback fails", () => {
+    const detail = databaseFallbackFailureDetail(
+      FY,
+      "Could not list the order-booking Drive folder (500)",
+      new Error("relation secondary_order_line does not exist"),
+    );
+    expect(detail).toContain("Could not list the order-booking Drive folder");
     // The real underlying reason (HTTP 500) is preserved, not masked as no-file.
-    expect(st?.detail).toContain("500");
+    expect(detail).toContain("500");
+    expect(detail).toContain("relation secondary_order_line does not exist");
   });
 });

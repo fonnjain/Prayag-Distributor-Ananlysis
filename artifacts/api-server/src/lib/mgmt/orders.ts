@@ -42,6 +42,8 @@ import {
   fyStartYear,
 } from "./names.js";
 import { mgmtSources } from "./roster.js";
+import { eq } from "drizzle-orm";
+import { db, secondaryOrderLines } from "@workspace/db";
 
 export type RetailerStat = { amount: number; orderIds: Set<string>; name: string };
 
@@ -100,6 +102,7 @@ export type OrderFileAgg = {
 export type OrderLoadStatus = {
   fy: string;
   status: "ok" | "no-file" | "error";
+  source?: "drive" | "uploaded" | "secondary_order_line";
   httpStatus?: number;
   detail: string;
   rowsRead?: number;
@@ -323,6 +326,227 @@ function errorDetail(fy: string, spreadsheetId: string, err: unknown): OrderLoad
 // Concurrent requests for the same uncached FY share one Sheets read.
 const inFlight = new Map<string, Promise<OrderFileAgg | null>>();
 
+export type SecondaryOrderLineForAggregation = {
+  orderDatetime: Date;
+  orderId: string;
+  salesUserName: string | null;
+  customerName: string | null;
+  dealerId: string;
+  cpName: string | null;
+  state: string | null;
+  segmentCanon: string | null;
+  categoryName: string | null;
+  basicOrderValue: string | null;
+};
+
+/** Drive/upload evidence always wins over the database fallback. */
+export function chooseOrderAggregate(
+  driveResult: OrderFileAgg | null,
+  databaseResult: OrderFileAgg | null,
+): OrderFileAgg | null {
+  return driveResult ?? databaseResult;
+}
+
+export function databaseFallbackFailureDetail(
+  fy: string,
+  driveDetail: string | undefined,
+  databaseError: unknown,
+): string {
+  return (
+    `${driveDetail ?? `Drive source for ${fy} was unavailable.`} ` +
+    `Database fallback secondary_order_line also failed: ` +
+    `${databaseError instanceof Error ? databaseError.message : String(databaseError)}`
+  );
+}
+
+/**
+ * Build the management aggregate from the durable Product-Wise order mirror.
+ *
+ * This deliberately uses normSecKey, rather than introducing a second join
+ * policy in the database path. The Drive parser and this fallback must feed the
+ * same member key space until the separately approved name-key change lands.
+ */
+export function aggregateSecondaryOrderLines(
+  fy: string,
+  sourceId: string,
+  rows: SecondaryOrderLineForAggregation[],
+): OrderFileAgg {
+  const perTm = new Map<string, TmOrderAgg>();
+  const retailerFirst = new Map<string, number>();
+  const segmentTotals = new Map<string, number>();
+  let totalAmount = 0;
+  const monthOrderIds = (m: number): Array<Set<string>> =>
+    Array.from({ length: m }, () => new Set<string>());
+  const monthAmounts = (): number[] => new Array(12).fill(0) as number[];
+  const makeAgg = (displayName: string): TmOrderAgg => ({
+    displayName,
+    amount: 0,
+    monthAmount: monthAmounts(),
+    saleAmount: 0,
+    saleMonthAmount: monthAmounts(),
+    monthOrderIds: monthOrderIds(12),
+    orderIds: new Set<string>(),
+    retailers: new Map<string, RetailerStat>(),
+    perSegment: new Map<string, number>(),
+    perPartyPerSegment: new Map<string, Map<string, number>>(),
+    partyState: new Map<string, string>(),
+    perStatePerParty: new Map<string, Map<string, number>>(),
+    perStatePerMonth: new Map<string, number[]>(),
+    directAmount: 0,
+    directRetailers: new Set<string>(),
+    distributors: new Set<string>(),
+  });
+
+  for (const row of rows) {
+    const dateSerial =
+      Math.round((row.orderDatetime.getTime() - Date.UTC(1899, 11, 30)) / 86_400_000);
+    if (!Number.isFinite(dateSerial)) continue;
+    const key = normSecKey(row.salesUserName ?? "");
+    // Match the Drive parser's member eligibility: an order row with no
+    // normalized salesperson is not part of the member aggregate, source
+    // total, or retailer-first census.
+    if (!key) continue;
+    const amount = row.basicOrderValue == null ? 0 : Number(row.basicOrderValue);
+    const lineAmount = Number.isFinite(amount) ? amount : 0;
+    const monthIdx = mgmtMonthIndex(dateSerial);
+    totalAmount += lineAmount;
+    if (row.dealerId) {
+      const prev = retailerFirst.get(row.dealerId);
+      if (prev === undefined || dateSerial < prev) retailerFirst.set(row.dealerId, dateSerial);
+    }
+    let agg = perTm.get(key);
+    if (!agg) {
+      agg = makeAgg(row.salesUserName?.trim() || key);
+      perTm.set(key, agg);
+    }
+    agg.amount += lineAmount;
+    agg.monthAmount[monthIdx] += lineAmount;
+    agg.saleAmount += lineAmount;
+    agg.saleMonthAmount[monthIdx] += lineAmount;
+    const segment = row.segmentCanon?.trim() || row.categoryName?.trim() || "";
+    if (segment && lineAmount !== 0) {
+      segmentTotals.set(segment, (segmentTotals.get(segment) ?? 0) + lineAmount);
+      agg.perSegment.set(segment, (agg.perSegment.get(segment) ?? 0) + lineAmount);
+      if (row.dealerId) {
+        let pps = agg.perPartyPerSegment.get(row.dealerId);
+        if (!pps) {
+          pps = new Map();
+          agg.perPartyPerSegment.set(row.dealerId, pps);
+        }
+        pps.set(segment, (pps.get(segment) ?? 0) + lineAmount);
+      }
+    }
+    if (row.orderId) {
+      agg.orderIds.add(row.orderId);
+      agg.monthOrderIds[monthIdx].add(row.orderId);
+    }
+    if (row.dealerId) {
+      let retailer = agg.retailers.get(row.dealerId);
+      if (!retailer) {
+        retailer = {
+          amount: 0,
+          orderIds: new Set<string>(),
+          name: row.customerName?.trim() || row.dealerId,
+        };
+        agg.retailers.set(row.dealerId, retailer);
+      }
+      retailer.amount += lineAmount;
+      if (row.orderId) retailer.orderIds.add(row.orderId);
+      if (row.state?.trim()) {
+        const state = row.state.trim();
+        if (!agg.partyState.has(row.dealerId)) agg.partyState.set(row.dealerId, state);
+        const resolvedState = agg.partyState.get(row.dealerId) ?? state;
+        let byParty = agg.perStatePerParty.get(resolvedState);
+        if (!byParty) {
+          byParty = new Map();
+          agg.perStatePerParty.set(resolvedState, byParty);
+        }
+        byParty.set(row.dealerId, (byParty.get(row.dealerId) ?? 0) + lineAmount);
+        let byMonth = agg.perStatePerMonth.get(resolvedState);
+        if (!byMonth) {
+          byMonth = monthAmounts();
+          agg.perStatePerMonth.set(resolvedState, byMonth);
+        }
+        byMonth[monthIdx] += lineAmount;
+      }
+    }
+    const distributor = row.cpName?.trim() || "";
+    if (!distributor || distributor.toLowerCase().replace(/[^a-z]/g, "") === "direct" ||
+        distributor.toLowerCase().replace(/[^a-z]/g, "") === "directdealer") {
+      agg.directAmount += lineAmount;
+      if (row.dealerId) agg.directRetailers.add(row.dealerId);
+    } else {
+      agg.distributors.add(distributor.toLowerCase());
+    }
+  }
+
+  return {
+    fy,
+    spreadsheetId: sourceId,
+    perTm,
+    retailerFirst,
+    segmentTotals,
+    totalAmount,
+    totalSaleAmount: totalAmount,
+    rowsRead: rows.length,
+    loadedAt: Date.now(),
+  };
+}
+
+async function loadOrderFileFromDatabase(fy: string): Promise<OrderFileAgg> {
+  const rows = await db
+    .select({
+      orderDatetime: secondaryOrderLines.orderDatetime,
+      orderId: secondaryOrderLines.orderId,
+      salesUserName: secondaryOrderLines.salesUserName,
+      customerName: secondaryOrderLines.customerName,
+      dealerId: secondaryOrderLines.dealerId,
+      cpName: secondaryOrderLines.cpName,
+      state: secondaryOrderLines.state,
+      segmentCanon: secondaryOrderLines.segmentCanon,
+      categoryName: secondaryOrderLines.categoryName,
+      basicOrderValue: secondaryOrderLines.basicOrderValue,
+    })
+    .from(secondaryOrderLines)
+    .where(eq(secondaryOrderLines.fiscalYear, fy));
+  return aggregateSecondaryOrderLines(fy, "secondary_order_line", rows);
+}
+
+async function loadOrderFileWithDatabaseFallback(
+  fy: string,
+  driveResult: OrderFileAgg | null,
+): Promise<OrderFileAgg | null> {
+  if (driveResult) return driveResult;
+  try {
+    const dbResult = await loadOrderFileFromDatabase(fy);
+    const status = getOrderLoadStatus(fy);
+    loadStatus.set(fy, {
+      fy,
+      status: "ok",
+      source: "secondary_order_line",
+      detail:
+        `Drive source was unavailable; read ${dbResult.rowsRead} rows from ` +
+        "secondary_order_line.",
+      rowsRead: dbResult.rowsRead,
+      spreadsheetId: "secondary_order_line",
+    });
+    logger.warn(
+      { fy, rowsRead: dbResult.rowsRead, driveReason: status?.detail },
+      "order booking Drive read unavailable; used secondary_order_line",
+    );
+    const result = chooseOrderAggregate(null, dbResult);
+    if (!result) return null;
+    cache.set(fy, result);
+    return result;
+  } catch (err) {
+    const prior = getOrderLoadStatus(fy);
+    const detail = databaseFallbackFailureDetail(fy, prior?.detail, err);
+    loadStatus.set(fy, { fy, status: "error", detail });
+    logger.error({ fy, err }, "secondary_order_line fallback failed");
+    return null;
+  }
+}
+
 // Never throws: any failure is recorded in the per-FY load status (visible
 // via getOrderLoadStatus) and logged with the exact reason.
 export async function loadOrderFile(
@@ -332,9 +556,11 @@ export async function loadOrderFile(
   if (hit && Date.now() - hit.loadedAt < ORDERS_TTL_MS) return hit;
   const pending = inFlight.get(fy);
   if (pending) return pending;
-  const p = loadOrderFileUncached(fy).finally(() => {
-    inFlight.delete(fy);
-  });
+  const p = loadOrderFileUncached(fy)
+    .then((driveResult) => loadOrderFileWithDatabaseFallback(fy, driveResult))
+    .finally(() => {
+      inFlight.delete(fy);
+    });
   inFlight.set(fy, p);
   return p;
 }
@@ -709,6 +935,7 @@ async function loadOrderFileUncached(
   loadStatus.set(fy, {
     fy,
     status: "ok",
+    source: sourceId.startsWith("uploaded:") ? "uploaded" : "drive",
     detail: `Read ${rowsRead} rows from source ${sourceId}.`,
     rowsRead,
     spreadsheetId: sourceId,

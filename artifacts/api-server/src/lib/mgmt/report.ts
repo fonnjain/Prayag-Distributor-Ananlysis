@@ -27,9 +27,10 @@ import {
   normName,
 } from "./names.js";
 import {
-  loadTargetsForFy,
+  loadTargetsForFyWithProvenance,
   type TargetRow,
   type TargetField,
+  type TargetSourceProvenance,
 } from "./targets.js";
 import {
   buildDashboardXlsxLookup,
@@ -41,6 +42,8 @@ import {
   type HrSfaRecord,
 } from "./hrSfaDashboard.js";
 import { loadMgmtMargins } from "./mgmtMargins.js";
+import { eq } from "drizzle-orm";
+import { db, secondaryHeadMonths } from "@workspace/db";
 
 export type ReportFilters = {
   fy: string;
@@ -63,6 +66,8 @@ export function regionMap(): RegionMap {
 const MISSING_SOURCES: Record<string, string> = {
   target:
     "Target Master (primary/secondary/monthly targets and business plans live in scattered per-head plan sheets; needs one consolidated sheet)",
+  planCount:
+    "Planned order counts by team member and month (no connected source currently provides this measure)",
   expense: "Finance T.A. bill / expense export per team member per month",
   orders:
     "Secondary Order Booking Segment Wise workbook for the selected year (not found in the Drive folder yet)",
@@ -101,7 +106,72 @@ export type MemberRow = {
   priorSaleAmount: number | null;
   oldNew: string;
   target: TargetRow | null;
+  /** Monthly plans from secondary_head_month, used only when Target Master has no value. */
+  secondaryPlanMonths: (number | null)[] | null;
 };
+
+export type ReportSourceState = {
+  available: boolean;
+  source:
+    | "drive"
+    | "uploaded"
+    | "secondary_order_line"
+    | "secondary_head_month"
+    | null;
+  reason: string | null;
+};
+
+type MonthlyPlanState = ReportSourceState & {
+  plans: Map<string, (number | null)[]>;
+};
+
+async function loadSecondaryMonthlyPlans(fy: string): Promise<MonthlyPlanState> {
+  try {
+    const rows = await db
+      .select({
+        headCanon: secondaryHeadMonths.headCanon,
+        monthIdx: secondaryHeadMonths.monthIdx,
+        planAmount: secondaryHeadMonths.planAmount,
+      })
+      .from(secondaryHeadMonths)
+      .where(eq(secondaryHeadMonths.fy, fy));
+    const plans = new Map<string, (number | null)[]>();
+    for (const row of rows) {
+      const monthIdx = Number(row.monthIdx);
+      if (!Number.isInteger(monthIdx) || monthIdx < 0 || monthIdx > 11) continue;
+      let months = plans.get(row.headCanon);
+      if (!months) {
+        months = new Array(12).fill(null) as (number | null)[];
+        plans.set(row.headCanon, months);
+      }
+      // SQL NULL is evidence that the source has no plan for this month. Keep
+      // it null; never turn it into a measured zero with Number(... ?? 0).
+      months[monthIdx] = row.planAmount == null ? null : Number(row.planAmount);
+    }
+    return rows.length > 0
+      ? {
+          available: true,
+          source: "secondary_head_month",
+          reason: null,
+          plans,
+        }
+      : {
+          available: false,
+          source: null,
+          reason: `secondary_head_month has no rows for ${fy}.`,
+          plans,
+        };
+  } catch (err) {
+    return {
+      available: false,
+      source: null,
+      reason:
+        `Reading secondary_head_month for ${fy} failed: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+      plans: new Map(),
+    };
+  }
+}
 
 // Effective monthly target: explicit override, else a SEASONALLY-WEIGHTED share
 // of the annual figure.  A flat ÷12 would produce badly wrong targets — see
@@ -123,17 +193,55 @@ function tgtRange(
   monthFrom: number,
   monthTo: number,
 ): number | null {
-  if (!r.target) return null;
+  if (f === "secondary") {
+    return sumMonthlyPlanRange(
+      r.target,
+      r.secondaryPlanMonths,
+      monthFrom,
+      monthTo,
+    );
+  }
   let sum = 0;
   let any = false;
   for (let i = monthFrom - 1; i <= monthTo - 1; i++) {
-    const v = tgtMonthly(r.target, f, i);
+    const v = r.target ? tgtMonthly(r.target, f, i) : null;
     if (v != null) {
       sum += v;
       any = true;
     }
   }
   return any ? sum : null;
+}
+
+export function resolveMonthlyPlan(
+  target: TargetRow | null,
+  fallback: (number | null)[] | null,
+  monthIdx: number,
+): number | null {
+  const fromTarget = target ? tgtMonthly(target, "secondary", monthIdx) : null;
+  return fromTarget ?? fallback?.[monthIdx] ?? null;
+}
+
+export function sumMonthlyPlanRange(
+  target: TargetRow | null,
+  fallback: (number | null)[] | null,
+  monthFrom: number,
+  monthTo: number,
+): number | null {
+  let sum = 0;
+  let any = false;
+  for (let i = monthFrom - 1; i <= monthTo - 1; i++) {
+    const value = resolveMonthlyPlan(target, fallback, i);
+    if (value != null) {
+      sum += value;
+      any = true;
+    }
+  }
+  return any ? sum : null;
+}
+
+function monthlyPlan(r: MemberRow, monthIdx: number): number | null {
+  return resolveMonthlyPlan(r.target, r.secondaryPlanMonths, monthIdx);
 }
 
 function tgtAnnual(r: MemberRow, f: TargetField): number | null {
@@ -354,6 +462,129 @@ export type XlsxTargetDiagnostic = {
   unmatchedRows: Array<{ name: string; target: number | null }>;
 };
 
+export type DashboardTargetProvenance = {
+  success: boolean;
+  rowCount: number;
+  contributedRows: number;
+  error: string | null;
+};
+
+export function mergeDashboardXlsxTargets(
+  targetMap: Map<string, TargetRow>,
+  xlsxLookup: Map<string, DashboardXlsxRecord>,
+  fy: string,
+  roster: Array<{ name: string; normKey: string }>,
+): { contributedRows: number; tokenFallbacks: number; rosterSortedTokens: Map<string, string> } {
+  const insertedBySource = new Map<DashboardXlsxRecord, string>();
+  let contributedRows = 0;
+  for (const [key, rec] of xlsxLookup) {
+    if (targetMap.has(key)) continue;
+    targetMap.set(key, xlsxRecordToTargetRow(rec, fy));
+    insertedBySource.set(rec, key);
+    contributedRows++;
+  }
+
+  const xlsxBySortedToken = new Map<string, DashboardXlsxRecord>();
+  for (const [, rec] of xlsxLookup) {
+    const stk = sortedTokenKey(rec.name);
+    if (stk && !xlsxBySortedToken.has(stk)) xlsxBySortedToken.set(stk, rec);
+  }
+  const rosterSortedTokens = new Map<string, string>();
+  for (const m of roster) {
+    const stk = sortedTokenKey(m.name);
+    if (stk && !rosterSortedTokens.has(stk)) rosterSortedTokens.set(stk, m.normKey);
+  }
+
+  let tokenFallbacks = 0;
+  for (const m of roster) {
+    if (targetMap.has(m.normKey)) continue;
+    const rec = xlsxBySortedToken.get(sortedTokenKey(m.name));
+    if (!rec) continue;
+    const previousKey = insertedBySource.get(rec);
+    if (previousKey && previousKey !== m.normKey) {
+      // The exact-key pass inserted this same source row under its original
+      // name order. Move that one row rather than duplicating it.
+      targetMap.delete(previousKey);
+    }
+    targetMap.set(m.normKey, xlsxRecordToTargetRow(rec, fy));
+    if (!previousKey) contributedRows++;
+    insertedBySource.set(rec, m.normKey);
+    tokenFallbacks++;
+  }
+  return { contributedRows, tokenFallbacks, rosterSortedTokens };
+}
+
+export type TargetProvenance = {
+  targetMaster: TargetSourceProvenance;
+  memberTargets: TargetSourceProvenance;
+  dashboardXlsx: DashboardTargetProvenance;
+};
+
+function provenanceReason(
+  source: string,
+  success: boolean,
+  rowCount: number,
+  contributedRows: number,
+  error: string | null,
+): string {
+  if (!success) return error ?? `${source} read failed.`;
+  if (contributedRows === 0) {
+    return `read successfully (${rowCount} rows) but contributed 0 target rows`;
+  }
+  return `read successfully (${rowCount} rows)`;
+}
+
+export function formatTargetProvenance(provenance: TargetProvenance): string {
+  const sources = [
+    {
+      name: "target_master",
+      data: provenance.targetMaster,
+      detail:
+        `${provenance.targetMaster.contributedRows} contributed of ` +
+        `${provenance.targetMaster.rowCount} read`,
+    },
+    {
+      name: "member_targets",
+      data: provenance.memberTargets,
+      detail:
+        `${provenance.memberTargets.contributedRows} contributed of ` +
+        `${provenance.memberTargets.rowCount} read` +
+        ` (${provenance.memberTargets.overlays} overlays)`,
+    },
+    {
+      name: "dashboard_xlsx",
+      data: provenance.dashboardXlsx,
+      detail:
+        `${provenance.dashboardXlsx.contributedRows} contributed of ` +
+        `${provenance.dashboardXlsx.rowCount} read`,
+    },
+  ];
+  const contributors = sources.filter(
+    ({ data }) => data.success && data.contributedRows > 0,
+  );
+  const failures = sources.filter(({ data }) => !data.success);
+  if (contributors.length === 0) {
+    return (
+      "none — " +
+      sources
+        .map(({ name, data }) =>
+          `${name}: ${provenanceReason(name, data.success, data.rowCount, data.contributedRows, data.error)}`,
+        )
+        .join("; ")
+    );
+  }
+  const contributorText = contributors
+    .map(({ name, data, detail }) => `${name} (${detail})`)
+    .join("; ");
+  if (failures.length === 0) return contributorText;
+  return (
+    `${contributorText}; failures: ` +
+    failures
+      .map(({ name, data }) => `${name}: ${data.error ?? `${name} read failed.`}`)
+      .join("; ")
+  );
+}
+
 export async function assembleRows(
   filters: ReportFilters,
 ): Promise<{
@@ -364,10 +595,14 @@ export async function assembleRows(
   targetsAvailable: boolean;
   orderStatus: OrderLoadStatus | null;
   priorStatus: OrderLoadStatus | null;
+  orderSource: ReportSourceState;
+  priorSource: ReportSourceState;
+  monthlyPlanSource: ReportSourceState;
   nameMatches: NameMatchInfo[];
   segmentCheck: SegmentCheck | null;
   saleAvailable: boolean;
   xlsxTargetDiagnostic: XlsxTargetDiagnostic | null;
+  targetProvenance: TargetProvenance;
 }> {
   const roster = await loadRoster();
   const scope = expandScope(filters);
@@ -380,15 +615,47 @@ export async function assembleRows(
   ]);
   const orderStatus = getOrderLoadStatus(filters.fy) ?? null;
   const priorStatus = getOrderLoadStatus(priorFy(filters.fy)) ?? null;
+  const monthlyPlans = await loadSecondaryMonthlyPlans(filters.fy);
   const firstSeen = agg
     ? await loadRetailerFirstSeen(filters.fy)
     : new Map<string, number>();
   // Targets come from the writable Target Master sheet. A read failure only
   // downgrades the target columns to "missing" — it never blocks the report.
   let targetMap = new Map<string, TargetRow>();
+  let targetMasterProvenance: TargetSourceProvenance = {
+    success: false,
+    rowCount: 0,
+    contributedRows: 0,
+    overlays: 0,
+    error: "Target Master pipeline was not read.",
+  };
+  let memberTargetsProvenance: TargetSourceProvenance = {
+    success: false,
+    rowCount: 0,
+    contributedRows: 0,
+    overlays: 0,
+    error: "member_targets read was not attempted.",
+  };
   try {
-    targetMap = await loadTargetsForFy(filters.fy);
+    const targetLoad = await loadTargetsForFyWithProvenance(filters.fy);
+    targetMap = targetLoad.targets;
+    targetMasterProvenance = targetLoad.targetMaster;
+    memberTargetsProvenance = targetLoad.memberTargets;
   } catch (err) {
+    targetMasterProvenance = {
+      success: false,
+      rowCount: 0,
+      contributedRows: 0,
+      overlays: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+    memberTargetsProvenance = {
+      success: false,
+      rowCount: 0,
+      contributedRows: 0,
+      overlays: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
     logger.warn(
       { err, fy: filters.fy },
       "target master read failed; target columns left blank",
@@ -399,45 +666,40 @@ export async function assembleRows(
   // so it also provides stateHead for supplemental rows. Entries from the
   // Prayag Target Master (Sheets) always override the xlsx on conflict.
   let xlsxTargetDiagnostic: XlsxTargetDiagnostic | null = null;
+  let dashboardXlsxProvenance: DashboardTargetProvenance = {
+    success: false,
+    rowCount: 0,
+    contributedRows: 0,
+    error: "Dashboard XLSX pipeline was not read.",
+  };
+  let dashboardXlsxContributions = 0;
+  let dashboardXlsxRowsRead = 0;
   try {
     const xlsxLookup = await buildDashboardXlsxLookup(filters.fy);
+    dashboardXlsxRowsRead = xlsxLookup.size;
+    dashboardXlsxProvenance = {
+      success: true,
+      rowCount: xlsxLookup.size,
+      contributedRows: 0,
+      error: null,
+    };
     if (xlsxLookup.size > 0) {
-      // Build a sorted-token secondary index: handles first-name/last-name swap
-      // differences between the xlsx names and roster names.
-      const xlsxBySortedToken = new Map<string, DashboardXlsxRecord>();
-      for (const [, rec] of xlsxLookup) {
-        const stk = sortedTokenKey(rec.name);
-        if (stk && !xlsxBySortedToken.has(stk)) xlsxBySortedToken.set(stk, rec);
-      }
-
-      // Primary join: normKey exact match.
-      for (const [key, rec] of xlsxLookup) {
-        if (targetMap.has(key)) continue;
-        targetMap.set(key, xlsxRecordToTargetRow(rec, filters.fy));
-      }
-
-      // Secondary join: sorted-token fallback for roster members still unmatched.
-      const rosterSortedTokens = new Map<string, string>(); // sortedToken → normKey
-      for (const m of roster.members) {
-        const stk = sortedTokenKey(m.name);
-        if (stk && !rosterSortedTokens.has(stk)) rosterSortedTokens.set(stk, m.normKey);
-      }
-      let tokenFallbacks = 0;
-      for (const m of roster.members) {
-        if (targetMap.has(m.normKey)) continue;
-        const rec = xlsxBySortedToken.get(sortedTokenKey(m.name));
-        if (rec) {
-          targetMap.set(m.normKey, xlsxRecordToTargetRow(rec, filters.fy));
-          tokenFallbacks++;
-        }
-      }
+      const mergeResult = mergeDashboardXlsxTargets(
+        targetMap,
+        xlsxLookup,
+        filters.fy,
+        roster.members.map((m) => ({ name: m.name, normKey: m.normKey })),
+      );
+      dashboardXlsxContributions = mergeResult.contributedRows;
+      const tokenFallbacks = mergeResult.tokenFallbacks;
+      dashboardXlsxProvenance.contributedRows = dashboardXlsxContributions;
 
       // Diagnostic: xlsx records that matched no roster member by either method.
       const rosterNormKeys = new Set(roster.members.map((m) => m.normKey));
       const unmatchedRows: Array<{ name: string; target: number | null }> = [];
       for (const [, rec] of xlsxLookup) {
         if (rosterNormKeys.has(rec.normKey)) continue;
-        if (rosterSortedTokens.has(sortedTokenKey(rec.name))) continue;
+        if (mergeResult.rosterSortedTokens.has(sortedTokenKey(rec.name))) continue;
         unmatchedRows.push({ name: rec.name, target: rec.secondaryTarget });
       }
       xlsxTargetDiagnostic = {
@@ -457,6 +719,12 @@ export async function assembleRows(
       );
     }
   } catch (err) {
+    dashboardXlsxProvenance = {
+      success: false,
+      rowCount: dashboardXlsxRowsRead,
+      contributedRows: dashboardXlsxContributions,
+      error: err instanceof Error ? err.message : String(err),
+    };
     logger.warn(
       { err, fy: filters.fy },
       "dashboard xlsx lookup failed; xlsx targets skipped",
@@ -465,6 +733,34 @@ export async function assembleRows(
   // Sale Report now comes from the secondary order file (Σ Order Value), so
   // it is available exactly when that file loaded.
   const saleAvailable = agg != null;
+  const orderSource: ReportSourceState = {
+    available: agg != null,
+    source: agg
+      ? orderStatus?.source ??
+        (orderStatus?.spreadsheetId === "secondary_order_line"
+          ? "secondary_order_line"
+          : orderStatus?.spreadsheetId?.startsWith("uploaded:")
+            ? "uploaded"
+            : "drive")
+      : null,
+    reason: agg
+      ? null
+      : orderStatus?.detail ?? `The ${filters.fy} order booking source is unavailable.`,
+  };
+  const priorSource: ReportSourceState = {
+    available: prior != null,
+    source: prior
+      ? priorStatus?.source ??
+        (priorStatus?.spreadsheetId === "secondary_order_line"
+          ? "secondary_order_line"
+          : priorStatus?.spreadsheetId?.startsWith("uploaded:")
+            ? "uploaded"
+            : "drive")
+      : null,
+    reason: prior
+      ? null
+      : priorStatus?.detail ?? `The ${priorFy(filters.fy)} order booking source is unavailable.`,
+  };
   const fyStart = fyBoundsSerial(filters.fy).start;
   const rows: MemberRow[] = members.map((m) => ({
     m,
@@ -491,6 +787,7 @@ export async function assembleRows(
       : null,
     oldNew: m.dojSerial != null && m.dojSerial >= fyStart ? "New" : "Old",
     target: targetMap.get(m.normKey) ?? null,
+    secondaryPlanMonths: monthlyPlans.plans.get(m.normKey) ?? null,
   }));
   // Supplement with order-file TMs not in the active roster. These may be
   // departed employees, off-roll staff, or members added to the OB file before
@@ -547,6 +844,7 @@ export async function assembleRows(
         priorSaleAmount: prior ? (prior.perTm.get(key)?.saleAmount ?? 0) : null,
         oldNew: "Old",
         target: targetRow ?? null,
+        secondaryPlanMonths: monthlyPlans.plans.get(key) ?? null,
       });
     }
   }
@@ -666,10 +964,18 @@ export async function assembleRows(
     targetsAvailable: targetMap.size > 0,
     orderStatus,
     priorStatus,
+    orderSource,
+    priorSource,
+    monthlyPlanSource: monthlyPlans,
     nameMatches,
     segmentCheck,
     saleAvailable,
     xlsxTargetDiagnostic,
+    targetProvenance: {
+      targetMaster: targetMasterProvenance,
+      memberTargets: memberTargetsProvenance,
+      dashboardXlsx: dashboardXlsxProvenance,
+    },
   };
 }
 
@@ -1137,9 +1443,13 @@ export async function buildManagementWorkbook(
     targetsAvailable,
     orderStatus,
     priorStatus,
+    orderSource,
+    priorSource,
+    monthlyPlanSource,
     nameMatches,
     segmentCheck,
     saleAvailable,
+    targetProvenance,
   } = await assembleRows(filters);
   const fy = filters.fy;
   const s = fyShort(fy);
@@ -1158,10 +1468,25 @@ export async function buildManagementWorkbook(
         return `${base}${priorNote}`;
       })();
   const ordersMissingKey = ordersAvailable ? null : "orders";
-  const targetsMissingKey = targetsAvailable ? null : "target";
+  // The monthly mirror can supply secondary target ranges even when the
+  // existing target pipeline has no annual row. Other target fields still
+  // render null/grey per cell and are documented below.
+  const targetsMissingKey =
+    targetsAvailable || monthlyPlanSource.available ? null : "target";
   // Sale Report is now sourced from the same secondary order file as Order
   // Booked, so it is blank for exactly the same reason (file not read yet).
   const saleMissingKey = saleAvailable ? null : "orders";
+  if (!targetsAvailable && monthlyPlanSource.available) {
+    note(
+      missing,
+      "target",
+      "Target Master/dashboard fallback has no annual target rows; monthly secondary plans come from secondary_head_month.",
+    );
+  }
+  const targetProvenanceText = formatTargetProvenance(targetProvenance);
+  const monthlyPlanProvenance = monthlyPlanSource.available
+    ? `${targetProvenanceText}; secondary_head_month fallback for missing member/month values (${fy})`
+    : `${targetProvenanceText}; secondary_head_month fallback unavailable — ${monthlyPlanSource.reason}`;
   const hrSfa = await loadHrSfaDashboard();
   const wb = new ExcelJS.Workbook();
   wb.creator = "Prayag Sales Intelligence";
@@ -1172,6 +1497,29 @@ export async function buildManagementWorkbook(
     ["Page", `Management Reports — FY ${fy}`],
     ["FY", fy],
     ["Provisional months", await provisionalMonthsExportInfo(fy)],
+    ["Roster source", rosterSource],
+    [
+      "Order booking source",
+      orderSource.available
+        ? orderSource.source === "secondary_order_line"
+          ? `secondary_order_line (${fy})`
+          : `${orderSource.source} (${orderStatus?.spreadsheetId ?? fy})`
+        : `unavailable — ${orderSource.reason}`,
+    ],
+    [
+      "Prior order booking source",
+      priorSource.available
+        ? `${priorSource.source} (${priorStatus?.spreadsheetId ?? priorFy(fy)})`
+        : `unavailable — ${priorSource.reason}`,
+    ],
+    [
+      "Monthly plan source",
+      monthlyPlanProvenance,
+    ],
+    [
+      "Target pipeline source",
+      targetProvenanceText,
+    ],
   ] as Array<[string, string]>) {
     const row = info.addRow([label, value]);
     row.getCell(1).font = { bold: true };
@@ -1289,10 +1637,10 @@ export async function buildManagementWorkbook(
         cursor += g.span;
       }
     }
-    if (targetsMissingKey) {
+    if (targetsMissingKey && !monthlyPlanSource.available) {
       note(missing, "target", `${ws.name.trim()}: monthly Plan Amount/Count, % of Achievement`);
     } else {
-      note(missing, "target", `${ws.name.trim()}: monthly Plan Count (the Target Master holds amounts, not order counts)`);
+      note(missing, "planCount", `${ws.name.trim()}: monthly Plan Count`);
     }
     if (saleMissingKey) {
       note(missing, "orders", `${ws.name.trim()}: monthly Sales Received Amount/Count`);
@@ -1307,10 +1655,11 @@ export async function buildManagementWorkbook(
       for (let mIdx = 0; mIdx < 12; mIdx++) {
         const base = 16 + mIdx * 7;
         const inRange = mIdx + 1 >= filters.monthFrom && mIdx + 1 <= filters.monthTo;
-        // Plan Amount from the Target Master; Plan Count has no source.
+        // Plan Amount prefers Target Master and falls back to the durable
+        // secondary_head_month mirror. A SQL NULL remains unknown (grey), not 0.
         const planA = ws.getCell(rowNum, base);
-        const plan = r.target ? tgtMonthly(r.target, "secondary", mIdx) : null;
-        if (!targetsMissingKey && plan != null) {
+        const plan = monthlyPlan(r, mIdx);
+        if (plan != null && (monthlyPlanSource.available || !targetsMissingKey)) {
           planA.value = plan;
           planA.numFmt = FMT_INT;
         } else {
@@ -1332,7 +1681,7 @@ export async function buildManagementWorkbook(
         // % of Achievement = month order booking vs month plan.
         const achCell = ws.getCell(rowNum, base + 4);
         const monthAch =
-          !targetsMissingKey && r.orders && inRange
+          r.orders && inRange && plan != null
             ? achievement(r.orders.monthAmount[mIdx], plan)
             : null;
         if (monthAch != null) {
@@ -1380,16 +1729,24 @@ export async function buildManagementWorkbook(
     for (let mIdx = 0; mIdx < 12; mIdx++) {
       const base = 16 + mIdx * 7;
       const planTotal = ws.getCell(totalRow, base);
-      if (!targetsMissingKey && rows.some((r) => r.target)) {
+      if (monthlyPlanSource.available || (!targetsMissingKey && rows.some((r) => r.target))) {
         let sum = 0;
+        let anyPlan = false;
         for (const r of rows) {
-          const v = r.target ? tgtMonthly(r.target, "secondary", mIdx) : null;
-          if (v != null) sum += v;
+          const v = monthlyPlan(r, mIdx);
+          if (v != null) {
+            sum += v;
+            anyPlan = true;
+          }
         }
-        planTotal.value = sum;
-        planTotal.numFmt = FMT_INT;
-        planTotal.fill = TOTAL_FILL;
-        planTotal.font = { bold: true };
+        if (anyPlan) {
+          planTotal.value = sum;
+          planTotal.numFmt = FMT_INT;
+          planTotal.fill = TOTAL_FILL;
+          planTotal.font = { bold: true };
+        } else {
+          planTotal.fill = GREY_FILL;
+        }
       } else {
         planTotal.fill = GREY_FILL;
       }
@@ -1586,10 +1943,16 @@ export async function buildManagementWorkbook(
     ws.getCell(5, 4).value = leftMembers;
     ws.getCell(5, 5).value = rows.length;
     ws.getCell(5, 6).value = rows.length;
-    ws.getCell(5, 7).value = orderedMembers;
+    const activeCell = ws.getCell(5, 7);
     const activePctCell = ws.getCell(5, 8);
-    activePctCell.value = rows.length > 0 ? orderedMembers / rows.length : null;
-    activePctCell.numFmt = "0.0%";
+    if (ordersAvailable) {
+      activeCell.value = orderedMembers;
+      activePctCell.value = rows.length > 0 ? orderedMembers / rows.length : null;
+      activePctCell.numFmt = "0.0%";
+    } else {
+      activeCell.fill = GREY_FILL;
+      activePctCell.fill = GREY_FILL;
+    }
     writeGrid(ws, cols, rows, 6, 5);
   }
 
@@ -1597,14 +1960,19 @@ export async function buildManagementWorkbook(
   {
     const ws = wb.addWorksheet(`Head Summary ${s}`);
     ws.views = [{ state: "frozen", ySplit: 2 }];
-    type HeadAgg = { registered: number; active: number; sale: number };
+    type HeadAgg = { registered: number; active: number | null; sale: number | null };
     const byHead = new Map<string, HeadAgg>();
     for (const r of rows) {
       const head = r.m.stateHead?.trim() || "(unassigned)";
       const e = byHead.get(head) ?? { registered: 0, active: 0, sale: 0 };
       e.registered++;
-      if ((r.orders?.orderCount ?? 0) > 0) e.active++;
-      e.sale += r.orders?.amount ?? 0;
+      if (r.orders) {
+        if (e.active != null && r.orders.orderCount > 0) e.active++;
+        if (e.sale != null) e.sale += r.orders.amount;
+      } else {
+        e.active = null;
+        e.sale = null;
+      }
       byHead.set(head, e);
     }
     const title = ws.getCell(1, 1);
@@ -1626,34 +1994,65 @@ export async function buildManagementWorkbook(
     });
     ws.getColumn(1).width = 22;
     for (let c = 2; c <= 5; c++) ws.getColumn(c).width = 16;
-    const ordered = [...byHead.entries()].sort((a, b) => b[1].sale - a[1].sale);
+    const ordered = [...byHead.entries()].sort(
+      (a, b) => (b[1].sale ?? -Infinity) - (a[1].sale ?? -Infinity),
+    );
     let rowNum = 3;
     let totReg = 0;
     let totActive = 0;
     let totSale = 0;
+    let hasActive = false;
+    let hasSale = false;
     for (const [head, e] of ordered) {
       ws.getCell(rowNum, 1).value = head;
       ws.getCell(rowNum, 2).value = e.registered;
-      ws.getCell(rowNum, 3).value = e.active;
+       if (e.active == null) {
+         ws.getCell(rowNum, 3).fill = GREY_FILL;
+       } else {
+         ws.getCell(rowNum, 3).value = e.active;
+         hasActive = true;
+       }
       const p = ws.getCell(rowNum, 4);
-      p.value = e.registered > 0 ? e.active / e.registered : null;
-      p.numFmt = "0.0%";
-      ws.getCell(rowNum, 5).value = Math.round(e.sale);
-      totReg += e.registered;
-      totActive += e.active;
-      totSale += e.sale;
+       if (e.active == null) {
+         p.fill = GREY_FILL;
+       } else {
+         p.value = e.registered > 0 ? e.active / e.registered : null;
+         p.numFmt = "0.0%";
+       }
+       if (e.sale == null) {
+         ws.getCell(rowNum, 5).fill = GREY_FILL;
+       } else {
+         ws.getCell(rowNum, 5).value = Math.round(e.sale);
+         hasSale = true;
+       }
+       totReg += e.registered;
+       if (e.active != null) totActive += e.active;
+       if (e.sale != null) totSale += e.sale;
       rowNum++;
     }
     const totalCell = ws.getCell(rowNum, 1);
     totalCell.value = "Total";
     totalCell.font = { bold: true };
     ws.getCell(rowNum, 2).value = totReg;
-    ws.getCell(rowNum, 3).value = totActive;
+     if (hasActive) ws.getCell(rowNum, 3).value = totActive;
+     else ws.getCell(rowNum, 3).fill = GREY_FILL;
     const tp = ws.getCell(rowNum, 4);
-    tp.value = totReg > 0 ? totActive / totReg : null;
-    tp.numFmt = "0.0%";
-    ws.getCell(rowNum, 5).value = Math.round(totSale);
+     if (hasActive) {
+       tp.value = totReg > 0 ? totActive / totReg : null;
+       tp.numFmt = "0.0%";
+     } else {
+       tp.fill = GREY_FILL;
+     }
+     if (hasSale) ws.getCell(rowNum, 5).value = Math.round(totSale);
+     else ws.getCell(rowNum, 5).fill = GREY_FILL;
     for (let c = 1; c <= 5; c++) ws.getCell(rowNum, c).font = { bold: true };
+    if (!ordersAvailable) {
+      note(
+        missing,
+        "orders",
+        `Head Summary: active members, active %, and sale are unavailable — ${orderSource.reason}`,
+      );
+    }
   }
 
   // --- Tab 5: Data
