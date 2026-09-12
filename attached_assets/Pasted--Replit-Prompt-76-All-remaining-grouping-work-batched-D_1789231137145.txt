@@ -1,0 +1,191 @@
+# Replit Prompt 76 — All remaining grouping work, batched
+
+**Date:** 12 September 2026
+**Follows:** the Prompt 74 sweep.
+**Scope:** Four batches. Batch 1 runs as one change. Batches 2, 3 and 4 must be
+separate.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Can these all run together? No — and here is why
+
+**Batch 1 is display-only.** Labels and groupings change, totals do not. Safe as
+one change.
+
+**Batches 2, 3 and 4 each move figures**, and they must be isolated so the effect
+of each is attributable. Running them together means a number moves and nobody
+can say which change did it — the problem that has cost this project days more
+than once.
+
+**Batch 2 and Batch 4 also touch the same AI builders.** Running them together
+would make the denominator fix and the taxonomy move indistinguishable.
+
+Sequence: **1 → 2 → 3 → 4**. Each published and verified before the next starts.
+
+---
+
+## Batch 1 — display only. Three surfaces, one change.
+
+```
+Code change. Three surfaces move from the old 17 to the six masters. No
+total changes.
+
+  Growth — Margins by Group
+  Customer Performance
+  Comparison — segment mode
+
+All three group by sale_line.group_canon today. Move them to
+canonical_item_category_registry: six masters at the headline, registry
+sub-category as the level below where a breakdown already exists.
+
+  PLUMBING · PTMT · C P · SANITARYWARE · SINK · HARDWARE
+  Water Tank sits inside PLUMBING.
+
+REQUIREMENTS
+
+1. GRAND TOTALS MUST NOT MOVE on any of the three. Print each before and
+   after. If a total shifts by a rupee, a row is being dropped or
+   double-counted.
+
+2. Unmapped stays explicit and stays in the total. It must never silently
+   vanish because a code has no registry assignment.
+
+3. Where a surface shows a fixed number of group rows, note that 17 becomes
+   6. Confirm no layout breaks and no row is truncated.
+
+4. Comparison segment mode: confirm what "segment" means there. If it is
+   already the secondary segment axis rather than a product category, it
+   may be correct as it is - say so rather than moving it.
+
+AFTER APPLYING, print for each surface:
+  - the group list before and after
+  - the grand total before and after, which must be identical
+  - the Unmapped row, with its value
+```
+
+---
+
+## Batch 2 — the AI Growth denominator. Isolated.
+
+Already specified as **Prompt 75**. Run it on its own.
+
+The short version: a primary-sales peer median is combined with a secondary
+`segment_canon` count inside one derived analysis. Fix the population mix
+**only** — do not change its taxonomy in the same pass, or the effect of neither
+will be visible.
+
+---
+
+## Batch 3 — the primary target engine. Isolated, and this one moves people.
+
+```
+Code change, but read-only first. This changes who appears to be under
+target.
+
+The primary target engine groups by group_canon and group_raw - the old 17.
+Moving it to the six masters redistributes targets across groups.
+
+SECTION A - READ-ONLY FIRST
+
+A1. Print how the target engine uses group_canon. Are targets SET per
+    group, or allocated across groups, or only reported by group?
+
+    If targets are set per group in a source sheet, moving the taxonomy
+    does not change the target - it changes how it is reported. If they are
+    allocated by group, the allocation itself changes.
+
+A2. For every member with a group-level target, print the target by old-17
+    group and by six-master group. Show which members' totals change and by
+    how much.
+
+A3. Does any alert, threshold or achievement percentage read these targets?
+    Red Alert A1 and A2 compare booking against pro-rated target. If the
+    denominator moves, alerts move.
+
+A4. How many members would cross an alert threshold in either direction?
+    Name them.
+
+SECTION B - ONLY AFTER A
+
+Move the engine to the six masters, if A2 and A4 show the change is
+acceptable.
+
+  - member-level target totals must not change, only their group split
+  - if a member total DOES change, stop and report - that means targets
+    are being reallocated, not relabelled
+  - print every alert that fires or clears as a result
+```
+
+---
+
+## Batch 4 — SKU Deep Dive, margin payloads, AI segment sections. Isolated.
+
+```
+Code change. Three related surfaces, all feeding analysis or narrative.
+
+  SKU Deep Dive           L17 with MRP/catalogue evidence
+  Management margin payloads   L17 per head/group
+  Full AI reports, segment sections   L17 primary segment statistics
+
+Run this ONLY after Batch 2 is published and verified. Both touch AI
+builders, and separating them is what makes each attributable.
+
+REQUIREMENTS
+
+1. SKU Deep Dive keeps its MRP and catalogue evidence columns. Those are
+   labelled source evidence beside the result, which the sweep confirmed is
+   the correct pattern - do not remove them.
+
+2. Margin payloads: the margin arithmetic does not change, only the
+   grouping it is reported under. Print gross margin by group before and
+   after; the weighted total must be identical.
+
+3. AI segment sections: the narrative must name the taxonomy it is using.
+   A sentence about "the PLUMBING group" must be traceable to the registry,
+   not to a legacy label that happens to read the same.
+
+4. Anywhere a member or distributor has no registry assignment for a code,
+   Unmapped appears explicitly in the narrative source data. The AI must
+   not silently omit it.
+
+AFTER APPLYING, print:
+  - SKU Deep Dive group list and totals, before and after
+  - gross margin by group, before and after, with the weighted total
+    unchanged
+  - one generated AI paragraph per report type, showing the new group names
+```
+
+---
+
+## Not in scope, deliberately
+
+**Scheme eligibility.** `scheme_item_group` is a separate 22-value vocabulary.
+It must not be remapped without an approved item-code crosswalk, and a category
+change must never silently alter who qualifies for a slab.
+
+**Secondary segment surfaces.** `secondary_sku_line` and `secondary_register_line`
+group by `segment_canon`, which is a different axis rather than an outdated
+version of this one. The sweep flagged them for confirmation, not migration.
+
+**Source-owned groupings** — Overview Product Mix, Momentum Order Groups, Pending
+Orders factory group, Alerts CRM Category Name. Each comes from a source system
+with its own vocabulary. Moving them is a separate decision about whether the app
+re-classifies source data or reports it as given.
+
+---
+
+## Notes
+
+- **Batch 1 first because it is free.** Three surfaces, no totals move, and it
+  makes the app visibly consistent for the common case.
+- **Batch 3's Section A is the important half.** A1 decides whether this is a
+  relabelling or a reallocation, and those are very different changes. If member
+  totals move, targets are being redistributed and that needs a business decision,
+  not a code change.
+- **A4 is the one to read carefully.** If members cross alert thresholds because
+  their target was regrouped, the alert engine will fire on a taxonomy change.
+  That must be known before, not discovered after.
+- **Batch 4 after Batch 2**, always. Both touch AI builders, and running them
+  together makes the denominator fix and the taxonomy move indistinguishable.
