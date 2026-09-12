@@ -145,3 +145,4 @@
 - [FY2024-25 order-booking restatement](fy2425-order-booking-restatement.md) — approved source variance applies only to isolated order history; frozen register/SKU correction remains separate.
 - [Secondary order-booking semantics](secondary-order-booking-semantics.md) — register and retailer-SKU rows are order bookings, never line-level sales, dispatch, sell-through, or offtake.
 - [Canonical category registry](canonical-category-registry.md) — code-level 17-category authority; source vocabularies fill gaps, only approved MRP composites create multiple assignments.
+- [State-head Excel drill-down scope](state-head-excel-drilldown-scope.md) — reference-style R1/R2 exports apply head filters directly in both FYs; do not reuse web prior-customer remapping.
