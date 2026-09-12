@@ -1,0 +1,163 @@
+# Replit Prompt 72 — Excel export for Sales Deep Dive
+
+**Date:** 12 September 2026
+**Scope:** Section A read-only. Section B is the build.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## What is wanted
+
+A **Download Excel** button on `/sales/deep-dive`, producing a well-made
+multi-sheet workbook that captures everything the page shows for the selected
+member.
+
+## One thing on the page looks stale
+
+> *"This page shows year-to-date figures. Month selection is not available
+> because its source has no monthly breakdown."*
+
+`secondary_head_month` holds **1,944 FY2026-27 rows across twelve months**, with
+₹77.44 Cr ordered and ₹94.86 Cr received. A monthly breakdown exists.
+
+That message may date from before the table was populated, exactly like the
+"2026-27 Secondary Order Booking file not found" message did. Section A checks it.
+
+---
+
+## Section A — read-only, before building
+
+```
+Read-only. Change nothing.
+
+A1. Print every section the Sales Deep Dive page renders for a selected
+    member, in display order, with the fields in each and the source of
+    each field.
+
+    MemberKpis carries roughly 40 fields - targets, achievement, cost,
+    coverage, visits. Confirm which are displayed and which are computed
+    but unused.
+
+A2. THE MONTHLY MESSAGE. Is it still true?
+
+    secondary_head_month has 1,944 FY2026-27 rows across twelve months.
+    Print what monthly data exists for a sample member - Monmon Paul under
+    Sandeep Dadheech - for plan, ordered and received.
+
+    If monthly data exists, the message is stale and the export can carry a
+    monthly sheet. Say plainly which it is.
+
+A3. What does "Generate Report" produce, and "Run Guard Test"? Are their
+    outputs part of what the export should capture, or separate artefacts?
+
+A4. The TARGETS section - which of primaryTarget, secondaryTarget,
+    monthlyTarget, totalTargetToDate and the two monthly variants are
+    displayed? The earlier audit found members with one target field
+    populated and the other empty, 23 of them worth Rs 8.11 crore.
+
+    Print the target fields for the selected member and their source.
+
+A5. Which fields are currently UNAVAILABLE rather than zero for a typical
+    member? T.A. bill and cost ratio depend on the Finance export, which
+    does not exist. Visits and working days come from the dashboard Data
+    tab.
+
+    The export must distinguish unavailable from zero, as the State Head
+    export now does.
+
+A6. Does the page support "All State Heads" with no member selected? If so,
+    what does the export produce then - a roster-level summary, or nothing?
+
+Report only.
+```
+
+---
+
+## Section B — build the export
+
+```
+Code change. Show the diff before applying.
+
+Add a Download Excel button to the Sales Deep Dive page, producing a
+multi-sheet workbook for the selected member and period.
+
+SHEETS
+
+1. Info
+     member name, state head, designation, HQ, contact
+     FY, period, date filter applied
+     generated timestamp, data-read timestamp
+     source of each dataset - name the table or workbook
+     provisional months, derived from the open window
+     a line stating which figures are order booking and which are dispatch
+
+2. Summary
+     the headline KPIs as the page shows them, one row per measure with
+     value, source, and an availability state
+
+3. Targets and achievement
+     primary target, secondary target, monthly target, total target to date,
+     elapsed months
+     order booking, direct dealer order, sale
+     achievement: secondary, direct dealer, total, sale - each with its
+     numerator and denominator SHOWN, not just the percentage
+
+     The earlier audit found achievement percentages that could not be
+     reconciled from the visible figures. Showing both sides fixes that
+     permanently.
+
+4. Coverage and visits
+     total retailers, old retailers, visited, non-visited, direct dealers
+     total visits YTD, working days actual
+     business per retailer, new party order booking
+
+5. Cost
+     monthly CTC, annual CTC, T.A. bill and station cost, cost ratio
+     Leave blank and grey where the source does not exist - do not show 0
+
+6. Monthly - ONLY IF A2 CONFIRMS MONTHLY DATA EXISTS
+     month by month: plan, ordered, received, achievement
+     mark months that are not yet recorded as unavailable, never as zero
+     never show a future month as zero with -100% growth
+
+7. Missing data
+     every field left blank, with the specific reason and the source needed
+     Same style as the State Head export
+
+RULES, ALL OF WHICH ALREADY APPLY ELSEWHERE
+
+  - Indian number format: >= 1 Cr as Rs x.xx Cr, >= 1 L as Rs x.xx L,
+    below that grouped with no decimals
+  - percentages as percentages, two decimals
+  - three visual states: value, blank-grey-with-reason, numeric zero
+  - never label order booking as sales
+  - freeze panes, sensible column widths, no sheet wider than it needs
+
+FILE NAME
+  SalesDeepDive_<member>_<FY>_<period>.xlsx
+
+DO NOT change any figure, query or page behaviour. This adds an export.
+
+AFTER APPLYING, print:
+  - the sheet list and the row count of each, for Monmon Paul
+  - the Info sheet as generated
+  - one example of each of the three visual states
+  - confirmation the page itself is unchanged
+```
+
+---
+
+## Notes
+
+- **A2 decides whether sheet 6 exists.** If monthly data is available, the page's
+  own message is wrong and should be corrected in the same change — that is a
+  one-line fix with real value.
+- **Sheet 3 showing numerator and denominator** is the fix for a problem that has
+  recurred throughout this work: a percentage on screen that cannot be reconciled
+  from the other figures on the same screen. Showing both sides ends it.
+- **A5 matters for the grey convention.** T.A. bill and cost ratio have no source
+  at all. If they render as zero, a member appears to cost nothing.
+- **A6 is worth asking** because the page allows "All State Heads" with a member
+  selected. If a user exports with no member chosen, the button needs defined
+  behaviour rather than an empty file.
