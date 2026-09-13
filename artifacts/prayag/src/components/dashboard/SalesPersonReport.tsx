@@ -8,9 +8,11 @@
 // before reaching this component. If guard.status === "requires_review", an
 // orange banner lists the flagged figures.
 
-import { useState } from "react";
+import { useReducer, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { isFyClosed } from "@/data/global-filter-context";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { reportReducer, deriveReportLayout } from "./SalesPersonReportLogic";
 
 const BASE = import.meta.env.BASE_URL ?? "/";
 const API  = `${BASE}api`.replace(/\/\//g, "/");
@@ -251,14 +253,26 @@ function ReportDocument({ report }: { report: AiReport }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function SalesPersonReport({ fy, stateHead, memberKey, memberName }: Props) {
-  const [report,  setReport]  = useState<AiReport | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState<string | null>(null);
+  const [state, dispatch] = useReducer(reportReducer<AiReport>, {
+    fy,
+    memberKey,
+    isCollapsed: true,
+    report: null,
+    loading: false,
+    error: null,
+    activeRequestId: null,
+  });
+
+  useEffect(() => {
+    dispatch({ type: "SET_PROPS", fy, memberKey });
+  }, [fy, memberKey]);
+
+  const layout = deriveReportLayout(state);
+  const { report, loading, error } = state;
 
   async function generate(corrupt = false) {
-    setLoading(true);
-    setError(null);
-    setReport(null);
+    const requestId = Date.now();
+    dispatch({ type: "GENERATE_START", requestId });
     try {
       const res = await fetch(`${API}/ai/report`, {
         method:  "POST",
@@ -270,11 +284,9 @@ export function SalesPersonReport({ fy, stateHead, memberKey, memberName }: Prop
         throw new Error(typeof body.error === "string" ? body.error : `Server error ${res.status}`);
       }
       const data = await res.json() as AiReport;
-      setReport(data);
+      dispatch({ type: "GENERATE_SUCCESS", requestId, report: data });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Report generation failed.");
-    } finally {
-      setLoading(false);
+      dispatch({ type: "GENERATE_ERROR", requestId, error: err instanceof Error ? err.message : "Report generation failed." });
     }
   }
 
@@ -282,7 +294,7 @@ export function SalesPersonReport({ fy, stateHead, memberKey, memberName }: Prop
     <div className="space-y-3">
 
       {/* Pre-generate prompt */}
-      {!report && !loading && (
+      {layout.showPreGenActions && !loading && (
         <div className="flex flex-wrap gap-2 items-center no-print">
           <button
             onClick={() => void generate(false)}
@@ -327,39 +339,56 @@ export function SalesPersonReport({ fy, stateHead, memberKey, memberName }: Prop
         <div className="space-y-3">
 
           {/* Action bar */}
-          <div className="no-print flex flex-wrap gap-2 items-center">
-            <button
-              onClick={() => void generate(false)}
-              className="h-8 rounded-md border border-border bg-muted/40 px-3 text-xs hover:bg-muted/60"
-            >
-              Regenerate
-            </button>
-            <button
-              onClick={() => void generate(true)}
-              title="Re-run guard test"
-              className="h-8 rounded-md border border-border bg-muted/40 px-3 text-xs hover:bg-muted/60"
-            >
-              Guard Test
-            </button>
-            <button
-              onClick={() => window.print()}
-              className={cn(
-                "h-8 rounded-md bg-primary px-4 text-xs font-medium text-primary-foreground",
-                "hover:bg-primary/90",
-              )}
-            >
-              Download PDF
-            </button>
-          </div>
+          {layout.showPostGenHeader && (
+            <div className="no-print flex flex-wrap gap-2 justify-between items-center bg-card border border-border px-4 py-2 rounded-md">
+              <button
+                onClick={() => dispatch({ type: "TOGGLE_COLLAPSE" })}
+                aria-expanded={!state.isCollapsed}
+                aria-controls="ai-report-narrative"
+                className="flex items-center gap-2 text-sm font-medium hover:text-primary transition-colors"
+              >
+                {state.isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                {state.isCollapsed ? "Show AI Report" : "Hide AI Report"}
+              </button>
+              <div className="flex flex-wrap gap-2 items-center">
+                <button
+                  onClick={() => void generate(false)}
+                  className="h-8 rounded-md border border-border bg-muted/40 px-3 text-xs hover:bg-muted/60"
+                >
+                  Regenerate
+                </button>
+                <button
+                  onClick={() => void generate(true)}
+                  title="Re-run guard test"
+                  className="h-8 rounded-md border border-border bg-muted/40 px-3 text-xs hover:bg-muted/60"
+                >
+                  Guard Test
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className={cn(
+                    "h-8 rounded-md bg-primary px-4 text-xs font-medium text-primary-foreground",
+                    "hover:bg-primary/90",
+                  )}
+                >
+                  Download PDF
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Guard status */}
-          <GuardStatusBadge
-            guard={report.guard}
-            corrupt={report.corruptTestMode ?? false}
-          />
+          {layout.showGuardBadge && (
+            <GuardStatusBadge
+              guard={report.guard}
+              corrupt={report.corruptTestMode ?? false}
+            />
+          )}
 
           {/* Report */}
-          <ReportDocument report={report} />
+          <div id="ai-report-narrative" className={state.isCollapsed ? "hidden print:block" : "block"}>
+            <ReportDocument report={report} />
+          </div>
 
         </div>
       )}

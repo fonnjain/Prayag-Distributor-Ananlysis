@@ -1059,7 +1059,13 @@ export type MemberTargetSnapshot = {
   monthlyTarget: number | null;
   /** Secondary OB + direct-dealer OB (YTD) — allocation weight for rollups. */
   obTotal: number;
+  /** False when all order-booking source cells were blank. */
+  obAvailable: boolean;
+  ctcMonthly: number | null;
+  taBillYtd: number | null;
   sale: number;
+  /** False when the source sale cell was blank; zero is a resolved zero. */
+  saleAvailable: boolean;
   /** T2 additions — person-level secondary engine needs these. */
   state: string;
   workingDaysActual: number | null;
@@ -1080,8 +1086,12 @@ export async function loadMemberTargetSnapshots(
     isLeft: m.isLeft,
     totalTargetToDate: m.totalTargetToDate,
     monthlyTarget: m.monthlyTarget,
-    obTotal: (m.orderBooking ?? 0) + (m.directDealersOrder ?? 0),
+    obTotal: (m.orderBooking ?? 0) + (m.newPartyOrderBooking ?? 0) + (m.directDealersOrder ?? 0),
+    obAvailable: m.orderBooking != null || m.newPartyOrderBooking != null || m.directDealersOrder != null,
     sale: m.sale ?? 0,
+    saleAvailable: m.sale != null,
+    ctcMonthly: m.ctcMonthly,
+    taBillYtd: m.taBillStCost,
     state: extractStateName(m),
     workingDaysActual: m.workingDaysActual,
     elapsedMonths: m.elapsedMonths,

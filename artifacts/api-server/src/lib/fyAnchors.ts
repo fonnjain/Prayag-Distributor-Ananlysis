@@ -18,6 +18,7 @@
 
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { isMonthComplete } from "./analytics/analytics.js";
 
 // After an FY closes (March 31), nightly ingests may take a while to finish
 // loading its final months. Within this window callers may tolerate anchoring
@@ -71,6 +72,15 @@ export function fyMonthLabels(fy: string): string[] {
     const year = i < 9 ? startYear : startYear + 1;
     return `${name}-${String(year % 100).padStart(2, "0")}`;
   });
+}
+
+/**
+ * Closed reporting-month boundary for the current/open FY.  This delegates
+ * completion semantics (including the shared lock/grace window) to the
+ * analytics calendar helper rather than maintaining a second date rule.
+ */
+export function closedReportingMonthCount(fy: string, now: number = Date.now()): number {
+  return fyMonthLabels(fy).filter((label) => isMonthComplete(label, null, now)).length;
 }
 
 export type FyIngestStats = { fy: string; rows: number; months: number };

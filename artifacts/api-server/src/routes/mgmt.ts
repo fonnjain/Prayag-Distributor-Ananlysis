@@ -1,6 +1,6 @@
 // Management Reports: filter options + Excel generation.
 import { Router, type IRouter, type Request, type Response } from "express";
-import { currentOpenFy, deriveSaleLineCohortFy } from "../lib/fyAnchors.js";
+import { currentOpenFy, deriveSaleLineCohortFy, closedReportingMonthCount, fyMonthLabels } from "../lib/fyAnchors.js";
 import express from "express";
 import { writeFile, rename as renameFile, mkdir as mkdirAsync } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -43,7 +43,13 @@ import {
   loadStateDashboard,
   type SecMember,
 } from "../lib/mgmt/stateDashboard.js";
-import { loadDeepDiveData, normSecKey, loadRegistry, getRegistry } from "../lib/mgmt/deepDiveData.js";
+import {
+  loadDeepDiveData,
+  loadMemberTargetSnapshots,
+  normSecKey,
+  loadRegistry,
+  getRegistry,
+} from "../lib/mgmt/deepDiveData.js";
 import { splitAnnualToMonth, getSeasonalCalibration } from "../lib/seasonal.js";
 import {
   buildPrimaryTargetMapFromStateTargets,
@@ -65,6 +71,7 @@ import {
   buildDeepDiveExport,
   buildDeepDivePeriodAnalysis,
   type DeepDiveMonthlyRow,
+  type DeepDiveBenchmark,
 } from "../lib/mgmt/deepDiveExport.js";
 import { provisionalMonthsExportInfo } from "../lib/exportInfo.js";
 
@@ -1334,6 +1341,51 @@ router.get("/mgmt/deep-dive", async (req: Request, res: Response): Promise<void>
 // small keyed guard prevents two clicks (or two browser tabs) from doing the
 // same expensive Sheets/DB work concurrently.
 const deepDiveExportInFlight = new Map<string, Promise<Buffer>>();
+const EXPORT_RETAILER_WAIT_MS = 20_000;
+
+/**
+ * The page endpoint deliberately returns quickly while a member working sheet
+ * loads. An export is different: it is an audit artifact, so give the
+ * already-single-flight member-sheet read a bounded opportunity to finish.
+ * Re-entering loadDeepDiveData joins loadMemberSheet's in-flight promise; it
+ * does not start another Sheets read.
+ */
+export async function loadDeepDiveDataForExport(
+  fy: string,
+  stateHead: string | undefined,
+  memberKey: string,
+): Promise<Awaited<ReturnType<typeof loadDeepDiveData>>> {
+  let result = await loadDeepDiveData(fy, stateHead, memberKey);
+  if (result.retailerDetail?.status !== "loading") return result;
+
+  const deadline = Date.now() + EXPORT_RETAILER_WAIT_MS;
+  while (result.retailerDetail?.status === "loading") {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      return {
+        ...result,
+        retailerDetail: {
+          status: "loading",
+          error: `Retailer detail remained loading for ${EXPORT_RETAILER_WAIT_MS}ms; export stopped waiting without claiming complete coverage.`,
+        },
+      };
+    }
+    const next = loadDeepDiveData(fy, stateHead, memberKey);
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), remaining));
+    const resolved = await Promise.race([next, timeout]);
+    if (resolved == null) {
+      return {
+        ...result,
+        retailerDetail: {
+          status: "loading",
+          error: `Retailer detail remained loading for ${EXPORT_RETAILER_WAIT_MS}ms; export stopped waiting without claiming complete coverage.`,
+        },
+      };
+    }
+    result = resolved;
+  }
+  return result;
+}
 
 const EXPORT_MONTHS = new Set(Array.from({ length: 12 }, (_, i) => i + 1));
 export function normalizeDeepDiveExportPeriod(raw: unknown): number[] | undefined {
@@ -1445,7 +1497,7 @@ router.get("/mgmt/deep-dive/export", async (req: Request, res: Response): Promis
     let work = deepDiveExportInFlight.get(guardKey);
     if (!work) {
       work = (async () => {
-        const result = await loadDeepDiveData(fy, stateHead, memberKey);
+        const result = await loadDeepDiveDataForExport(fy, stateHead, memberKey);
         if (result.error && !result.kpis) throw new Error(result.error);
         if (!result.kpis) throw new Error("Selected member was not found.");
         const monthlyDbRows = await db
@@ -1476,6 +1528,28 @@ router.get("/mgmt/deep-dive/export", async (req: Request, res: Response): Promis
           achievementPct: r.achievementPct == null ? null : Number(r.achievementPct),
           notYetRecorded: Boolean(r.notYetRecorded),
         }));
+        // Cost must use the same closed reporting window as the selected
+        // sales metric, not the target-sheet tenure/pro-rata field (which can
+        // lag the dashboard window).  This explicit count is passed to the
+        // exporter so it cannot invent calendar semantics independently.
+        const closedBoundaryCount = closedReportingMonthCount(fy);
+        const closedBoundarySet = new Set(
+          fyMonthLabels(fy).slice(0, closedBoundaryCount).map((_, index) => index),
+        );
+        const selectedMonthSet = periodMonths == null ? null : new Set(periodMonths.map((month) => month - 1));
+        const selectedClosedCount = periodMonths == null ? null : [...selectedMonthSet!]
+          .filter((month) => closedBoundarySet.has(month)).length;
+        const rowClosedCount = monthlyRows.filter((row) =>
+          (selectedMonthSet == null || selectedMonthSet.has(row.monthIdx))
+          && !row.notYetRecorded
+          && row.receivedAmount != null,
+        ).length;
+        const reportingMonthCandidate = selectedClosedCount ?? (rowClosedCount > 0 ? rowClosedCount : closedBoundaryCount);
+        const reportingMonthCount = reportingMonthCandidate > 0
+          ? reportingMonthCandidate
+          : result.kpis.ctcMonthly != null && result.kpis.sale != null && result.kpis.sale > 0
+            ? null
+            : reportingMonthCandidate;
         const priorQuarterly = [
           result.kpis.lastYearQ1, result.kpis.lastYearQ2,
           result.kpis.lastYearQ3, result.kpis.lastYearQ4,
@@ -1493,10 +1567,101 @@ router.get("/mgmt/deep-dive/export", async (req: Request, res: Response): Promis
         const priorSamePeriodOb = quarterIndex != null && priorQuarterly[quarterIndex] != null
           ? priorQuarterly[quarterIndex]
           : exactFullYear ? priorFullYearOb : null;
+        // Benchmarks are resolved from an explicit state-head peer population.
+        // The member snapshot contains full current-FY/YTD figures only; when
+        // a custom period is selected we disclose the benchmark as
+        // unavailable rather than reusing a mismatched full-period median.
+        const benchmarkPeers = periodMonths === undefined
+          ? (await loadMemberTargetSnapshots(fy))?.filter((peer) =>
+              !peer.isLeft
+              && peer.stateHead === canonicalStateHead
+              && peer.normKey !== result.kpis!.normKey,
+            ) ?? []
+          : [];
+        const median = (values: number[]): number | null => {
+          if (values.length === 0) return null;
+          const sorted = [...values].sort((a, b) => a - b);
+          const middle = Math.floor(sorted.length / 2);
+          return sorted.length % 2 === 0
+            ? (sorted[middle - 1] + sorted[middle]) / 2
+            : sorted[middle];
+        };
+        const benchmarkPeriod = periodMonths === undefined
+          ? `FY ${fy} resolved YTD`
+          : `${period.label} (period-specific peer payload unavailable)`;
+        const benchmarkSource = "Resolved Data-tab member target snapshots";
+        const selectedCostBasis: "ctcOnly" | "fullCost" =
+          result.kpis.taBillStCost == null ? "ctcOnly" : "fullCost";
+        const peerCostRatios = reportingMonthCount != null
+          ? benchmarkPeers
+            .filter((peer) => peer.saleAvailable && peer.sale > 0 && peer.ctcMonthly != null
+              && (selectedCostBasis === "ctcOnly" || peer.taBillYtd != null))
+            .map((peer) => {
+              const knownCtc = peer.ctcMonthly! * reportingMonthCount;
+              const comparableCost = selectedCostBasis === "fullCost"
+                ? knownCtc + (peer.taBillYtd ?? 0)
+                : knownCtc;
+              return comparableCost / peer.sale * 100;
+            })
+          : [];
+        const peerBusinessPerRetailer = benchmarkPeers
+          .filter((peer) => peer.obAvailable && peer.totalRetailers != null && peer.totalRetailers > 0)
+          .map((peer) => peer.obTotal / (peer.totalRetailers ?? 1));
+        const benchmarks: DeepDiveBenchmark[] = [
+          {
+            metric: "costRatio",
+            median: median(peerCostRatios),
+            population: `active peers under state head ${canonicalStateHead}`,
+            peerCount: peerCostRatios.length,
+            period: benchmarkPeriod,
+            source: benchmarkSource,
+            basis: selectedCostBasis,
+            reason: periodMonths === undefined ? undefined : "Period-specific peer values were not resolved.",
+          },
+          {
+            metric: "businessPerRetailer",
+            median: median(peerBusinessPerRetailer),
+            population: `active peers under state head ${canonicalStateHead}`,
+            peerCount: peerBusinessPerRetailer.length,
+            period: benchmarkPeriod,
+            source: benchmarkSource,
+            reason: periodMonths === undefined ? undefined : "Period-specific peer values were not resolved.",
+          },
+          {
+            metric: "attainment",
+            median: median(benchmarkPeers
+              .filter((peer) => peer.obAvailable && peer.totalTargetToDate != null && peer.totalTargetToDate > 0)
+              .map((peer) => peer.obTotal / (peer.totalTargetToDate ?? 1) * 100)),
+            population: `active peers under state head ${canonicalStateHead}`,
+            peerCount: benchmarkPeers.filter((peer) => peer.obAvailable && peer.totalTargetToDate != null && peer.totalTargetToDate > 0).length,
+            period: benchmarkPeriod,
+            source: benchmarkSource,
+            reason: periodMonths === undefined ? undefined : "Period-specific peer values were not resolved.",
+          },
+          {
+            metric: "sales",
+            median: median(benchmarkPeers.filter((peer) => peer.saleAvailable).map((peer) => peer.sale)),
+            population: `active peers under state head ${canonicalStateHead}`,
+            peerCount: benchmarkPeers.filter((peer) => peer.saleAvailable).length,
+            period: benchmarkPeriod,
+            source: benchmarkSource,
+            reason: periodMonths === undefined ? undefined : "Period-specific peer values were not resolved.",
+          },
+          {
+            metric: "orderBooking",
+            median: median(benchmarkPeers.filter((peer) => peer.obAvailable).map((peer) => peer.obTotal)),
+            population: `active peers under state head ${canonicalStateHead}`,
+            peerCount: benchmarkPeers.filter((peer) => peer.obAvailable).length,
+            period: benchmarkPeriod,
+            source: benchmarkSource,
+            reason: periodMonths === undefined ? undefined : "Period-specific peer values were not resolved.",
+          },
+        ];
         return buildDeepDiveExport({
           fy,
           kpis: result.kpis,
           monthlyRows,
+          reportingMonthCount,
           periodAnalysis: buildDeepDivePeriodAnalysis(
             result.retailerDetail?.status === "ok" ? result.retailerDetail.months : null,
             periodMonths,
@@ -1522,6 +1687,7 @@ router.get("/mgmt/deep-dive/export", async (req: Request, res: Response): Promis
           roiCost: result.roiCost,
           skuSpread: result.skuSpread,
           winBack: result.winBack,
+          benchmarks,
           skuSpreadIncluded: result.skuSpread != null,
           winBackIncluded: result.winBack != null,
         });

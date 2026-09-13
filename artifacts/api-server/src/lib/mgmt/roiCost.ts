@@ -43,7 +43,7 @@ export type RoiCost = {
   costPerActiveRetailer: number | null;  // cost / activeRetailers ("cost per order")
 
   // Efficiency ratio
-  costRatioPct: number | null;   // (totalCost / OB) × 100
+  costRatioPct: number | null;   // (totalCost / OB) × 100 (legacy AI payload basis)
 
   // Margin ROI placeholder — always false until Cost Master exists
   marginRoiAvailable: false;
@@ -105,6 +105,8 @@ export function computeRoiCost(
 
   const obToCostMultiple    = totalCost > 0 ? div(ob, totalCost) : null;
   const saleToCostMultiple  = totalCost > 0 ? div(sale, totalCost) : null;
+  // Keep the shared ROI payload's historical costRatioOB semantics.  The
+  // workbook exporter recomputes its separate SALES_RECEIVED ratio explicitly.
   const costRatioPct        = ob > 0 ? (totalCost / ob) * 100 : null;
 
   const costPerRetailer       = div(totalCost, total > 0 ? total : null);

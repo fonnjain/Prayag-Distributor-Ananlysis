@@ -55,6 +55,23 @@ export type DeepDivePeriodAnalysis = {
   priorPeriodLabel?: string;
 };
 
+/**
+ * An explicitly resolved peer benchmark.  The exporter never derives a
+ * benchmark from the selected member or from an unnamed "company average".
+ * Callers must provide the population and period that were actually loaded.
+ */
+export type DeepDiveBenchmark = {
+  metric: "attainment" | "sales" | "orderBooking" | "costRatio" | "businessPerRetailer";
+  median: number | null;
+  population: string;
+  peerCount: number;
+  period: string;
+  source: string;
+  /** Cost benchmark denominator/basis, when metric is costRatio. */
+  basis?: "ctcOnly" | "fullCost" | string;
+  reason?: string;
+};
+
 export type DeepDiveExportInput = {
   fy: string;
   kpis: MemberKpis;
@@ -77,6 +94,11 @@ export type DeepDiveExportInput = {
   periodAnalysis?: DeepDivePeriodAnalysis;
   skuSpreadIncluded?: boolean;
   winBackIncluded?: boolean;
+  /** Backward-compatible single benchmark input for focused exports. */
+  benchmark?: DeepDiveBenchmark;
+  benchmarks?: DeepDiveBenchmark[];
+  /** Closed reporting-month count used by the selected sales metric. */
+  reportingMonthCount?: number | null;
   /** A resolved page field; no workbook-layer source lookup is performed. */
   omissions?: string[];
 };
@@ -598,27 +620,39 @@ export function buildDeepDiveWorkbook(input: DeepDiveExportInput): ExcelJS.Workb
   const totalTarget = kpis.totalTargetToDate;
   const totalSale = kpis.sale;
   const totalVisits = spread?.totalVisits ?? kpis.totalVisitsYtd;
-  const costElapsed = roi?.elapsedCompleteMonths ?? kpis.elapsedMonths;
-  const ytdCtc = roi?.ctcCostYtd ?? (kpis.ctcMonthly != null && costElapsed != null ? kpis.ctcMonthly * costElapsed : null);
-  const ytdTa = roi?.taBillYtd ?? kpis.taBillStCost;
-  const totalCost = ytdCtc != null && ytdTa != null ? ytdCtc + ytdTa : null;
+  // CTC_MONTHLY × the authoritative elapsed-month field is the source of
+  // truth for YTD cost.  Do not prefer a stale/absent ROI snapshot when the
+  // resolved Data-tab payload has both operands; targets and peer benchmarks
+  // use the same elapsed-month value.
+  const costElapsed = input.reportingMonthCount ?? kpis.elapsedMonthsFromSheet ?? kpis.elapsedMonths ?? roi?.elapsedCompleteMonths ?? null;
+  const ytdCtc = kpis.ctcMonthly != null && costElapsed != null
+    ? kpis.ctcMonthly * costElapsed
+    : roi?.ctcCostYtd ?? null;
+  // A null Data-tab T.A. is unavailable, not a resolved zero from RoiCost
+  // (that shared helper intentionally uses zero only for its own legacy math).
+  const ytdTa = kpis.taBillStCost ?? null;
+  const taAvailable = ytdTa != null;
+  // A known CTC remains reportable as a known-cost lower bound. Missing T.A.
+  // is disclosed below rather than silently poisoning the CTC calculation.
+  const totalCost = ytdCtc != null ? ytdCtc + (ytdTa ?? 0) : null;
   // Prompt 81 cost KPI: denominator is resolved Sales Received, never OB.
   const denominator = kpis.sale;
   const ratio = totalCost != null && denominator != null && denominator > 0 ? totalCost / denominator * 100 : null;
+  const salesCostMultiple = totalCost != null && totalSale != null && totalCost > 0 ? totalSale / totalCost : null;
+  const obCostMultiple = totalCost != null && totalOb != null && totalCost > 0 ? totalOb / totalCost : null;
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "Prayag Sales Intelligence";
   wb.created = input.generatedAt ?? new Date();
   wb.modified = wb.created;
 
-  // 1. Summary for Decision. Each block is deliberately multi-row so the
-  // decision is auditable rather than a one-number verdict.
+  // 1. Summary for Decision.  This is intentionally a four-column decision
+  // sheet.  Operands and source proof live in Working detail; the first sheet
+  // must remain readable when printed.
   const summary = wb.addWorksheet("Summary for Decision");
   title(summary, "Sales Deep Dive — decisions", [
-    "Decision block", "Question / figure", "Figure", "Comparison / basis",
-    "Numerator", "Denominator", "Percentage", "Verdict", "Source", "Reason",
+    "Decision block", "Figure / question", "Value / basis", "Verdict",
   ]);
-  const block = (name: string) => summary.addRow([name, "", "", "", "", "", "", "", "", ""]);
   const period = input.periodAnalysis ?? buildDeepDivePeriodAnalysis(
     detail?.months,
     input.periodMonths,
@@ -626,114 +660,183 @@ export function buildDeepDiveWorkbook(input: DeepDiveExportInput): ExcelJS.Workb
   );
   const priorTotal = kpis.lastYearQ1 != null || kpis.lastYearQ2 != null || kpis.lastYearQ3 != null || kpis.lastYearQ4 != null
     ? (kpis.lastYearQ1 ?? 0) + (kpis.lastYearQ2 ?? 0) + (kpis.lastYearQ3 ?? 0) + (kpis.lastYearQ4 ?? 0) : null;
-  const addRatioDecision = (
-    blockName: string, question: string, numerator: number | null, denominator: number | null,
-    comparison: string, verdict: string, source: string, reason = "", kind: "money" | "number" = "money",
-  ) => {
-    const pct = numerator != null && denominator != null && denominator > 0
-      ? numerator / denominator * 100 : null;
-    addDecision(summary, question, numerator, comparison, verdict, source, numerator, denominator, pct, reason, kind);
-    summary.getCell(summary.rowCount, 1).value = blockName;
-  };
-  const addBlockDecision = (
-    blockName: string,
-    question: string,
-    value: number | null,
-    comparison: string,
-    verdict: string,
-    source: string,
-    numerator: number | null = null,
-    denominator: number | null = null,
-    pct: number | null = null,
-    reason = "",
-    kind: "money" | "number" = "money",
-  ) => {
-    addDecision(summary, question, value, comparison, verdict, source, numerator, denominator, pct, reason, kind);
-    summary.getCell(summary.rowCount, 1).value = blockName;
-  };
-  block("Target attainment");
-  addRatioDecision("Target attainment", "Total target vs sale", totalSale, totalTarget,
-    `${totalSale ?? "—"} sales / ${totalTarget ?? "—"} total target`,
-    totalSale == null || totalTarget == null ? "Unavailable" : totalSale >= totalTarget ? "On track" : "Below target",
-    sourceA, totalSale == null || totalTarget == null ? "Sales or target unavailable." : "");
-  addRatioDecision("Target attainment", "Secondary OB vs secondary target", kpis.orderBooking, kpis.secondaryTarget,
-    `${kpis.orderBooking ?? "—"} secondary OB / ${kpis.secondaryTarget ?? "—"} secondary target`,
-    kpis.orderBooking == null || kpis.secondaryTarget == null ? "Unavailable" : kpis.orderBooking >= kpis.secondaryTarget ? "On track" : "Below target",
-    sourceA, kpis.orderBooking == null || kpis.secondaryTarget == null ? "Secondary OB or target unavailable." : "");
-  addRatioDecision("Target attainment", "Direct dealer OB vs primary target", kpis.directDealersOrder, kpis.primaryTarget,
-    `${kpis.directDealersOrder ?? "—"} DD OB / ${kpis.primaryTarget ?? "—"} primary target`,
-    kpis.directDealersOrder == null || kpis.primaryTarget == null ? "Unavailable" : kpis.directDealersOrder >= kpis.primaryTarget ? "On track" : "Below target",
-    sourceA, kpis.directDealersOrder == null || kpis.primaryTarget == null ? "DD OB or primary target unavailable." : "");
-
-  block("Growth");
-  addRatioDecision("Growth", "Current YTD sales vs same-period prior sales",
-    kpis.sale, period?.priorSamePeriodSales ?? null,
-    `${period?.currentPeriodLabel ?? "current YTD"} vs ${period?.priorPeriodLabel ?? "same period prior FY"}`,
-    kpis.sale == null || period.priorSamePeriodSales == null ? "Unavailable" :
-      kpis.sale >= period.priorSamePeriodSales ? "Growing" : "Declining",
-    sourceA, period?.priorSamePeriodSales == null ? "Same-period prior sales was not present in the resolved page payload." : "");
-  addRatioDecision("Growth", "Current YTD OB vs same-period prior OB",
-    totalOb, period?.priorSamePeriodOb ?? null,
-    `${period?.currentPeriodLabel ?? "current YTD"} vs ${period?.priorPeriodLabel ?? "same period prior FY"}`,
-    totalOb == null || period.priorSamePeriodOb == null ? "Unavailable" :
-      totalOb >= period.priorSamePeriodOb ? "Growing" : "Declining",
-    sourceA, period?.priorSamePeriodOb == null ? "Same-period prior OB was not present in the resolved page payload." : "");
-  for (const [label, value] of [["Prior FY Q1", kpis.lastYearQ1], ["Prior FY Q2", kpis.lastYearQ2], ["Prior FY Q3", kpis.lastYearQ3], ["Prior FY Q4", kpis.lastYearQ4]] as [string, number | null][]) {
-    addRatioDecision("Growth", `${label} shape`, value, priorTotal, "Prior quarter / prior FY quarter total",
-      value == null || priorTotal == null ? "Unavailable" : "Shape available", sourceA,
-      value == null || priorTotal == null ? "Prior quarterly shape was not present." : "");
-  }
-
-  const totalRetailers = spread?.totalRetailers ?? kpis.totalRetailers;
+  const totalRetailers = kpis.totalRetailers;
   const visited = kpis.visitedRetailers;
   const nonVisited = kpis.nonVisitedRetailers;
-  const partiesGivingBusiness = detail ? effectiveRows.filter((r) => r.orderBooking > 0).length : null;
+  const dashboardPartiesGivingBusiness = extraNumber(kpis, "BUSINESSACHIEVEDBY", "PARTIESGIVINGBUSINESS");
+  const partiesGivingBusiness = detail
+    ? effectiveRows.filter((r) => r.orderBooking > 0).length
+    : dashboardPartiesGivingBusiness;
   const newRetailers = extraNumber(kpis, "NEWRETAILERS", "NEWPARTIES", "NEWRETAILERCOUNT");
-  block("Coverage");
-  addBlockDecision("Coverage", "Total retailers", totalRetailers, totalRetailers == null ? "Unavailable" : "Working-sheet / dashboard total",
-    "Figure available", sourceB, totalRetailers, null, null, totalRetailers == null ? "Retailer total unavailable." : "", "number");
-  addRatioDecision("Coverage", "Visited retailer coverage", visited, totalRetailers, `${visited ?? "—"} visited / ${totalRetailers ?? "—"} total`,
-    visited == null || totalRetailers == null ? "Unavailable" : "Coverage", sourceA, "", "number");
-  addRatioDecision("Coverage", "Non-visited retailer share", nonVisited, totalRetailers, `${nonVisited ?? "—"} non-visited / ${totalRetailers ?? "—"} total`,
-    nonVisited == null || totalRetailers == null ? "Unavailable" : "Risk to follow up", sourceA, "", "number");
-  addBlockDecision("Coverage", "Parties giving business", partiesGivingBusiness, detail ? "Retailer rows with order booking > 0" : "Working-sheet rows unavailable",
-    partiesGivingBusiness == null ? "Unavailable" : "Figure available", sourceB, partiesGivingBusiness, null, null,
-    partiesGivingBusiness == null ? "Retailer detail is not loaded." : "", "number");
-  addBlockDecision("Coverage", "Business per retailer", spread?.businessPerActiveRetailer ?? kpis.businessPerRetailer,
-    "Resolved page spread metric", "Figure available", sourceB);
-  addBlockDecision("Coverage", "New retailers count", newRetailers,
-    "Mapped resolved KPI", newRetailers == null ? "Unavailable" : "Figure available", sourceA, newRetailers, null, null,
-    newRetailers == null ? "New-retailer count was not present in the resolved page payload." : "", "number");
-  addBlockDecision("Coverage", "New-party order value", kpis.newPartyOrderBooking, "Resolved Data-tab new-party order booking",
-    "Figure available", sourceA, kpis.newPartyOrderBooking);
+  const orderCount = extraNumber(kpis, "NOOFORDERS", "TOTALORDERS", "ORDERS");
+  const workingDays = kpis.workingDaysActual;
+  const salesPerDay = workingDays != null && workingDays > 0 && totalSale != null ? totalSale / workingDays : null;
+  const obPerDay = workingDays != null && workingDays > 0 && totalOb != null ? totalOb / workingDays : null;
+  const ordersPerDay = workingDays != null && workingDays > 0 && orderCount != null ? orderCount / workingDays : null;
+  const shortfall = (actual: number | null, target: number | null): number | null =>
+    actual != null && target != null ? Math.max(0, target - actual) : null;
+  const verdict = (value: number | null, unavailable: string, zero = "Genuine zero"): string =>
+    value == null ? `Unavailable — ${unavailable}` : value === 0 ? zero : "Positive contribution";
+  const pctAgainst = (actual: number | null, target: number | null): number | null =>
+    actual != null && target != null && target > 0 ? actual / target * 100 : null;
+  const benchmark = (metric: DeepDiveBenchmark["metric"]): DeepDiveBenchmark | null =>
+    (input.benchmarks ?? []).find((b) => b.metric === metric)
+      ?? (input.benchmark?.metric === metric ? input.benchmark : null);
+  const benchmarkText = (b: DeepDiveBenchmark | null): string =>
+    b == null
+      ? "Benchmark unavailable: no explicit resolved peer population and period."
+      : b.median == null
+        ? `Benchmark unavailable: ${b.population} has no resolved median for ${b.period}. Basis ${b.basis ?? "unspecified"}. Source: ${b.source}.`
+        : `Benchmark median ${b.median.toFixed(2)}; population ${b.population} (${b.peerCount} peers), period ${b.period}; basis ${b.basis ?? "unspecified"}; source ${b.source}.`;
+  const addSummary = (
+    blockName: string, question: string, value: number | null, basis: string, verdictText: string,
+    kind: "money" | "number" | "percent" = "money",
+  ) => {
+    // Keep the basis visible without adding columns: operand/source text is
+    // attached to the question, while column C remains a typed Excel value.
+    const r = summary.addRow([blockName, `${question} — ${basis}; source: Working detail`, null, verdictText]);
+    if (value != null) {
+      if (kind === "money") money(r.getCell(3), value);
+      else if (kind === "percent") pctCell(r.getCell(3), value);
+      else numberCell(r.getCell(3), value);
+    } else grey(r.getCell(3));
+  };
+  const block = (name: string) => summary.addRow([name, "", "", ""]);
+  const addAttainment = (label: string, actual: number | null, target: number | null, source: string) => {
+    const gap = shortfall(actual, target);
+    addSummary("Attainment", label, actual,
+      `${source}; target ${target == null ? "unavailable" : `₹${target.toLocaleString("en-IN")}`}; shortfall ${gap == null ? "unavailable" : `₹${gap.toLocaleString("en-IN")}`}`,
+      actual == null || target == null ? "Unavailable — actual or target missing" : actual >= target ? "On track" : `Below target by ₹${gap!.toLocaleString("en-IN")}`);
+    const achievement = pctAgainst(actual, target);
+    addSummary("Attainment", `${label} achievement %`, achievement,
+      `${source}; actual ÷ target`, achievement == null ? "Unavailable — denominator missing or not positive" : "Achievement calculated", "percent");
+    addSummary("Attainment", `${label} shortfall`, gap,
+      `${source}; max(target − actual, 0)`, gap == null ? "Unavailable — actual or target missing" : gap === 0 ? "No rupee shortfall" : `Below target by ₹${gap.toLocaleString("en-IN")}`);
+  };
 
-  block("Cost effectiveness");
-  addRatioDecision("Cost effectiveness", "YTD cost vs Sales Received", totalCost, denominator,
-    `${totalCost ?? "—"} YTD cost from CTC + T.A. / ${denominator ?? "—"} Sales Received`,
-    ratio == null ? "Unavailable" : ratio <= 10 ? "Efficient" : "Review cost efficiency",
-    "Recomputed from resolved page ROI",
-    ratio == null ? "Sales Received denominator unavailable or not positive." : "", "money");
-  addBlockDecision("Cost effectiveness", "Average sales per working day",
-    kpis.workingDaysActual != null && kpis.workingDaysActual > 0 && totalSale != null ? totalSale / kpis.workingDaysActual : null,
-    "Sales / actual working days", "Figure available", sourceA);
-  addBlockDecision("Cost effectiveness", "Visits per working day",
-    kpis.workingDaysActual != null && kpis.workingDaysActual > 0 && totalVisits != null ? totalVisits / kpis.workingDaysActual : null,
-    "Visits YTD / actual working days", "Figure available", sourceA, null, null, null, "", "number");
-  addBlockDecision("Cost effectiveness", "Order booking value per working day",
-    kpis.workingDaysActual != null && kpis.workingDaysActual > 0 && totalOb != null ? totalOb / kpis.workingDaysActual : null,
-    "Order booking / actual working days", "Figure available", sourceA, null, null, null, "", "number");
+  block("Cost / ROI");
+  addSummary("Cost / ROI", "Monthly cost (CTC)", kpis.ctcMonthly,
+    `Monthly CTC; source ${sourceA}`, verdict(kpis.ctcMonthly, "monthly CTC missing"));
+  addSummary("Cost / ROI", "Sales received", totalSale,
+    `SALES_RECEIVED; source ${sourceA}`, verdict(totalSale, "sales received missing"));
+  addSummary("Cost / ROI", "Order booking", totalOb,
+    `Committed order value (OB), distinct from sales received; source ${sourceA}`,
+    verdict(totalOb, "order booking missing"));
+  addSummary("Cost / ROI", "YTD cost vs Sales Received", totalCost,
+    `CTC_MONTHLY ₹${kpis.ctcMonthly?.toLocaleString("en-IN") ?? "unavailable"} × ${costElapsed ?? "unavailable"} authoritative reporting months + YTD T.A. ${taAvailable ? `₹${ytdTa!.toLocaleString("en-IN")}` : "unavailable (excluded)"} = ${taAvailable ? "total" : "known CTC"} ₹${totalCost?.toLocaleString("en-IN") ?? "unavailable"}; SALES_RECEIVED ₹${denominator?.toLocaleString("en-IN") ?? "unavailable"}; ${taAvailable ? "cost" : "known-cost"} ratio ${ratio == null ? "unavailable" : `${ratio.toFixed(2)}%`}`,
+    ratio == null ? "Unavailable — SALES_RECEIVED denominator missing or not positive" : ratio <= 10 ? "Efficient" : "Review cost efficiency");
+  const costBenchmark = benchmark("costRatio");
+  addSummary("Cost / ROI", "Cost ratio vs peer median", ratio,
+    `${benchmarkText(costBenchmark)}; denominator type SALES_RECEIVED`,
+    ratio == null || costBenchmark?.median == null ? "Unavailable — explicit cost benchmark unresolved"
+      : ratio > costBenchmark.median ? `Review — ${(ratio / costBenchmark.median).toFixed(1)}× peer median`
+    : "At or below peer median", "percent");
+  const obSalesNarrative = totalOb == null || totalSale == null
+    ? "Order booking versus sales received is unavailable; the two measures require a matched basis."
+    : totalOb > totalSale
+      ? "Order booking exceeds sales received; these are distinct source/timing measures and the gap requires conversion/basis review."
+      : totalOb < totalSale
+        ? "Sales received exceeds order booking; these are distinct source/timing measures and the difference requires basis review."
+        : "Order booking and sales received are equal on this extract; they remain distinct source/timing measures.";
+  const plainSentence = `${taAvailable ? "Costs" : "Known CTC"} ₹${totalCost == null ? "unavailable" : (totalCost / 100000).toFixed(2)} L year to date${taAvailable ? "" : " (T.A. unavailable and excluded)"} and returned ₹${totalSale == null ? "unavailable" : (totalSale / 100000).toFixed(2)} L of sales — a ${taAvailable ? "cost" : "known-cost"} ratio of ${ratio == null ? "unavailable" : `${ratio.toFixed(1)}%`} against ${costBenchmark?.median == null ? "an unresolved peer median" : `a peer median of ${costBenchmark.median.toFixed(1)}%`}. ${obSalesNarrative}`;
+  addSummary("Cost / ROI", "Plain decision", null, plainSentence, ratio == null ? "Unavailable — cost or sales basis incomplete" : "Decision basis stated");
+  addSummary("Cost / ROI", "Sales / cost multiple", salesCostMultiple,
+    "Sales received ÷ total YTD cost; sales and OB are distinct measures",
+    verdict(salesCostMultiple, "sales or cost missing"), "number");
+  addSummary("Cost / ROI", "OB / cost multiple", obCostMultiple,
+    "Order booking value ÷ total YTD cost; OB is committed orders, not dispatch/sales received",
+    verdict(obCostMultiple, "OB or cost missing"), "number");
+  addSummary("Cost / ROI", "Sales received per working day", salesPerDay, "SALES_RECEIVED ÷ actual working days", verdict(salesPerDay, "sales or working days missing"));
+  addSummary("Cost / ROI", "Order booking value/working day", obPerDay, "Order booking value ÷ actual working days", verdict(obPerDay, "OB or working days missing"));
+  addSummary("Cost / ROI", "Orders count/working day", ordersPerDay, "NOOFORDERS ÷ actual working days; source-labelled in Working detail", verdict(ordersPerDay, "NOOFORDERS or working days missing"), "number");
+
+  block("Attainment");
+  addAttainment("Sales received vs total target", totalSale, totalTarget, sourceA);
+  addAttainment("Secondary OB vs secondary target", kpis.orderBooking, kpis.secondaryTarget, sourceA);
+  addAttainment("Direct dealer OB vs primary target", kpis.directDealersOrder, kpis.primaryTarget, sourceA);
+  const attBenchmark = benchmark("attainment");
+  addSummary("Attainment", "Achievement vs peer median", kpis.achievementTotal,
+    `${benchmarkText(attBenchmark)}; selected member source ${sourceA}`, kpis.achievementTotal == null || attBenchmark?.median == null
+      ? "Unavailable — explicit benchmark unresolved"
+      : kpis.achievementTotal >= attBenchmark.median ? "Above peer median" : "Below peer median", "number");
+
+  block("What works");
+  addSummary("What works", "Parties giving business", partiesGivingBusiness,
+    detail ? "Working-sheet retailer rows with order booking > ₹0"
+      : "BUSINESSACHIEVEDBY resolved dashboard KPI; working-sheet rows are loading",
+    verdict(partiesGivingBusiness, detail ? "working-sheet detail not loaded" : "BUSINESSACHIEVEDBY dashboard KPI not resolved"), "number");
+  const obSalesMultiple = totalOb != null && totalSale != null && totalSale > 0 ? totalOb / totalSale : null;
+  addSummary("What works", "OB vs Sales Received multiple", obSalesMultiple,
+    "OB ÷ SALES_RECEIVED; OB is committed order value and sales received is dispatch/receipt — distinct measures",
+    obSalesMultiple == null ? "Unavailable — one measure missing or sales is not positive" : obSalesMultiple > 1 ? "OB exceeds sales; review source basis and timing" : "OB does not exceed sales on this extract", "number");
+  const businessDenominator = kpis.totalRetailers ?? spread?.totalRetailers ?? null;
+  const businessPopulation = kpis.totalRetailers != null
+    ? "declared dashboard/peer retailer totals (all retailers)"
+    : "declared working-sheet retailer totals (all retailers)";
+  const businessPerRetailer = businessDenominator != null && businessDenominator > 0 && totalOb != null
+    ? totalOb / businessDenominator
+    : kpis.businessPerRetailer;
+  const businessBenchmark = benchmark("businessPerRetailer");
+  addSummary("What works", "Business per retailer vs peer median", businessPerRetailer,
+    `${benchmarkText(businessBenchmark)}; denominator ${businessDenominator ?? "unavailable"} ${businessPopulation}`,
+    businessPerRetailer == null || businessBenchmark?.median == null ? "Unavailable — explicit peer median unresolved"
+      : businessPerRetailer >= businessBenchmark.median ? "At or above peer median" : "Below peer median");
+  addSummary("What works", "New retailers", newRetailers, "Resolved mapped KPI", verdict(newRetailers, "new-retailer count missing"), "number");
+  addSummary("What works", "New-party order value", kpis.newPartyOrderBooking, "Resolved Data-tab new-party order booking", verdict(kpis.newPartyOrderBooking, "new-party OB missing"));
+  addSummary("What works", "Visited retailer coverage", visited,
+    `dashboard visited ${visited ?? "unavailable"} / dashboard total ${totalRetailers ?? "unavailable"}`,
+    visited == null || totalRetailers == null ? "Unavailable — source counts missing" : visited === 0 ? "No retailer visits" : "Coverage present", "number");
 
   block("Risk");
-  addBlockDecision("Risk", "Concentration HHI", input.skuSpread?.concentrationHhi ?? spread?.concentrationIndex ?? null,
-    "Resolved segment/retailer concentration index", "Review if concentration is high", sourceB, null, null, null, "", "number");
-  addRatioDecision("Risk", "Segment coverage", input.skuSpread?.distinctSegments ?? null, input.skuSpread?.totalKnownSegments ?? null,
-    `${input.skuSpread?.distinctSegments ?? "—"} known / ${input.skuSpread?.totalKnownSegments ?? "—"} universe`,
-    input.skuSpread == null ? "Unavailable" : "Coverage signal", "secondary_register_line resolved page payload", "", "number");
-  addBlockDecision("Risk", "Dormant retailer count", effectiveDormant == null ? null : effectiveDormant.length,
-    "Full resolved win-back collection", "Review win-back list", sourceB, null, null, null, "", "number");
-  addBlockDecision("Risk", "Dormant retailer value", effectiveDormant == null ? null : effectiveDormant.reduce((sum, item) => sum + item.lastNet, 0),
-    "Sum of last NET for full dormant collection", "Review win-back value", sourceB);
-  finish(summary, [22, 48, 22, 40, 20, 20, 16, 26, 48, 58]);
+  addSummary("Risk", "Non-visited retailer count", nonVisited,
+    `dashboard non-visited ${nonVisited ?? "unavailable"} / dashboard total ${totalRetailers ?? "unavailable"}`,
+    nonVisited == null ? "Unavailable — dashboard count missing" : nonVisited === 0 ? "Genuine zero" : "Follow up required", "number");
+  addSummary("Risk", "Concentration HHI", input.skuSpread?.concentrationHhi ?? spread?.concentrationIndex ?? null,
+    "Resolved segment/retailer concentration index", (() => {
+      const hhi = input.skuSpread?.concentrationHhi ?? spread?.concentrationIndex ?? null;
+      return hhi == null ? "Unavailable — concentration source missing"
+        : hhi >= 2500 ? "High concentration — dependency risk"
+          : hhi >= 1500 ? "Moderate concentration — monitor mix"
+            : "Low concentration — diversified mix";
+    })(), "number");
+  const segmentKnown = input.skuSpread?.totalKnownSegments ?? null;
+  addSummary("Risk", "Segment coverage", input.skuSpread?.distinctSegments ?? null,
+    `${input.skuSpread?.distinctSegments ?? "unavailable"} of ${segmentKnown ?? "unavailable"} known segments`,
+    input.skuSpread == null || segmentKnown == null ? "Unavailable — segment universe unresolved" : "Coverage shown as resolved segments / known universe", "number");
+  addSummary("Risk", "Dormant retailer count", effectiveDormant == null ? null : effectiveDormant.length,
+    "Full resolved win-back collection", effectiveDormant == null ? "Unavailable — collection not loaded" : effectiveDormant.length === 0 ? "Genuine zero" : "Review win-back list", "number");
+  addSummary("Risk", "Dormant retailer value", effectiveDormant == null ? null : effectiveDormant.reduce((sum, item) => sum + item.lastNet, 0),
+    "Sum of last NET for full dormant collection", effectiveDormant == null ? "Unavailable — collection not loaded" : "Review win-back value");
+  const unavailable = [
+    totalCost == null ? "YTD cost" : "",
+    !taAvailable ? "YTD T.A." : "",
+    denominator == null ? "Sales received denominator" : "",
+    totalRetailers == null ? "Retailer total" : "",
+    nonVisited == null ? "Non-visited count" : "",
+    input.skuSpread == null ? "Segment spread" : "",
+    effectiveDormant == null ? "Dormant collection" : "",
+  ].filter(Boolean);
+  addSummary("Risk", "Unavailable measures", null, unavailable.length > 0 ? unavailable.join(", ") : "None",
+    unavailable.length > 0 ? "Unavailable list — do not interpret as zero" : "No named measures unavailable");
+
+  block("Trend");
+  addSummary("Trend", "Current sales vs same-period prior sales", kpis.sale,
+    `${period?.currentPeriodLabel ?? "current period"} vs ${period?.priorPeriodLabel ?? "same period prior FY"}; prior ${period?.priorSamePeriodSales ?? "unavailable"}`,
+    kpis.sale == null || period?.priorSamePeriodSales == null ? "Unavailable — prior sales unresolved" : kpis.sale >= period.priorSamePeriodSales ? "Growing" : "Declining");
+  addSummary("Trend", "Current OB vs same-period prior OB", totalOb,
+    `${period?.currentPeriodLabel ?? "current period"} vs ${period?.priorPeriodLabel ?? "same period prior FY"}; prior ${period?.priorSamePeriodOb ?? "unavailable"}`,
+    totalOb == null || period?.priorSamePeriodOb == null ? "Unavailable — prior OB unresolved" : totalOb >= period.priorSamePeriodOb ? "Growing" : "Declining");
+  addSummary("Trend", "Prior FY quarterly shape", priorTotal,
+    "Q1–Q4 prior-year actuals; source-labelled in Performance and Prior Period",
+    priorTotal == null ? "Unavailable — prior quarter source missing" : "Prior-year quarter sources resolved");
+  for (const [label, value] of [["Prior FY Q1 share", kpis.lastYearQ1], ["Prior FY Q2 share", kpis.lastYearQ2], ["Prior FY Q3 share", kpis.lastYearQ3], ["Prior FY Q4 share", kpis.lastYearQ4]] as [string, number | null][]) {
+    const share = pctAgainst(value, priorTotal);
+    addSummary("Trend", label, share, "Quarter actual ÷ prior FY total",
+      share == null ? "Unavailable — prior quarter or prior FY total missing" : "Share of prior FY", "percent");
+  }
+  addSummary("Trend", "Sales vs peer median", totalSale,
+    benchmarkText(benchmark("sales")), totalSale == null || benchmark("sales")?.median == null ? "Unavailable — explicit benchmark unresolved" : totalSale >= (benchmark("sales")!.median ?? 0) ? "Above peer median" : "Below peer median");
+  finish(summary, [20, 38, 100, 34]);
 
   // 2. Targets and Achievement
   const targets = wb.addWorksheet("Targets and Achievement");
@@ -843,7 +946,8 @@ export function buildDeepDiveWorkbook(input: DeepDiveExportInput): ExcelJS.Workb
   // 4. Coverage and Visits
   const coverage = wb.addWorksheet("Coverage and Visits");
   title(coverage, "Coverage and visits", ["Measure", "Value", "Numerator", "Denominator", "Percentage", "Availability", "Source", "Reason"]);
-  metric(coverage, "Total retailers", spread?.totalRetailers ?? kpis.totalRetailers, detail ? sourceB : sourceA, "Retailer detail unavailable");
+  metric(coverage, "Total retailers", kpis.totalRetailers, sourceA, "Dashboard retailer total unavailable");
+  metric(coverage, "Working-sheet total retailers", spread?.totalRetailers ?? null, sourceB, "Working-sheet retailer total unavailable");
   metric(coverage, "Active retailers", spread?.activeRetailers ?? null, sourceB, "Working-sheet spread unavailable");
   metric(coverage, "Dormant retailers", spread?.dormantRetailers ?? null, sourceB, "Working-sheet spread unavailable");
   percentage(coverage, "Active retailer coverage", spread?.activeRetailers ?? null, spread?.totalRetailers ?? null, sourceB, "Active or total retailer count unavailable");
@@ -867,82 +971,44 @@ export function buildDeepDiveWorkbook(input: DeepDiveExportInput): ExcelJS.Workb
   percentage(coverage, "Top 5 order-booking share", top5, spread?.totalOrderBooking ?? null, sourceB, "Retailer detail or total OB unavailable", "money");
   percentage(coverage, "Top 10 order-booking share", top10, spread?.totalOrderBooking ?? null, sourceB, "Retailer detail or total OB unavailable", "money");
   metric(coverage, "Retailer concentration HHI", spread?.concentrationIndex ?? null, sourceB, "Retailer concentration unavailable");
-  if (detail?.visitPlan) {
-    metric(coverage, "Visits done (working-sheet pattern)", detail.visitPlan.pattern.totalVisitsDone, sourceB, "Visit pattern unavailable");
-    metric(coverage, "Visits required (working-sheet pattern)", detail.visitPlan.pattern.totalVisitsRequired, sourceB, "Visit pattern unavailable");
-    metric(coverage, "Pro-rated visits required", detail.visitPlan.pattern.proRatedRequired, sourceB, "Visit pattern unavailable");
-    metric(coverage, "Visit deficit", detail.visitPlan.pattern.visitDeficit, sourceB, "Visit pattern unavailable");
-    metric(coverage, "Visited retailers with zero order", detail.visitPlan.pattern.visitedZeroOrderCount, sourceB, "Visit pattern unavailable");
-    metric(coverage, "Visit-plan total feasible", detail.visitPlan.totalFeasible, sourceB, "Visit-plan field unavailable");
-    metric(coverage, "Visit-plan total required", detail.visitPlan.totalRequired, sourceB, "Visit-plan field unavailable");
-    metric(coverage, "Visit-plan gap", detail.visitPlan.gap, sourceB, "Visit-plan field unavailable");
-    metric(coverage, "Visit-plan demonstrated visits/day", detail.visitPlan.capacity.demonstratedVisitsPerDay, sourceB, "Capacity field unavailable");
-    metric(coverage, "Visit-plan remaining required", detail.visitPlan.capacity.remainingRequired, sourceB, "Capacity field unavailable");
-    metric(coverage, "Visit-plan feasible remaining visits", detail.visitPlan.capacity.feasibleRemainingVisits, sourceB, "Capacity field unavailable");
-    metric(coverage, "Visit-plan working days remaining", detail.visitPlan.capacity.workingDaysRemaining, sourceB, "Capacity field unavailable");
-    metric(coverage, "Visit-plan monthly capacity", detail.visitPlan.capacity.monthlyCapacity, sourceB, "Capacity field unavailable");
-    coverage.addRow(["Visit plan FY start", detail.visitPlan.capacity.fyStartDate, "value", sourceB, ""]);
-    coverage.addRow(["Visit plan data window end", detail.visitPlan.capacity.dataWindowEndDate, "value", sourceB, ""]);
-    coverage.addRow(["Visit plan anchor FY", detail.visitPlan.capacity.anchorFy, "value", sourceB, ""]);
-    coverage.addRow(["Visit plan annual capacity anchor", detail.visitPlan.capacity.annualCapacityAnchor, "value", sourceB, ""]);
-    if (detail.visitPlan.pattern.visitedZeroOrderRetailers.length > 0) {
-      coverage.addRow(["Visited zero-order retailer names", detail.visitPlan.pattern.visitedZeroOrderRetailers.join("; "), "value", sourceB, ""]);
-    }
-    for (const historical of detail.visitPlan.historicalFyCapacity) {
-      metric(coverage, `Historical ${historical.fy} visits done`, historical.totalVisitsDone, sourceB, "Historical capacity unavailable");
-      metric(coverage, `Historical ${historical.fy} visits required`, historical.totalVisitsRequired, sourceB, "Historical capacity unavailable");
-      percentage(coverage, `Historical ${historical.fy} coverage`, historical.totalVisitsDone, historical.totalVisitsRequired, sourceB, "Historical visit denominator unavailable", "number");
-    }
-    if (detail.visitPlan.pattern.distanceBuckets.length > 0) {
-      coverage.addRow(["Distance bucket", "Retailers", "Visits done", "Average visits", "Average OB", "Active retailers", sourceB, ""]);
-      for (const bucket of detail.visitPlan.pattern.distanceBuckets) {
-        coverage.addRow([
-          bucket.label, bucket.count, bucket.visitsDone, bucket.avgVisits, bucket.avgOb,
-          bucket.activeCount, sourceB, "",
-        ]);
-      }
-    }
-    if (detail.visitPlan.monthPlans.length > 0) {
-      coverage.addRow(["Visit month plan", "Working days", "Capacity", "Maintenance visits", "Development visits", "Targets", sourceB, ""]);
-      for (const month of detail.visitPlan.monthPlans) {
-        coverage.addRow([
-          month.month, month.workingDays, month.capacity, month.maintenanceVisits,
-          month.developmentVisits, month.targets.length, sourceB, "",
-        ]);
-        for (const target of month.targets) {
-          coverage.addRow([
-            `Visit target (${month.month})`, target.name, target.district, target.distanceKm,
-            target.ob, target.visitsDone, sourceB, `${target.priority}: ${target.reason}`,
-          ]);
-        }
-      }
-    }
-  }
-  if (detail) {
-    coverage.addRow([
-      "Retailer detail rows", "Retailer", "District", "City", "Distributor", "Distance km",
-      "Business plan", "Visits required", "Order booking", "Sales received", "Visits",
-      "Achievement %", "Achievement numerator", "Achievement denominator", "Status", sourceB, "",
-    ]);
-    for (const retailer of effectiveRows) {
-      const r = coverage.addRow([
-        "Retailer", retailer.name, retailer.district, retailer.city, retailer.distributor, retailer.distanceKm,
-        retailer.businessPlan, retailer.visitsRequired, retailer.orderBooking, retailer.sale, retailer.totalVisit,
-        null, retailer.orderBooking, retailer.businessPlan, retailer.orderBooking > 0 ? "active business" : "no order",
-        sourceB, "",
-      ]);
-      numberCell(r.getCell(6), retailer.distanceKm);
-      money(r.getCell(7), retailer.businessPlan);
-      numberCell(r.getCell(8), retailer.visitsRequired);
-      money(r.getCell(9), retailer.orderBooking);
-      money(r.getCell(10), retailer.sale);
-      numberCell(r.getCell(11), retailer.totalVisit);
-      pctCell(r.getCell(12), retailer.achievementPct);
-      money(r.getCell(13), retailer.orderBooking);
-      money(r.getCell(14), retailer.businessPlan);
-    }
-  }
-  finish(coverage, [42, 24, 20, 20, 20, 16, 18, 18, 20, 20, 14, 16, 20, 20, 20, 48, 58]);
+  // Coverage is an analytical sheet only.  Retailer rows, visit targets and
+  // the raw visit-plan proof are deliberately kept out of it and are written
+  // to Working detail below.
+  const dashboardVisits = kpis.totalVisitsYtd;
+  const workingSheetVisits = spread?.totalVisits ?? null;
+  const visitMismatch = dashboardVisits != null && workingSheetVisits != null
+    ? dashboardVisits - workingSheetVisits : null;
+  const addCoverageComparison = (label: string, value: number | null, basis: string, source: string, reason: string, kind: "money" | "number" = "number") => {
+    const r = coverage.addRow([label, null, null, null, null, state(value), source, reason]);
+    if (kind === "money") money(r.getCell(2), value); else numberCell(r.getCell(2), value);
+    r.getCell(8).value = reason || basis;
+  };
+  addCoverageComparison("Dashboard total visits", dashboardVisits, "Data-tab all-type visits", sourceA, dashboardVisits == null ? "Dashboard total unavailable" : "Distinct dashboard source", "number");
+  addCoverageComparison("Working-sheet visits done", workingSheetVisits, "Retailer rows with visit values", sourceB, workingSheetVisits == null ? "Working-sheet visit total unavailable" : "Distinct working-sheet source", "number");
+  addCoverageComparison("Visit total mismatch (dashboard − working-sheet)", visitMismatch,
+    `${dashboardVisits ?? "unavailable"} − ${workingSheetVisits ?? "unavailable"}`, "Recomputed comparison", visitMismatch == null ? "Mismatch unavailable until both sources load" : "Visible source mismatch arithmetic", "number");
+  const dashboardDerivedNonVisited = kpis.totalRetailers != null && visited != null ? kpis.totalRetailers - visited : null;
+  addCoverageComparison("Dashboard non-visited arithmetic (total − visited)", dashboardDerivedNonVisited,
+    `${kpis.totalRetailers ?? "unavailable"} − ${visited ?? "unavailable"}`, sourceA,
+    dashboardDerivedNonVisited == null ? "Derived check unavailable" : "Cross-check only; reported non-visited remains a distinct source field", "number");
+  addCoverageComparison("Reported non-visited count", nonVisited, "Dashboard reported non-visited field", sourceA,
+    nonVisited == null ? "Dashboard non-visited unavailable" : "Distinct reported source; compare with arithmetic above", "number");
+  const dashboardRetailers = kpis.totalRetailers;
+  const workingRetailers = spread?.totalRetailers ?? null;
+  addCoverageComparison("Population arithmetic mismatch (dashboard visited + non-visited − working total)",
+    visited != null && nonVisited != null && workingRetailers != null ? visited + nonVisited - workingRetailers : null,
+    `${visited ?? "unavailable"} + ${nonVisited ?? "unavailable"} − ${workingRetailers ?? "unavailable"}`,
+    "Recomputed comparison",
+    visited == null || nonVisited == null || workingRetailers == null ? "Mismatch unavailable until all populations load" : "Distinct populations; 5 means dashboard counts exceed working total", "number");
+  addCoverageComparison("Dashboard total retailers", dashboardRetailers, "Data-tab declared total", sourceA,
+    dashboardRetailers == null ? "Dashboard total unavailable" : "Distinct dashboard source", "number");
+  addCoverageComparison("Working-sheet total retailers", workingRetailers, "Working-sheet parsed active rows", sourceB,
+    workingRetailers == null ? "Working-sheet total unavailable" : "Distinct working-sheet source", "number");
+  addCoverageComparison("Retailer total mismatch (dashboard − working-sheet)",
+    dashboardRetailers != null && workingRetailers != null ? dashboardRetailers - workingRetailers : null,
+    `${dashboardRetailers ?? "unavailable"} − ${workingRetailers ?? "unavailable"}`, "Recomputed comparison",
+    dashboardRetailers == null || workingRetailers == null ? "Mismatch unavailable until both sources load" : "Visible source mismatch arithmetic", "number");
+  finish(coverage, [54, 24, 20, 20, 20, 16, 48, 70]);
 
   // 5. Cost — exactly one cost-ratio KPI, with an auditable denominator.
   const cost = wb.addWorksheet("Cost");
@@ -951,20 +1017,22 @@ export function buildDeepDiveWorkbook(input: DeepDiveExportInput): ExcelJS.Workb
   metric(cost, "Annual CTC", kpis.ctcAnnual, sourceA, "Annual CTC unavailable", "money");
   metric(cost, "Monthly T.A. basis", null, sourceA, "Monthly T.A. is not supplied; YTD T.A. is retained below", "money");
   const elapsed = costElapsed;
-  metric(cost, "YTD CTC", ytdCtc, sourceB, "YTD CTC unavailable", "money");
+  metric(cost, "YTD CTC", ytdCtc, sourceA, "YTD CTC unavailable — CTC_MONTHLY × authoritative elapsed months unresolved", "money");
   metric(cost, "YTD T.A.", ytdTa, sourceA, "YTD T.A. unavailable", "money");
-  metric(cost, "Total YTD cost", totalCost, "Recomputed from YTD CTC + YTD T.A.", "Total cost unavailable", "money");
+  metric(cost, "Total YTD cost", totalCost,
+    taAvailable ? "Recomputed from YTD CTC + YTD T.A." : "Known CTC only; YTD T.A. unavailable and excluded",
+    totalCost == null ? "Known CTC unavailable" : taAvailable ? "" : "Cost coverage is CTC-only; T.A. is not a resolved zero", "money");
   metric(cost, "Exact denominator (sales received)", denominator, sourceA, "Sales Received denominator unavailable or not positive", "money");
-  const ratioRow = cost.addRow(["Cost ratio (recomputed; the only cost-ratio KPI)", null, totalCost, denominator, null, state(ratio), "Recomputed from YTD CTC + YTD T.A.", ratio == null ? "Sales Received denominator unavailable or not positive" : ""]);
+  const ratioRow = cost.addRow([`${taAvailable ? "Cost" : "Known-cost"} ratio (recomputed; the only cost-ratio KPI)`, null, totalCost, denominator, null, state(ratio), taAvailable ? "Recomputed from YTD CTC + YTD T.A." : "Recomputed from known CTC; YTD T.A. unavailable/excluded", ratio == null ? "Sales Received denominator unavailable or not positive" : taAvailable ? "" : "Cost coverage is CTC-only; T.A. is unavailable"]);
   pctCell(ratioRow.getCell(2), ratio);
   money(ratioRow.getCell(3), totalCost);
   money(ratioRow.getCell(4), denominator);
   pctCell(ratioRow.getCell(5), ratio);
   const typeRow = cost.addRow(["Denominator TYPE", "SALES_RECEIVED", null, null, null, "value", sourceA, ""]);
   typeRow.getCell(2).numFmt = "@";
-  metric(cost, "Elapsed complete months", elapsed, sourceB, "Elapsed months unavailable");
-  metric(cost, "OB to cost multiple", roi?.obToCostMultiple ?? null, sourceB, "OB-to-cost multiple unavailable");
-  metric(cost, "Sales to cost multiple", roi?.saleToCostMultiple ?? null, sourceB, "Sales-to-cost multiple unavailable");
+  metric(cost, "Elapsed complete months", elapsed, sourceA, "Elapsed months unavailable from resolved targets/calendar payload");
+  metric(cost, "OB to cost multiple", obCostMultiple, sourceA, "OB-to-cost multiple unavailable");
+  metric(cost, "Sales to cost multiple", salesCostMultiple, sourceA, "Sales-to-cost multiple unavailable");
   metric(cost, "Cost per retailer", roi?.costPerRetailer ?? null, sourceB, "Cost-per-retailer unavailable", "money");
   metric(cost, "Cost per visit", roi?.costPerVisit ?? null, sourceB, "Cost-per-visit unavailable", "money");
   metric(cost, "Cost per active retailer", roi?.costPerActiveRetailer ?? null, sourceB, "Cost-per-active-retailer unavailable", "money");
@@ -976,7 +1044,14 @@ export function buildDeepDiveWorkbook(input: DeepDiveExportInput): ExcelJS.Workb
     ? totalOb / kpis.workingDaysActual : null;
   metric(cost, "Average sales / day", avgSalesDay, sourceA, "Sales or working days unavailable");
   metric(cost, "Visits / day", avgVisitsDay, sourceA, "Visits or working days unavailable");
-  metric(cost, "Orders / day", avgOrdersDay, sourceA, "Orders or working days unavailable");
+  // OB value/day and order count/day are different measures.  NOOFORDERS is
+  // retained only as a source-labelled operand; it is never inferred from OB.
+  metric(cost, "Order booking value/working day", avgOrdersDay, sourceA, "Order booking value or working days unavailable");
+  metric(cost, "Orders count/working day", ordersPerDay,
+    extraNumber(kpis, "NOOFORDERS") == null
+      ? "NOOFORDERS source field unavailable; no count inferred"
+      : `${sourceA}; raw field NOOFORDERS`,
+    "Order count or working days unavailable", "number");
   finish(cost, [54, 32, 18, 48, 58, 22, 22, 18]);
 
   // 6. Segment Spread
@@ -1064,24 +1139,212 @@ export function buildDeepDiveWorkbook(input: DeepDiveExportInput): ExcelJS.Workb
   profileText("Old / new", extraText(kpis, "OLDNEW", "OLDORNEW"), sourceA);
   profileText("Channel", extraText(kpis, "CHANNEL", "CHANNELTYPE"), sourceA);
   profileText("Target range", extraText(kpis, "TARGETRANGE", "TARGETBAND"), sourceA);
-  for (const [key, value] of Object.entries(kpis.extra ?? {})) {
-    const label = friendlyExtraLabel(key.toUpperCase());
-    if (!label || ["State", "Working state", "Employee code", "Old / new", "Channel", "Target range", "Status"].includes(label)) continue;
-    const text = value == null ? null : String(value);
-    profileText(label, text, sourceA);
-  }
-  const mappedExtraOmissions = addMappedExtraRows(profile, kpis, sourceA);
   const doj = resolvedDoj(kpis);
   const dojRow = profile.addRow(["Date of Joining", null, null, null, null, state(doj), "Resolved roster/Data-tab field", doj == null ? "Date of Joining is unavailable in the resolved page payload." : ""]);
-  dojRow.getCell(2).value = doj;
+  // ExcelJS writes a genuine Date as a date cell; assigning the raw Sheets
+  // serial would leave consumers with a plain number despite the date format.
+  dojRow.getCell(2).value = doj == null ? null : new Date((doj - 25569) * 86400000);
   if (doj == null) grey(dojRow.getCell(2));
   else dojRow.getCell(2).numFmt = "dd-mmm-yyyy";
-  profileText("FY", input.fy, "Export filter");
+  // Profile is identity only.  Raw/mapped Data-tab extras belong in Working
+  // detail, where their field names, operands and provenance are visible.
   finish(profile, [36, 42, 18, 46, 66, 22, 22, 20]);
 
-  // 10. Info
+  // 10. Working detail — the audit layer. Retailer rows, visit targets,
+  // source operands and reconciliation proof are kept out of Coverage.
+  const working = wb.addWorksheet("Working detail");
+  title(working, "Working detail and source proof", [
+    "Section", "Measure / row", "Value", "Numerator", "Denominator",
+    "Availability", "Source", "Reason", "Raw field name",
+    "District", "City", "Distributor", "Distance km", "Annual plan", "Visits required",
+    "OB", "Sales received", "Visits done", "Achievement", "Effective OB", "Effective plan",
+    "Status", "Detail source", "Detail reason",
+    "Visit month", "Target name", "Target district", "Target distance km",
+    "Target OB", "Target visits", "Visit decision",
+  ]);
+  const workingMetric = (
+    section: string, label: string, value: number | string | Date | null,
+    source: string, reason: string, rawField = "",
+    numerator: number | null = null, denominator: number | null = null,
+  ) => {
+    const availability = value == null ? "unavailable" : typeof value === "number" && value === 0 ? "zero" : "value";
+    const r = working.addRow([section, label, value, numerator, denominator, availability, source, value == null ? reason : "", rawField]);
+    if (value == null) grey(r.getCell(3));
+    else if (typeof value === "number") r.getCell(3).numFmt = "#,##0.00";
+    return r;
+  };
+  const workingMoney = (
+    section: string, label: string, value: number | null, source: string, reason: string,
+    rawField = "", numerator: number | null = null, denominator: number | null = null,
+  ) => {
+    const r = workingMetric(section, label, value, source, reason, rawField, numerator, denominator);
+    money(r.getCell(3), value);
+    if (numerator != null) money(r.getCell(4), numerator);
+    if (denominator != null) money(r.getCell(5), denominator);
+    return r;
+  };
+  const workingStatusRow = workingMetric("Working-sheet status", "Retailer detail availability",
+    detail ? "ok" : sourceBStatus,
+    sourceB,
+    detail ? "Complete retailer rows and visit-plan proof loaded." : sourceBStatusReason || "Retailer detail unavailable; no completeness inferred.",
+    "retailerDetail.status");
+  workingStatusRow.getCell(8).value = detail
+    ? "Complete retailer rows and visit-plan proof loaded."
+    : sourceBStatusReason || "Retailer detail unavailable; no completeness inferred.";
+  workingMoney("KPI operands", "Monthly CTC", kpis.ctcMonthly, sourceA, "Monthly CTC unavailable", "CTC_MONTHLY");
+  workingMetric("KPI operands", "Authoritative elapsed months", costElapsed, sourceA,
+    "Elapsed months unavailable from resolved targets/calendar payload", "ELAPSED_MONTHS");
+  workingMoney("KPI operands", "YTD CTC", ytdCtc, sourceA,
+    "YTD CTC unavailable — requires CTC_MONTHLY × authoritative elapsed months",
+    "CTC_MONTHLY × ELAPSED_MONTHS", kpis.ctcMonthly, costElapsed);
+  workingMoney("KPI operands", "YTD T.A.", ytdTa, sourceA, "YTD T.A. unavailable", "TABILLSTCOST");
+  workingMoney("KPI operands", "Total YTD cost", totalCost,
+    taAvailable ? "Recomputed" : "Known CTC only; T.A. unavailable/excluded",
+    totalCost == null ? "Known CTC unavailable" : taAvailable ? "" : "Cost coverage is CTC-only; T.A. is not a resolved zero",
+    "CTC_COST_YTD + TA_BILL_YTD", ytdCtc, ytdTa);
+  workingMoney("KPI operands", "SALES_RECEIVED denominator", denominator, sourceA, "Sales received unavailable or not positive", "SALE");
+  workingMetric("KPI operands", "Denominator TYPE", "SALES_RECEIVED", sourceA, "", "SALES_RECEIVED");
+  workingMetric("Benchmark basis", "Cost ratio benchmark basis",
+    costBenchmark?.basis ?? (taAvailable ? "fullCost" : "ctcOnly"),
+    sourceA,
+    "Cost benchmark basis is unavailable",
+    "COST_RATIO_BASIS");
+  workingMetric("Benchmark basis", "Cost benchmark reporting months", costElapsed,
+    sourceA, "Reporting month count unavailable", "REPORTING_MONTH_COUNT");
+  workingMetric("KPI operands", "Order booking value/working day", obPerDay, sourceA, "OB or working days unavailable", "ORDER_BOOKING / WORKING_DAYS");
+  workingMetric("KPI operands", "Orders count/working day", ordersPerDay,
+    extraNumber(kpis, "NOOFORDERS") == null ? "NOOFORDERS source not resolved" : sourceA,
+    "NOOFORDERS or working days unavailable", "NOOFORDERS / WORKING_DAYS");
+  workingMetric("KPI operands", "Dashboard total visits", totalVisits, sourceA, "Dashboard total visits unavailable", "TOTALVISITS");
+  workingMetric("KPI operands", "Working-sheet visits done", spread?.totalVisits ?? null, sourceB, "Working-sheet visit values unavailable", "TOTALVISITS (working sheet)");
+  workingMetric("KPI operands", "Dashboard total retailers", kpis.totalRetailers, sourceA, "Dashboard total unavailable", "TOTALRETAILERS");
+  workingMetric("KPI operands", "Dashboard visited retailers", kpis.visitedRetailers, sourceA, "Dashboard visited unavailable", "VISITEDRETAILERS");
+  workingMetric("KPI operands", "Dashboard non-visited retailers", kpis.nonVisitedRetailers, sourceA, "Dashboard non-visited unavailable", "NONVISITED");
+  workingMetric("KPI operands", "Working-sheet total retailers", spread?.totalRetailers ?? null, sourceB, "Working-sheet total unavailable", "spread.totalRetailers");
+  workingMetric("KPI operands", "Retailer total mismatch arithmetic",
+    kpis.totalRetailers != null && spread?.totalRetailers != null ? kpis.totalRetailers - spread.totalRetailers : null,
+    "Recomputed comparison", "Both retailer totals are required", "DASHBOARD_TOTAL_RETAILERS − WORKING_SHEET_TOTAL_RETAILERS",
+    kpis.totalRetailers, spread?.totalRetailers ?? null);
+  if (detail?.visitPlan) {
+    const vp = detail.visitPlan;
+    workingMetric("Raw visit-plan proof", "Visits done (working-sheet pattern)", vp.pattern.totalVisitsDone, sourceB, "", "pattern.totalVisitsDone");
+    workingMetric("Raw visit-plan proof", "Visits required (working-sheet pattern)", vp.pattern.totalVisitsRequired, sourceB, "", "pattern.totalVisitsRequired");
+    workingMetric("Raw visit-plan proof", "Pro-rated visits required", vp.pattern.proRatedRequired, sourceB, "", "pattern.proRatedRequired");
+    workingMetric("Raw visit-plan proof", "Visit deficit", vp.pattern.visitDeficit, sourceB, "", "pattern.visitDeficit");
+    workingMetric("Raw visit-plan proof", "Visit-plan total feasible", vp.totalFeasible, sourceB, "", "totalFeasible");
+    workingMetric("Raw visit-plan proof", "Visit-plan total required", vp.totalRequired, sourceB, "", "totalRequired");
+    workingMetric("Raw visit-plan proof", "Visit-plan gap", vp.gap, sourceB, "", "gap");
+    workingMetric("Raw visit-plan proof", "Demonstrated visits/day", vp.capacity.demonstratedVisitsPerDay, sourceB, "", "capacity.demonstratedVisitsPerDay");
+    workingMetric("Raw visit-plan proof", "Remaining required", vp.capacity.remainingRequired, sourceB, "", "capacity.remainingRequired");
+    workingMetric("Raw visit-plan proof", "Feasible remaining visits", vp.capacity.feasibleRemainingVisits, sourceB, "", "capacity.feasibleRemainingVisits");
+    workingMetric("Raw visit-plan proof", "Working days remaining", vp.capacity.workingDaysRemaining, sourceB, "", "capacity.workingDaysRemaining");
+    workingMetric("Raw visit-plan proof", "Monthly capacity", vp.capacity.monthlyCapacity, sourceB, "", "capacity.monthlyCapacity");
+    workingMetric("Raw visit-plan proof", "FY start / data window / anchor",
+      `${vp.capacity.fyStartDate} / ${vp.capacity.dataWindowEndDate} / ${vp.capacity.anchorFy}`,
+      sourceB, "", "capacity dates");
+    workingMetric("Raw visit-plan proof", "Data cutoff working days", vp.capacity.dataCutoffWorkingDays, sourceB, "", "capacity.dataCutoffWorkingDays");
+    workingMetric("Raw visit-plan proof", "Unassigned excluded", vp.unassignedExcluded, sourceB, "", "unassignedExcluded");
+    for (const historical of vp.historicalFyCapacity) {
+      workingMetric("Raw visit-plan proof", `${historical.fy} visits done`, historical.totalVisitsDone, sourceB, "", `historicalFyCapacity.${historical.fy}.totalVisitsDone`);
+      workingMetric("Raw visit-plan proof", `${historical.fy} visits required`, historical.totalVisitsRequired, sourceB, "", `historicalFyCapacity.${historical.fy}.totalVisitsRequired`);
+    }
+    for (const bucket of vp.pattern.distanceBuckets) {
+      workingMetric("Raw visit-plan proof", `Distance bucket ${bucket.label}`,
+        `${bucket.count} retailers / ${bucket.visitsDone} visits`, sourceB,
+        `avg visits ${bucket.avgVisits}; avg OB ${bucket.avgOb}; active ${bucket.activeCount}`,
+        "pattern.distanceBuckets");
+    }
+    if (vp.pattern.visitedZeroOrderRetailers.length > 0) {
+      workingMetric("Raw visit-plan proof", "Visited zero-order retailer names",
+        vp.pattern.visitedZeroOrderRetailers.join("; "), sourceB, "", "pattern.visitedZeroOrderRetailers");
+    }
+    for (const month of vp.monthPlans) {
+      workingMetric("Visit target rows", `${month.month} summary`, month.targets.length, sourceB,
+        `working days ${month.workingDays}; capacity ${month.capacity}; maintenance ${month.maintenanceVisits}; development ${month.developmentVisits}`,
+        "monthPlans");
+      for (const target of month.targets) {
+        const targetRow = workingMetric("Visit target rows", `${month.month}: ${target.name}`,
+          null, sourceB, "", "monthPlans.targets");
+        targetRow.getCell(25).value = month.month;
+        targetRow.getCell(26).value = target.name;
+        targetRow.getCell(27).value = target.district ?? null;
+        targetRow.getCell(28).value = target.distanceKm ?? null;
+        targetRow.getCell(29).value = target.ob;
+        targetRow.getCell(30).value = target.visitsDone;
+        targetRow.getCell(31).value = `${target.priority}: ${target.reason}`;
+      }
+    }
+  } else {
+    workingMetric("Raw visit-plan proof", "Visit plan", null, sourceB, sourceBStatusReason, "visitPlan");
+  }
+  for (const [key, value] of Object.entries(kpis.extra ?? {})) {
+    const upper = key.toUpperCase();
+    if (/^A\d+$/.test(upper) || /^COL\d+$/.test(upper) || upper.includes("INTERNAL")) {
+      workingMetric("Raw / mapped extras", key, null, sourceA, "Omitted internal source field; retained as an audit omission.", key);
+      continue;
+    }
+    if (upper.includes("COSTRATIO") || (upper.includes("COST") && upper.includes("RATIO"))) {
+      workingMetric("Raw / mapped extras", key, null, sourceA, "Unverified source ratio; suppressed from numeric KPI rows.", key);
+      continue;
+    }
+    const spec = mappedExtraSpec(upper);
+    const n = rawExtraNumber(value);
+    const r = workingMetric("Raw / mapped extras", spec?.label ?? key,
+      spec?.unit === "text" ? (value == null ? null : String(value)) : n, sourceA,
+      n == null && spec?.unit !== "text" ? "Mapped source value was not numeric." : "", key);
+    if (spec?.unit === "money") money(r.getCell(3), n);
+    if (spec?.unit === "percent" && n != null) {
+      r.getCell(3).value = Math.abs(n) <= 5 ? n : n / 100;
+      r.getCell(3).numFmt = "0.00%";
+    }
+  }
+  if (detail) {
+    for (const retailer of effectiveRows) {
+      const r = working.addRow([
+        "Retailer rows", retailer.name, null, null, null,
+        retailer.orderBooking === 0 ? "zero" : "value", sourceB,
+        retailer.orderBooking > 0 ? "active business" : "no order", "retailer row",
+      ]);
+      r.getCell(10).value = retailer.district ?? null;
+      r.getCell(11).value = retailer.city ?? null;
+      r.getCell(12).value = retailer.distributor ?? null;
+      numberCell(r.getCell(13), retailer.distanceKm);
+      money(r.getCell(14), retailer.businessPlan);
+      numberCell(r.getCell(15), retailer.visitsRequired);
+      money(r.getCell(16), retailer.orderBooking);
+      money(r.getCell(17), retailer.sale);
+      numberCell(r.getCell(18), retailer.totalVisit);
+      // Member-sheet achievementPct is already percentage points (80 means
+      // 80%), unlike monthly payload achievementPct, which is a 0–1 ratio.
+      pctCell(r.getCell(19), retailer.achievementPct);
+      money(r.getCell(20), retailer.orderBooking);
+      money(r.getCell(21), retailer.businessPlan);
+      r.getCell(22).value = retailer.isActive ? "active" : "inactive";
+      r.getCell(23).value = sourceB;
+      r.getCell(24).value = retailer.orderBooking > 0 ? "active business" : "no order";
+    }
+  }
+  const reconWorking = (label: string, a: number | null, b: number | null) => {
+    const difference = a != null && b != null ? a - b : null;
+    workingMoney("Reconciliation evidence", label, difference, "Recomputed comparison",
+      a == null || b == null ? sourceBStatusReason || "One source unavailable" : `${a} − ${b} = ${difference}`,
+      "SOURCE_A − SOURCE_B", a, b);
+  };
+  reconWorking("Order booking (retailer + DD)", pageOrderBooking, spread?.totalOrderBooking ?? null);
+  reconWorking("Sales received", kpis.sale, spread?.totalSale ?? null);
+  reconWorking("Retailer count", kpis.totalRetailers, spread?.totalRetailers ?? null);
+  finish(working, [24, 48, 28, 24, 24, 18, 48, 70, 34, 18, 18, 20, 16, 18, 18, 18, 18, 16, 16, 18, 18, 18, 42, 54, 16, 28, 24, 18, 18, 16, 34]);
+
+  // 11. Info
   const info = wb.addWorksheet("Info");
   title(info, "Export information and omissions", ["Field", "Value"]);
+  const mappedExtraOmissions = Object.entries(kpis.extra ?? {})
+    .filter(([key]) => /^A\d+$/i.test(key) || /^COL\d+$/i.test(key)
+      || key.toUpperCase().includes("INTERNAL")
+      || key.toUpperCase().includes("COSTRATIO"))
+    .map(([key]) => /^A\d+$/i.test(key) || /^COL\d+$/i.test(key) || key.toUpperCase().includes("INTERNAL")
+      ? `${key}: omitted internal source field.`
+      : `${key}: unverified source field; suppressed from all numeric KPI rows.`);
   const actualOmissions = [
     period?.priorSamePeriodSales == null ? "Growth: same-period prior sales unavailable." : "",
     period?.priorSamePeriodOb == null ? "Growth: same-period prior order booking unavailable." : "",
@@ -1112,6 +1375,11 @@ export function buildDeepDiveWorkbook(input: DeepDiveExportInput): ExcelJS.Workb
     ["Segment coverage note", input.skuSpread?.liveYearNote ?? "No additional segment coverage note supplied."],
     ["Dormant dataset source", effectiveDormant == null ? "Not loaded" : "Resolved full win-back collection"],
     ["Filters and period basis", input.periodLabel ?? "Full FY / current page selection"],
+    ["Benchmark disclosure", ((input.benchmarks ?? []).length > 0 || input.benchmark != null)
+      ? [...(input.benchmarks ?? []), ...(input.benchmark ? [input.benchmark] : [])].map((b) =>
+         `${b.metric}: ${b.population}; ${b.peerCount} peers; ${b.period}; basis ${b.basis ?? "unspecified"}; source ${b.source}; median ${b.median == null ? "unavailable" : b.median}`,
+      ).join(" | ")
+      : "No explicit resolved company or state-head peer population and period was supplied; benchmark is unavailable."],
     ["Provisional months", input.provisionalMonths ?? "No provisional-month note was supplied by the resolved page."],
     ["Order booking vs dispatch", "Order booking is committed order value; dispatch / sales received is goods dispatched/received. They are separate measures and are not substituted."],
     ["Snapshot basis", `${input.fromDbSnapshot ? "DB snapshot" : "live resolved read"}${input.stale ? "; stale snapshot served while source was busy" : ""}`],

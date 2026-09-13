@@ -10,6 +10,7 @@ import {
 } from "./deepDiveExport.js";
 import type { MemberKpis } from "./deepDiveData.js";
 import type { MemberSheetData } from "./memberSheet.js";
+import { closedReportingMonthCount } from "../fyAnchors.js";
 
 function fixture(overrides: Partial<MemberKpis> = {}): MemberKpis {
   return {
@@ -160,7 +161,8 @@ function input(overrides: Partial<DeepDiveExportInput> = {}): DeepDiveExportInpu
 }
 
 function row(ws: ExcelJS.Worksheet, label: string): ExcelJS.Row {
-  const hit = ws.getRows(1, ws.rowCount)?.find((r) => r.getCell(1).value === label);
+  const hit = ws.getRows(1, ws.rowCount)?.find((r) =>
+    r.getCell(1).value === label || r.getCell(2).value === label);
   if (!hit) throw new Error(`Could not find row ${label}`);
   return hit;
 }
@@ -170,8 +172,8 @@ function values(workbook: ExcelJS.Workbook): unknown[] {
     ws.getRows(1, ws.rowCount)?.flatMap((r) => r.values as unknown[]) ?? []);
 }
 
-describe("Prompt 81 Sales Deep Dive workbook", () => {
-  it("has exactly the approved ten-sheet order and all resolved collections", async () => {
+describe("Prompt 84 Sales Deep Dive workbook", () => {
+  it("has exactly the approved eleven-sheet order and all resolved collections", async () => {
     const bytes = await buildDeepDiveExport(input());
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(bytes as unknown as Parameters<typeof workbook.xlsx.load>[0]);
@@ -186,9 +188,10 @@ describe("Prompt 81 Sales Deep Dive workbook", () => {
       "Reconciliation",
       "Dormant Retailers",
       "Profile",
+      "Working detail",
       "Info",
     ]);
-    expect(workbook.worksheets).toHaveLength(10);
+    expect(workbook.worksheets).toHaveLength(11);
     const dormant = workbook.getWorksheet("Dormant Retailers")!;
     expect(dormant.getColumn(1).values).toContain("Dormant A");
     expect(dormant.getColumn(1).values).toContain("Dormant B");
@@ -213,12 +216,15 @@ describe("Prompt 81 Sales Deep Dive workbook", () => {
     expect(costRatio.getCell(4).value).toBe(90);
     expect(costRatio.getCell(5).value).toBeCloseTo(102000 / 90, 8);
     const summaryCost = workbook.getWorksheet("Summary for Decision")!.getRows(1, workbook.getWorksheet("Summary for Decision")!.rowCount)!
-      .find((r) => r.getCell(2).value === "YTD cost vs Sales Received")!;
-    expect(summaryCost.getCell(5).value).toBe(102000);
-    expect(summaryCost.getCell(6).value).toBe(90);
-    expect(summaryCost.getCell(7).value).toBeCloseTo(102000 / 90, 8);
+      .find((r) => String(r.getCell(2).value).startsWith("YTD cost vs Sales Received"))!;
+    expect(summaryCost.getCell(3).value).toBe(102000);
     expect(values(workbook)).not.toContain(0.02);
     expect(workbook.getWorksheet("Info")!.getColumn(1).values).toContain("Unverified source ratio metadata");
+    const summaryRows = workbook.getWorksheet("Summary for Decision")!.getRows(1, workbook.getWorksheet("Summary for Decision")!.rowCount)!;
+    expect(summaryRows.find((r) => String(r.getCell(2).value).startsWith("Sales / cost multiple"))!.getCell(3).value)
+      .toBeCloseTo(90 / 102000, 8);
+    expect(summaryRows.find((r) => String(r.getCell(2).value).startsWith("OB / cost multiple"))!.getCell(3).value)
+      .toBeCloseTo(110 / 102000, 8);
   });
 
   it("writes DOJ as a genuine Excel date and preserves value, zero and unavailable states", async () => {
@@ -271,25 +277,30 @@ describe("Prompt 81 Sales Deep Dive workbook", () => {
       workbook.getWorksheet(name)!.getRows(1, workbook.getWorksheet(name)!.rowCount)!
         .flatMap((r) => [r.getCell(1).value, r.getCell(2).value]).map(String),
     );
-    for (const block of ["Target attainment", "Growth", "Coverage", "Cost effectiveness", "Risk"]) {
+    for (const block of ["Cost / ROI", "Attainment", "What works", "Risk", "Trend"]) {
       expect(labels("Summary for Decision")).toContain(block);
     }
     for (const label of [
-      "Total target vs sale", "Secondary OB vs secondary target", "Direct dealer OB vs primary target",
-      "Prior FY Q1 shape", "Total retailers", "Visited retailer coverage",
-      "Parties giving business", "Business per retailer", "New-party order value",
-      "New retailers count",
-      "YTD cost vs Sales Received", "Concentration HHI", "Dormant retailer count", "Dormant retailer value",
-    ]) expect(labels("Summary for Decision")).toContain(label);
+      "YTD cost vs Sales Received", "Sales / cost multiple", "OB / cost multiple",
+      "Sales received vs total target", "Secondary OB vs secondary target",
+      "Direct dealer OB vs primary target", "Prior FY quarterly shape",
+      "Visited retailer coverage", "Non-visited retailer count",
+      "Parties giving business", "OB vs Sales Received multiple", "Business per retailer vs peer median",
+      "New retailers", "New-party order value",
+      "Concentration HHI", "Dormant retailer count", "Dormant retailer value",
+    ]) expect([...labels("Summary for Decision")].some((v) => v.includes(label))).toBe(true);
     for (const label of [
       "Monthly CTC basis", "Annual CTC", "YTD CTC", "YTD T.A.", "Total YTD cost",
       "Exact denominator (sales received)", "Denominator TYPE", "Average sales / day",
-       "Visits / day", "Orders / day",
+       "Visits / day", "Order booking value/working day", "Orders count/working day",
     ]) expect(labels("Cost")).toContain(label);
     for (const label of [
       "Annual business plan", "Active retailer percentage", "Top 5 order-booking share",
-      "Top 10 order-booking share", "Retailer concentration HHI", "Retailer detail rows",
+       "Top 10 order-booking share", "Retailer concentration HHI", "Dashboard total visits",
     ]) expect(labels("Coverage and Visits")).toContain(label);
+    for (const label of ["Business breakdown", "Counterwise visits"]) {
+      expect(labels("Working detail")).toContain(label);
+    }
     for (const label of [
       "Current FY YTD", "Custom selected period", "Full Year / current FY", "Prior FY same-period comparison",
       "Q1", "Q2", "Q3", "Q4", "Prior year Q1", "Prior year Q2", "Prior year Q3", "Prior year Q4",
@@ -316,24 +327,20 @@ describe("Prompt 81 Sales Deep Dive workbook", () => {
   it("exports mapped page extras as typed numeric rows and records explicit omissions", () => {
     const workbook = buildDeepDiveWorkbook(input());
     const profile = workbook.getWorksheet("Profile")!;
-    expect(row(profile, "Business breakdown").getCell(2).value).toBe(1234);
-    expect(row(profile, "Business breakdown").getCell(2).numFmt).toContain("₹");
-    expect(row(profile, "Counterwise visits").getCell(2).value).toBe(12);
-    expect(row(profile, "GPS distance (km)").getCell(2).value).toBe(45.5);
-    expect(row(profile, "Average order value").getCell(2).value).toBe(101.25);
-    expect(row(profile, "Target Achievement").getCell(2).value).toBe(0.42);
-    expect(row(profile, "Target Achievement").getCell(3).value).toBe(110);
-    expect(row(profile, "Target Achievement").getCell(4).value).toBe(300);
-    expect(row(profile, "Target Achievement").getCell(5).value).toBeCloseTo(110 / 300, 8);
-    expect(row(profile, "Current total sales").getCell(2).value).toBe(90);
-    expect(row(profile, "Visits to Parties Giving Business").getCell(2).value).toBe(7);
-    expect(row(profile, "Visits to Parties with No Business").getCell(2).value).toBe(5);
+    expect(profile.getColumn(1).values).not.toContain("Business breakdown");
+    const working = workbook.getWorksheet("Working detail")!;
+    expect(row(working, "Business breakdown").getCell(3).value).toBe(1234);
+    expect(row(working, "Business breakdown").getCell(3).numFmt).toContain("₹");
+    expect(row(working, "Counterwise visits").getCell(3).value).toBe(12);
+    expect(row(working, "GPS distance (km)").getCell(3).value).toBe(45.5);
+    expect(row(working, "Average order value").getCell(3).value).toBe(101.25);
+    expect(row(working, "Target Achievement").getCell(3).value).toBe(0.42);
+    expect(row(working, "Current total sales").getCell(3).value).toBe(90);
+    expect(row(working, "Business breakdown").getCell(9).value).toBe("BUSINESSBREAKDOWN");
     const info = workbook.getWorksheet("Info")!;
     const infoText = (info.getColumn(2).values as unknown[]).map(String).join(" | ");
     expect(infoText).toContain("A4: omitted internal source field.");
-    expect(infoText).toContain("DOJ: raw source key omitted because it is represented by the typed Date of Joining row.");
-    expect(infoText).not.toContain("TOTALVISITSOFBUSINESSRECEIVEDPARTIES");
-    expect(infoText).not.toContain("TOTALVISITSOFVISITEDBUTNOBUSINESSRECEIVED");
+    expect(infoText).toContain("COSTRATIOSALE: unverified source field");
   });
 
   it("keeps the export manifest aligned with every meaningful page EXTRA_LABELS key", () => {
@@ -418,27 +425,22 @@ describe("Prompt 81 Sales Deep Dive workbook", () => {
     expect(fullYear.getCell(3).value).toBeNull();
     expect(fullYear.getCell(10).value).toContain("12 distinct FY months");
     const summary = workbook.getWorksheet("Summary for Decision")!;
-    const salesGrowth = summary.getRows(1, summary.rowCount)!.find((r) => r.getCell(2).value === "Current YTD sales vs same-period prior sales")!;
+    expect((summary.getRow(2).values as unknown[]).slice(1, 5)).toEqual([
+      "Decision block", "Figure / question", "Value / basis", "Verdict",
+    ]);
+    const salesGrowth = summary.getRows(1, summary.rowCount)!.find((r) =>
+      String(r.getCell(2).value).startsWith("Current sales vs same-period prior sales"))!;
     expect(salesGrowth.getCell(3).value).toBe(90);
-    expect(salesGrowth.getCell(6).value).toBeNull();
-    expect(salesGrowth.getCell(8).value).toBe("Unavailable");
-    const obGrowth = summary.getRows(1, summary.rowCount)!.find((r) => r.getCell(2).value === "Current YTD OB vs same-period prior OB")!;
+    expect(salesGrowth.getCell(4).value).toContain("Unavailable");
+    const obGrowth = summary.getRows(1, summary.rowCount)!.find((r) =>
+      String(r.getCell(2).value).startsWith("Current OB vs same-period prior OB"))!;
     expect(obGrowth.getCell(3).value).toBe(110);
-    expect(obGrowth.getCell(6).value).toBeNull();
-    for (const rowValue of summary.getRows(1, summary.rowCount) ?? []) {
-      const question = String(rowValue.getCell(2).value ?? "");
-      if (["Coverage", "Cost effectiveness", "Risk"].includes(String(rowValue.getCell(1).value))) continue;
-      if (["Total retailers", "Visited retailer coverage", "Non-visited retailer share", "Parties giving business",
-        "Business per retailer", "New retailers count", "New-party order value", "YTD cost vs Sales Received",
-        "Average sales per working day", "Visits per working day", "Order booking value per working day",
-        "Concentration HHI", "Segment coverage", "Dormant retailer count", "Dormant retailer value"].includes(question)) {
-        expect(rowValue.getCell(1).value).toBe(question === "YTD cost vs Sales Received"
-          || question === "Average sales per working day"
-          || question === "Visits per working day"
-          || question === "Order booking value per working day" ? "Cost effectiveness"
-          : ["Concentration HHI", "Segment coverage", "Dormant retailer count", "Dormant retailer value"].includes(question) ? "Risk" : "Coverage");
-      }
-    }
+    expect(obGrowth.getCell(4).value).toContain("Unavailable");
+    const workingStatus = row(workbook.getWorksheet("Working detail")!, "Retailer detail availability");
+    expect(workingStatus.getCell(3).value).toBe("not-loaded");
+    expect(workingStatus.getCell(8).value).toContain("not yet loaded");
+    const infoStatus = workbook.getWorksheet("Info")!;
+    expect((infoStatus.getColumn(2).values as unknown[]).map(String).join(" | ")).toContain("status=not-loaded");
   });
 
   it("uses page-equivalent reconciliation and preserves every Source B status", () => {
@@ -474,18 +476,212 @@ describe("Prompt 81 Sales Deep Dive workbook", () => {
       businessPlan: 100, visitsRequired: 4, orderBooking: 80, sale: 75, totalVisit: 3,
       achievementPct: 80, isActive: true, lastActiveYear: null, lastYearOb: null, lastYearSale: null,
     }];
+    const visitPlan = {
+      pattern: {
+        totalVisitsDone: 3, totalVisitsRequired: 4, proRatedRequired: 4,
+        visitDeficit: 1, visitedZeroOrderCount: 0, visitedZeroOrderRetailers: [],
+        distanceBuckets: [],
+      },
+      capacity: {
+        fyStartDate: "2026-04-01", dataWindowEndDate: "2026-06-30",
+        dataCutoffWorkingDays: 78, demonstratedVisitsPerDay: 0.04,
+        annualCapacityAnchor: 100, anchorFy: "2025-26",
+        feasibleRemainingVisits: 97, remainingRequired: 1, gap: 96,
+        workingDaysRemaining: 250, monthlyCapacity: 10,
+      },
+      historicalFyCapacity: [], totalFeasible: 97, totalRequired: 1, gap: 96,
+      unassignedExcluded: 0,
+      monthPlans: [{
+        month: "Jul", workingDays: 26, capacity: 10, maintenanceVisits: 1,
+        developmentVisits: 9, poolExhausted: false,
+        targets: [{
+          name: "Retailer One", district: "D", distanceKm: 12.5, ob: 80,
+          businessPlan: 100, visitsDone: 3, priority: "maintain", reason: "maintain active business",
+        }],
+      }],
+    };
     const workbook = buildDeepDiveWorkbook(input({
       winBack: dormantRows,
-      retailerDetail: { ...detail, rows: retailerRows } as unknown as MemberSheetData,
+      retailerDetail: { ...detail, rows: retailerRows, visitPlan } as unknown as MemberSheetData,
     }));
     const dormant = workbook.getWorksheet("Dormant Retailers")!;
     expect((dormant.getColumn(1).values as unknown[]).filter((v) => /^Dormant \d+$/.test(String(v)))).toHaveLength(25);
     const coverage = workbook.getWorksheet("Coverage and Visits")!;
-    const retailer = coverage.getRows(1, coverage.rowCount)!.find((r) => r.getCell(2).value === "Retailer One")!;
-    expect(retailer.getCell(7).value).toBe(100);
-    expect(retailer.getCell(9).value).toBe(80);
-    expect(retailer.getCell(10).value).toBe(75);
-    expect(retailer.getCell(12).value).toBeCloseTo(0.8, 8);
+    expect(coverage.getRows(1, coverage.rowCount)!.some((r) => r.getCell(2).value === "Retailer One")).toBe(false);
+    const working = workbook.getWorksheet("Working detail")!;
+    for (const header of ["District", "City", "Distributor", "Distance km", "Annual plan", "Visits required",
+      "OB", "Sales received", "Visits done", "Achievement", "Effective OB", "Effective plan", "Status",
+      "Visit month", "Target name", "Target district", "Target distance km", "Target OB", "Target visits", "Visit decision"]) {
+      expect((working.getRow(2).values as unknown[])).toContain(header);
+    }
+    const retailer = working.getRows(1, working.rowCount)!.find((r) => r.getCell(2).value === "Retailer One")!;
+    expect(retailer.getCell(13).value).toBe(12.5);
+    expect(retailer.getCell(16).value).toBe(80);
+    expect(retailer.getCell(14).value).toBe(100);
+    expect(retailer.getCell(19).value).toBeCloseTo(0.8, 8);
+    expect(retailer.getCell(19).numFmt).toBe("0.00%");
+    const target = working.getRows(1, working.rowCount)!.find((r) =>
+      r.getCell(1).value === "Visit target rows" && r.getCell(26).value === "Retailer One",
+    )!;
+    expect(target.getCell(25).value).toBe("Jul");
+    expect(target.getCell(27).value).toBe("D");
+    expect(target.getCell(28).value).toBe(12.5);
+    expect(target.getCell(29).value).toBe(80);
+    expect(target.getCell(30).value).toBe(3);
+    expect(target.getCell(31).value).toContain("maintain");
+  });
+
+  it("uses the real NOOFORDERS field for count/day and leaves it unavailable when absent", () => {
+    const withOrders = buildDeepDiveWorkbook(input({
+      kpis: fixture({ workingDaysActual: 10, extra: { NOOFORDERS: 23 } }),
+    }));
+    const cost = withOrders.getWorksheet("Cost")!;
+    expect(row(cost, "Order booking value/working day").getCell(2).value).toBe(11);
+    expect(row(cost, "Orders count/working day").getCell(2).value).toBe(2.3);
+    expect(row(cost, "Orders count/working day").getCell(7).value).toContain("NOOFORDERS");
+    const unavailable = buildDeepDiveWorkbook(input({ kpis: fixture({ workingDaysActual: 10 }) }))
+      .getWorksheet("Cost")!;
+    expect(row(unavailable, "Orders count/working day").getCell(2).value).toBeNull();
+    expect(row(unavailable, "Orders count/working day").getCell(6).value).toBe("unavailable");
+  });
+
+  it("keeps dashboard coverage counts separate from the working population", () => {
+    const workbook = buildDeepDiveWorkbook(input({
+      kpis: fixture({ totalRetailers: 64, visitedRetailers: 46, nonVisitedRetailers: 18 }),
+      retailerDetail: {
+        ...detail,
+        spread: { ...(detail as any).spread, totalRetailers: 59 },
+      } as unknown as MemberSheetData,
+    }));
+    const coverage = workbook.getWorksheet("Coverage and Visits")!;
+    expect(row(coverage, "Visited retailers").getCell(2).value).toBe(46);
+    expect(row(coverage, "Non-visited retailers").getCell(2).value).toBe(18);
+    expect(row(coverage, "Working-sheet total retailers").getCell(2).value).toBe(59);
+    expect(row(coverage, "Population arithmetic mismatch (dashboard visited + non-visited − working total)").getCell(2).value).toBe(5);
+    expect(row(coverage, "Total retailers").getCell(7).value).toContain("STATE HEAD DASHBOARD");
+    expect(row(coverage, "Working-sheet total retailers").getCell(7).value).toContain("member working-sheet");
+  });
+
+  it("uses all declared retailers for the selected business-per-retailer denominator", () => {
+    const workbook = buildDeepDiveWorkbook(input({
+      kpis: fixture({ totalRetailers: 10 }),
+      retailerDetail: {
+        ...detail,
+        spread: { ...(detail as any).spread, totalRetailers: 10, activeRetailers: 2, businessPerActiveRetailer: 55 },
+      } as unknown as MemberSheetData,
+      benchmarks: [{
+        metric: "businessPerRetailer",
+        median: 12,
+        population: "peer declared totals",
+        peerCount: 3,
+        period: "FY 2026-27 resolved YTD",
+        source: "test peer snapshot",
+      }],
+    }));
+    const summary = workbook.getWorksheet("Summary for Decision")!;
+    const business = summary.getRows(1, summary.rowCount)!.find((r) =>
+      String(r.getCell(2).value).startsWith("Business per retailer vs peer median"))!;
+    expect(business.getCell(3).value).toBeCloseTo(110 / 10, 8);
+    expect(String(business.getCell(2).value)).toContain("all retailers");
+    expect(String(business.getCell(2).value)).not.toContain("active");
+  });
+
+  it("describes OB and sales as conditional source/timing measures", () => {
+    const above = buildDeepDiveWorkbook(input());
+    const aboveText = String(above.getWorksheet("Summary for Decision")!
+      .getRows(1, above.getWorksheet("Summary for Decision")!.rowCount)!
+      .find((r) => String(r.getCell(2).value).startsWith("Plain decision"))!.getCell(2).value);
+    expect(aboveText).toContain("distinct source/timing measures");
+    expect(aboveText).toContain("conversion/basis review");
+    expect(aboveText).not.toContain("has not converted");
+
+    const below = buildDeepDiveWorkbook(input({
+      kpis: fixture({ orderBooking: 10, directDealersOrder: 0, newPartyOrderBooking: 0, sale: 90 }),
+    }));
+    const belowText = String(below.getWorksheet("Summary for Decision")!
+      .getRows(1, below.getWorksheet("Summary for Decision")!.rowCount)!
+      .find((r) => String(r.getCell(2).value).startsWith("Plain decision"))!.getCell(2).value);
+    expect(belowText).toContain("Sales received exceeds order booking");
+    expect(belowText).not.toContain("has not converted");
+  });
+
+  it("reconstructs Neel-style YTD cost from monthly CTC and authoritative elapsed months", () => {
+    const workbook = buildDeepDiveWorkbook(input({
+      kpis: fixture({
+        ctcMonthly: 51950,
+        taBillStCost: null,
+        elapsedMonths: 4,
+        elapsedMonthsFromSheet: 4,
+        sale: 719342,
+        extra: {
+          ...fixture().extra,
+          CTC: 207800,
+          BUSINESSACHIEVEDBY: 18,
+        },
+      }),
+      roiCost: null,
+      reportingMonthCount: 5,
+      retailerDetail: null,
+      retailerDetailStatus: "loading",
+      benchmarks: [{
+        metric: "costRatio",
+        median: 3,
+        population: "active peers under state head Maharashtra",
+        peerCount: 10,
+        period: "FY 2026-27 resolved YTD",
+        source: "resolved peer snapshots",
+        basis: "ctcOnly",
+      }],
+    }));
+    const summary = workbook.getWorksheet("Summary for Decision")!;
+    const cost = summary.getRows(1, summary.rowCount)!.find((r) =>
+      String(r.getCell(2).value).startsWith("YTD cost vs Sales Received"))!;
+    expect(cost.getCell(3).value).toBe(259750);
+    expect(String(cost.getCell(2).value)).toContain("known CTC");
+    const ratio = summary.getRows(1, summary.rowCount)!.find((r) =>
+      String(r.getCell(2).value).startsWith("Cost ratio vs peer median"))!;
+    expect(ratio.getCell(3).value).toBeCloseTo((259750 / 719342 * 100) / 100, 8);
+    expect(String(ratio.getCell(2).value)).toContain("Benchmark median 3.00");
+    expect(String(ratio.getCell(2).value)).toContain("basis ctcOnly");
+    expect(String(ratio.getCell(4).value)).toContain("peer median");
+    expect(summary.getRows(1, summary.rowCount)!.find((r) =>
+      String(r.getCell(2).value).startsWith("Sales / cost multiple"))!.getCell(3).value).toBeCloseTo(719342 / 259750, 8);
+    expect(summary.getRows(1, summary.rowCount)!.find((r) =>
+      String(r.getCell(2).value).startsWith("OB / cost multiple"))!.getCell(3).value).toBeCloseTo(110 / 259750, 8);
+    const parties = summary.getRows(1, summary.rowCount)!.find((r) =>
+      String(r.getCell(2).value).startsWith("Parties giving business"))!;
+    expect(parties.getCell(3).value).toBe(18);
+    expect(String(parties.getCell(2).value)).toContain("BUSINESSACHIEVEDBY");
+    const working = workbook.getWorksheet("Working detail")!;
+    expect(row(working, "Authoritative elapsed months").getCell(3).value).toBe(5);
+    expect(row(working, "YTD CTC").getCell(3).value).toBe(259750);
+    expect(row(working, "Cost ratio benchmark basis").getCell(3).value).toBe("ctcOnly");
+    const info = workbook.getWorksheet("Info")!;
+    expect((info.getColumn(2).values as unknown[]).map(String).join(" | ")).toContain("basis ctcOnly");
+  });
+
+  it("derives five closed Apr-Aug months for an empty current-FY monthly payload", () => {
+    const asOf = Date.UTC(2026, 8, 13);
+    expect(closedReportingMonthCount("2026-27", asOf)).toBe(5);
+    const workbook = buildDeepDiveWorkbook(input({
+      monthlyRows: [],
+      reportingMonthCount: closedReportingMonthCount("2026-27", asOf),
+      kpis: fixture({
+        ctcMonthly: 51950,
+        elapsedMonths: 4,
+        elapsedMonthsFromSheet: 4,
+        taBillStCost: null,
+        sale: 719342,
+      }),
+      roiCost: null,
+    }));
+    const summary = workbook.getWorksheet("Summary for Decision")!;
+    const cost = summary.getRows(1, summary.rowCount)!.find((r) =>
+      String(r.getCell(2).value).startsWith("YTD cost vs Sales Received"))!;
+    expect(cost.getCell(3).value).toBe(259750);
+    const unavailable = summary.getRows(1, summary.rowCount)!.find((r) =>
+      String(r.getCell(2).value).startsWith("Unavailable measures"))!;
+    expect(String(unavailable.getCell(2).value)).toContain("YTD T.A.");
   });
 
   it("does not export raw internal A4 fields and explains the segment vocabulary limitation", () => {
