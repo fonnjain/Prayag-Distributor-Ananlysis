@@ -1,0 +1,135 @@
+# Replit Prompt 77 — Restore verification, then Batch 2, then Batch 3A
+
+**Date:** 12 September 2026
+**Scope:** Section A is housekeeping. Section B is a code change. Section C is
+read-only.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Where things stand
+
+**Batch 1 is live and verified** — Growth Margins, Customer Performance and
+Comparison segment mode on the six masters. Totals unchanged at 57,539 rows and
+₹1,37,16,63,704.85, Unmapped explicit at ₹2,41,571, no frozen-anchor movement.
+
+**One gap in that verification.** The authenticated API check could not run
+because the bootstrap password no longer matches the live account. Verification
+rested on a successful deployment and the bundle containing the new column,
+rather than on reading the live API.
+
+That is weaker than the standard applied elsewhere, and it will block the next
+verification too. Batch 3 moves figures and needs proper confirmation.
+
+---
+
+## Section A — restore API verification
+
+```
+Housekeeping. Do not attempt credential recovery on the live account without
+saying so first.
+
+A1. Why does the configured bootstrap password no longer match? Was it
+    rotated, reset by a migration, or changed manually? Establish the cause
+    before proposing a fix.
+
+A2. What is the correct way to restore an authenticated verification path -
+    a service account, a read-only verification user, a documented rotation
+    procedure? Recommend one.
+
+A3. Is there a verification route that does NOT require the bootstrap
+    account? A read-only health or reconciliation endpoint would serve for
+    post-publish checks without holding a user credential.
+
+A4. Confirm no production data or user account was altered while
+    investigating.
+
+Report before changing anything. This is the mechanism by which every
+publish has been verified, and it should be restored deliberately.
+```
+
+---
+
+## Section B — Batch 2: WIDEN and ACTIVATE
+
+Already specified as **Prompt 75 Section B**. Run it next, before Batch 4.
+
+The short version: a primary-sales customer median of ₹19.31 L is being used to
+monetise secondary distributor and retailer gaps, where the matched basis is
+₹16.28 L. **The mixed value runs 18.6% high** across ten production distributors.
+ACTIVATE carries the same defect with a retailer-level count, so it needs a
+retailer-level median rather than the distributor one that fixes WIDEN.
+
+Fix the population and the period. Do not change the taxonomy in the same pass.
+
+---
+
+## Section C — Batch 3 Section A, read-only
+
+```
+Read-only. Change nothing. This decides whether Batch 3 is a relabelling or
+a reallocation, and those are very different changes.
+
+The primary target engine groups by group_canon and group_raw - the old 17.
+
+C1. THE QUESTION THAT DECIDES EVERYTHING. Are targets SET per group in a
+    source sheet, ALLOCATED across groups by the engine, or only REPORTED
+    by group?
+
+      - set per group: moving the taxonomy changes how targets are
+        reported, not what they are. Member totals stay identical
+      - allocated by group: the allocation itself changes, and member
+        totals may move. That is a business decision, not a code change
+
+    Answer from the code and the source sheet, not from intent.
+
+C2. For every member with a group-level target, print the target by old-17
+    group and by six-master group. Show which members' TOTALS change and by
+    how much.
+
+    If any member total changes, stop and report. That is reallocation.
+
+C3. Does any alert, threshold or achievement percentage read these targets?
+    Red Alert A1 and A2 compare booking against pro-rated target. If the
+    denominator moves, alerts move.
+
+C4. How many members would cross an alert threshold in either direction?
+    Name them, with their current and new achievement percentage.
+
+    Ten A1 alerts are currently open covering Rs 34.85 L. If a taxonomy
+    change clears or raises alerts, that must be known before, not
+    discovered when they arrive.
+
+C5. Does the target engine feed the Sales Deep Dive targets sheet, the State
+    Head export, or the Company Reports targets? If a target moves, those
+    exports move with it.
+
+Report only. Do not move the engine in this prompt.
+```
+
+---
+
+## Notes
+
+- **Section A is not optional housekeeping.** Every publish this month has been
+  verified against the live API. Losing that check means the next one rests on
+  "the build succeeded", which is a weaker claim and would not have caught several
+  things it did catch.
+- **C1 is the whole of Batch 3.** If targets are set per group, this is safe and
+  mechanical. If they are allocated, member totals move and someone has to decide
+  whether that is acceptable — which is a conversation, not a diff.
+- **C4 is where this touches people.** A member crossing an alert threshold because
+  their target was regrouped would receive an alert caused by a taxonomy change.
+  That needs to be known in advance.
+
+## Sequence from here
+
+1. **Section A** — restore verification
+2. **Section B** — Batch 2, WIDEN and ACTIVATE
+3. **Section C** — Batch 3 read-only, then decide
+4. **Batch 3 Section B** — only if C2 shows member totals hold
+5. **Batch 4** — SKU Deep Dive, margin payloads, AI segment sections. After
+   Batch 2, always, since both touch the AI builders
+
+Scheme eligibility stays ring-fenced throughout.
