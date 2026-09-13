@@ -52,6 +52,7 @@ import type {
   GetMgmtDeepDiveParams,
   GetMgmtDistributorDeepDiveParams,
   GetMgmtDistributorTierOverrideParams,
+  GetOverviewPerformanceParams,
   GetPrimaryTargetsParams,
   GetSalesPeopleTreeParams,
   GetSalesPersonDeepDiveParams,
@@ -74,6 +75,7 @@ import type {
   MgmtReportRequest,
   MgmtVerifyResult,
   OkResponse,
+  OverviewPerformanceResponse,
   PrimaryTargetsResponse,
   SalesRepReport,
   SalesTree,
@@ -738,6 +740,91 @@ export function useGetAnalytics<TData = Awaited<ReturnType<typeof getAnalytics>>
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAnalyticsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetOverviewPerformanceUrl = (params?: GetOverviewPerformanceParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/overview/performance?${stringifiedParams}` : `/api/overview/performance`
+}
+
+/**
+ * Returns fiscal-month dispatch performance for the open fiscal year and its prior year. Only closed like-months participate in growth and YTD comparisons. Company primary order-booking achievement uses the primary_state_targets plan and the state-mapped order-book source.
+ * @summary Contract-first overview performance
+ */
+export const getOverviewPerformance = async (params?: GetOverviewPerformanceParams, options?: RequestInit): Promise<OverviewPerformanceResponse> => {
+
+  return customFetch<OverviewPerformanceResponse>(getGetOverviewPerformanceUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOverviewPerformanceQueryKey = (params?: GetOverviewPerformanceParams,) => {
+    return [
+    `/api/overview/performance`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetOverviewPerformanceQueryOptions = <TData = Awaited<ReturnType<typeof getOverviewPerformance>>, TError = ErrorType<ErrorResponse>>(params?: GetOverviewPerformanceParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOverviewPerformance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOverviewPerformanceQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOverviewPerformance>>> = ({ signal }) => getOverviewPerformance(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOverviewPerformance>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOverviewPerformanceQueryResult = NonNullable<Awaited<ReturnType<typeof getOverviewPerformance>>>
+export type GetOverviewPerformanceQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Contract-first overview performance
+ */
+
+export function useGetOverviewPerformance<TData = Awaited<ReturnType<typeof getOverviewPerformance>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetOverviewPerformanceParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOverviewPerformance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOverviewPerformanceQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

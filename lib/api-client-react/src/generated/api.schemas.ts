@@ -801,6 +801,90 @@ export interface AnalyticsMargins {
   message: string | null;
 }
 
+export type OverviewPerformanceMonthState = typeof OverviewPerformanceMonthState[keyof typeof OverviewPerformanceMonthState];
+
+
+export const OverviewPerformanceMonthState = {
+  closed: 'closed',
+  partial: 'partial',
+  future: 'future',
+} as const;
+
+export interface OverviewPerformanceMonth {
+  monthLabel: string;
+  /** @nullable */
+  currentSalesInr: number | null;
+  /** @nullable */
+  priorSalesInr: number | null;
+  /** @nullable */
+  currentCoverageThrough: string | null;
+  /** @nullable */
+  priorCoverageThrough: string | null;
+  state: OverviewPerformanceMonthState;
+  /** @nullable */
+  comparableGrowthPct: number | null;
+  /** @nullable */
+  growthNumeratorInr: number | null;
+  /** @nullable */
+  growthDenominatorInr: number | null;
+}
+
+export interface OverviewPerformanceYtd {
+  currentSalesInr: number;
+  priorSalesInr: number;
+  /** @nullable */
+  growthPct: number | null;
+  /** @nullable */
+  growthNumeratorInr: number | null;
+  /** @nullable */
+  growthDenominatorInr: number | null;
+  /** @nullable */
+  throughDate: string | null;
+}
+
+export interface OverviewPerformanceAchievement {
+  /** @nullable */
+  actualInr: number | null;
+  targetToDateInr: number;
+  /** @nullable */
+  percentage: number | null;
+  coveredMonths: string[];
+  source: string;
+  actualsAvailable: boolean;
+  /** @nullable */
+  actualsError: string | null;
+  /** @nullable */
+  actualsThroughDate: string | null;
+  /** @nullable */
+  sourceLatestThroughDate: string | null;
+}
+
+export interface OverviewPerformanceSources {
+  sales: string;
+  priorSales: string;
+  targets: string;
+  bookings: string;
+}
+
+export interface OverviewPerformanceCoverage {
+  currentClosedMonths: string[];
+  currentPartialMonths: string[];
+  currentFutureMonths: string[];
+  priorClosedMonths: string[];
+  /** @nullable */
+  salesThroughDate: string | null;
+}
+
+export interface OverviewPerformanceResponse {
+  fy: string;
+  priorFy: string;
+  months: OverviewPerformanceMonth[];
+  closedComparableYtd: OverviewPerformanceYtd;
+  companyAchievement: OverviewPerformanceAchievement;
+  sources: OverviewPerformanceSources;
+  coverage: OverviewPerformanceCoverage;
+}
+
 export type AnalyticsReportYoy = {
   overall: AnalyticsYoy;
   territory: AnalyticsYoy;
@@ -2449,6 +2533,14 @@ fy?: string;
  * @pattern ^\d{4}-\d{2}$
  */
 compare?: string;
+};
+
+export type GetOverviewPerformanceParams = {
+/**
+ * Fiscal year, e.g. 2026-27 (defaults to the open fiscal year).
+ * @pattern ^\d{4}-\d{2}$
+ */
+fy?: string;
 };
 
 export type GetAiPayloadParams = {

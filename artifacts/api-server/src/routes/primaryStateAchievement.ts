@@ -14,6 +14,7 @@ import { resolveHeadKey } from "../lib/mgmt/names.js";
 import { loadOrderBookByState } from "../lib/mgmt/orderBookByState.js";
 import { isSheetsQuotaError } from "../lib/registers/sheetsApi.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
+import { STATE_REGISTER_MAP } from "../lib/mgmt/primaryStateTargetSemantics.js";
 
 const router = Router();
 
@@ -21,34 +22,6 @@ const FY_PATTERN = /^\d{4}-\d{2}$/;
 
 // ── State map: target state → register state(s) in the order booking sheet ───
 // Verified: 24 of 24 target states resolve against the live order booking register.
-const STATE_REGISTER_MAP: Record<string, string[]> = {
-  "W-BENGAL":      ["W-BENGAL"],
-  "BIHAR":         ["BIHAR"],
-  "JHARKHAND":     ["JHARKHAND"],
-  "ODISHA":        ["ODISHA"],
-  "ASSAM":         ["ASSAM"],
-  "AP":            ["AP"],
-  "Telangana":     ["Telangana"],
-  "UP(R)":         ["UP ( R )"],
-  "MP":            ["MP"],
-  "MAHARASTRA R":  ["MAHARASTRA R"],
-  "Chhattisgarh":  ["Chhattisgarh"],
-  "MAHARASTRA L":  ["MAHARASTRA L"],
-  "Goa":           ["Goa"],
-  "Rajasthan":     ["Rajasthan"],
-  "Haryana":       ["Haryana"],
-  "Uttarakhand":   ["Uttarakhand"],
-  "DELHI":         ["DELHI A", "DELHI NCR"],  // sum of two register states
-  "UP(A)":         ["UP ( A )"],
-  "Tamilnadu":     ["Tamilnadu"],
-  "Karnataka":     ["Karnataka (B)"],
-  "Kerala":        ["Kerala"],
-  "PUNJAB":        ["PUNJAB"],
-  "HP":            ["HP"],                    // new territory — actual ~0
-  "KASHMIR":       ["KASHMIR"],
-  "Gujarat":       ["Gujarat"],
-};
-
 // States with no established order-booking history — not an error, not underperformance.
 const NEW_TERRITORY_STATES = new Set(["HP"]);
 
@@ -132,6 +105,9 @@ router.get(
         if (isSheetsQuotaError(err)) throw err;
         return {
           amounts: new Map<string, number>(),
+          coveredThroughByMonth: new Map<string, string>(),
+          sourceLatestThroughDate: null,
+          coveredThrough: null,
           error: err instanceof Error ? err.message : String(err),
         };
       });

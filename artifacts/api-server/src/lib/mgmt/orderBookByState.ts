@@ -14,7 +14,7 @@ import {
   isSheetsQuotaError,
   type SheetCellValue,
 } from "../registers/sheetsApi.js";
-import { resolveHeadKey } from "./names.js";
+import { parseOrderDate, resolveHeadKey, serialToDate } from "./names.js";
 import { logger } from "../logger.js";
 
 const ORDER_BOOK_FY2627 = "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A";
@@ -55,6 +55,12 @@ function findCol(headers: SheetCellValue[], re: RegExp): number {
   return -1;
 }
 
+export function parseOrderDateOnly(value: SheetCellValue | undefined): string | null {
+  const serial = parseOrderDate(value);
+  if (serial == null) return null;
+  return serialToDate(serial).toISOString().slice(0, 10);
+}
+
 export type StateBookingKey = {
   stateHeadNorm: string;
   state: string;       // raw state from sheet
@@ -64,6 +70,12 @@ export type StateBookingKey = {
 export type StateBookingResult = {
   // Lookup: normHead|state|monthLabel → rupees
   amounts: Map<string, number>;
+  /** Latest valid order date represented by included source rows, per tab. */
+  coveredThroughByMonth?: Map<string, string>;
+  /** Latest valid order date represented by any included source row. */
+  sourceLatestThroughDate?: string | null;
+  /** Backward-compatible alias for the loader-wide latest date. */
+  coveredThrough?: string | null;
   error: string | null;
 };
 
@@ -78,6 +90,8 @@ export async function loadOrderBookByState(): Promise<StateBookingResult> {
   if (_cache && Date.now() - _cache.ts < TTL_MS) return _cache.result;
 
   const amounts = new Map<string, number>();
+  const coveredThroughByMonth = new Map<string, string>();
+  let sourceLatestThroughDate: string | null = null;
 
   try {
     const tabs = await listSheetTabs(ORDER_BOOK_FY2627);
@@ -90,7 +104,7 @@ export async function loadOrderBookByState(): Promise<StateBookingResult> {
 
     for (const tab of monthlyTabs) {
       const monthLabel = tabToMonthLabel(tab.title, "2026-27");
-      let taxIdx = -1, headIdx = -1, stateIdx = -1;
+      let taxIdx = -1, headIdx = -1, stateIdx = -1, dateIdx = -1;
       let headerFound = false;
 
       await readTabRowsChunked(ORDER_BOOK_FY2627, tab.title, (rows, startRow) => {
@@ -105,6 +119,7 @@ export async function loadOrderBookByState(): Promise<StateBookingResult> {
             if (tI >= 0 && hI >= 0) {
               taxIdx  = tI;
               headIdx = hI;
+              dateIdx = findCol(row, /^(date|order\s*date|invoice\s*date)$/i);
               // STATE column: match exact "state" (geographic state, column P in the
               // SALE SHEET / ORDER BOOK structure).
               // Do NOT match "station" — that is the delivery city column (column O)
@@ -144,6 +159,18 @@ export async function loadOrderBookByState(): Promise<StateBookingResult> {
           if (!hKey || NON_TERRITORY_RE.test(hKey)) continue;
 
           const state = stateIdx >= 0 ? strVal(row[stateIdx]) : "UNKNOWN";
+          if (dateIdx >= 0) {
+            const date = parseOrderDateOnly(row[dateIdx]);
+            if (date != null) {
+              const monthThrough = coveredThroughByMonth.get(monthLabel);
+              if (monthThrough == null || date > monthThrough) {
+                coveredThroughByMonth.set(monthLabel, date);
+              }
+              if (sourceLatestThroughDate == null || date > sourceLatestThroughDate) {
+                sourceLatestThroughDate = date;
+              }
+            }
+          }
           const key = `${hKey}|${state}|${monthLabel}`;
           amounts.set(key, (amounts.get(key) ?? 0) + amt);
         }
@@ -154,7 +181,13 @@ export async function loadOrderBookByState(): Promise<StateBookingResult> {
       }
     }
 
-    const result: StateBookingResult = { amounts, error: null };
+    const result: StateBookingResult = {
+      amounts,
+      coveredThroughByMonth,
+      sourceLatestThroughDate,
+      coveredThrough: sourceLatestThroughDate,
+      error: null,
+    };
     _cache = { ts: Date.now(), result };
     logger.info(
       { keys: amounts.size },
@@ -167,6 +200,12 @@ export async function loadOrderBookByState(): Promise<StateBookingResult> {
     if (isSheetsQuotaError(err)) throw err;
     const error = err instanceof Error ? err.message : String(err);
     logger.warn({ err }, "orderBookByState: failed to load");
-    return { amounts: new Map(), error };
+    return {
+      amounts: new Map(),
+      coveredThroughByMonth: new Map(),
+      sourceLatestThroughDate: null,
+      coveredThrough: null,
+      error,
+    };
   }
 }

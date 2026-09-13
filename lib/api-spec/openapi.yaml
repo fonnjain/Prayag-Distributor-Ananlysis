@@ -237,6 +237,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /overview/performance:
+    get:
+      operationId: getOverviewPerformance
+      tags: [dashboard]
+      summary: Contract-first overview performance
+      description: >
+        Returns fiscal-month dispatch performance for the open fiscal year and
+        its prior year. Only closed like-months participate in growth and YTD
+        comparisons. Company primary order-booking achievement uses the
+        primary_state_targets plan and the state-mapped order-book source.
+      parameters:
+        - name: fy
+          in: query
+          required: false
+          description: Fiscal year, e.g. 2026-27 (defaults to the open fiscal year).
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}$"
+      responses:
+        "200":
+          description: Overview performance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OverviewPerformanceResponse"
+        "400":
+          description: Invalid fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Performance could not be computed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /ai/payload:
     get:
       operationId: getAiPayload
@@ -2655,6 +2692,118 @@ components:
         - coveragePct
         - provisional
         - message
+    OverviewPerformanceMonth:
+      type: object
+      required:
+        - monthLabel
+        - currentSalesInr
+        - priorSalesInr
+        - currentCoverageThrough
+        - priorCoverageThrough
+        - state
+        - comparableGrowthPct
+        - growthNumeratorInr
+        - growthDenominatorInr
+      properties:
+        monthLabel: { type: string }
+        currentSalesInr: { type: ["number", "null"] }
+        priorSalesInr: { type: ["number", "null"] }
+        currentCoverageThrough: { type: ["string", "null"] }
+        priorCoverageThrough: { type: ["string", "null"] }
+        state:
+          type: string
+          enum: [closed, partial, future]
+        comparableGrowthPct: { type: ["number", "null"] }
+        growthNumeratorInr: { type: ["number", "null"] }
+        growthDenominatorInr: { type: ["number", "null"] }
+    OverviewPerformanceYtd:
+      type: object
+      required:
+        - currentSalesInr
+        - priorSalesInr
+        - growthPct
+        - growthNumeratorInr
+        - growthDenominatorInr
+        - throughDate
+      properties:
+        currentSalesInr: { type: number }
+        priorSalesInr: { type: number }
+        growthPct: { type: ["number", "null"] }
+        growthNumeratorInr: { type: ["number", "null"] }
+        growthDenominatorInr: { type: ["number", "null"] }
+        throughDate: { type: ["string", "null"] }
+    OverviewPerformanceAchievement:
+      type: object
+      required:
+        - actualInr
+        - targetToDateInr
+        - percentage
+        - coveredMonths
+        - source
+        - actualsAvailable
+        - actualsError
+        - actualsThroughDate
+        - sourceLatestThroughDate
+      properties:
+        actualInr: { type: ["number", "null"] }
+        targetToDateInr: { type: number }
+        percentage: { type: ["number", "null"] }
+        coveredMonths:
+          type: array
+          items: { type: string }
+        source: { type: string }
+        actualsAvailable: { type: boolean }
+        actualsError: { type: ["string", "null"] }
+        actualsThroughDate: { type: ["string", "null"] }
+        sourceLatestThroughDate: { type: ["string", "null"] }
+    OverviewPerformanceSources:
+      type: object
+      required: [sales, priorSales, targets, bookings]
+      properties:
+        sales: { type: string }
+        priorSales: { type: string }
+        targets: { type: string }
+        bookings: { type: string }
+    OverviewPerformanceCoverage:
+      type: object
+      required:
+        - currentClosedMonths
+        - currentPartialMonths
+        - currentFutureMonths
+        - priorClosedMonths
+        - salesThroughDate
+      properties:
+        currentClosedMonths:
+          type: array
+          items: { type: string }
+        currentPartialMonths:
+          type: array
+          items: { type: string }
+        currentFutureMonths:
+          type: array
+          items: { type: string }
+        priorClosedMonths:
+          type: array
+          items: { type: string }
+        salesThroughDate: { type: ["string", "null"] }
+    OverviewPerformanceResponse:
+      type: object
+      required: [fy, priorFy, months, closedComparableYtd, companyAchievement, sources, coverage]
+      properties:
+        fy: { type: string }
+        priorFy: { type: string }
+        months:
+          type: array
+          items:
+            $ref: "#/components/schemas/OverviewPerformanceMonth"
+        closedComparableYtd:
+          $ref: "#/components/schemas/OverviewPerformanceYtd"
+        companyAchievement:
+          $ref: "#/components/schemas/OverviewPerformanceAchievement"
+        sources:
+          $ref: "#/components/schemas/OverviewPerformanceSources"
+        coverage:
+          $ref: "#/components/schemas/OverviewPerformanceCoverage"
     AnalyticsReport:
       type: object
       properties:

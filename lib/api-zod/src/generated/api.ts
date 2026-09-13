@@ -281,6 +281,66 @@ export const GetAnalyticsResponse = zod.object({
 
 
 /**
+ * Returns fiscal-month dispatch performance for the open fiscal year and its prior year. Only closed like-months participate in growth and YTD comparisons. Company primary order-booking achievement uses the primary_state_targets plan and the state-mapped order-book source.
+ * @summary Contract-first overview performance
+ */
+export const getOverviewPerformanceQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const GetOverviewPerformanceQueryParams = zod.object({
+  "fy": zod.coerce.string().regex(getOverviewPerformanceQueryFyRegExp).optional().describe('Fiscal year, e.g. 2026-27 (defaults to the open fiscal year).')
+})
+
+export const GetOverviewPerformanceResponse = zod.object({
+  "fy": zod.string(),
+  "priorFy": zod.string(),
+  "months": zod.array(zod.object({
+  "monthLabel": zod.string(),
+  "currentSalesInr": zod.number().nullable(),
+  "priorSalesInr": zod.number().nullable(),
+  "currentCoverageThrough": zod.string().nullable(),
+  "priorCoverageThrough": zod.string().nullable(),
+  "state": zod.enum(['closed', 'partial', 'future']),
+  "comparableGrowthPct": zod.number().nullable(),
+  "growthNumeratorInr": zod.number().nullable(),
+  "growthDenominatorInr": zod.number().nullable()
+})),
+  "closedComparableYtd": zod.object({
+  "currentSalesInr": zod.number(),
+  "priorSalesInr": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "growthNumeratorInr": zod.number().nullable(),
+  "growthDenominatorInr": zod.number().nullable(),
+  "throughDate": zod.string().nullable()
+}),
+  "companyAchievement": zod.object({
+  "actualInr": zod.number().nullable(),
+  "targetToDateInr": zod.number(),
+  "percentage": zod.number().nullable(),
+  "coveredMonths": zod.array(zod.string()),
+  "source": zod.string(),
+  "actualsAvailable": zod.boolean(),
+  "actualsError": zod.string().nullable(),
+  "actualsThroughDate": zod.string().nullable(),
+  "sourceLatestThroughDate": zod.string().nullable()
+}),
+  "sources": zod.object({
+  "sales": zod.string(),
+  "priorSales": zod.string(),
+  "targets": zod.string(),
+  "bookings": zod.string()
+}),
+  "coverage": zod.object({
+  "currentClosedMonths": zod.array(zod.string()),
+  "currentPartialMonths": zod.array(zod.string()),
+  "currentFutureMonths": zod.array(zod.string()),
+  "priorClosedMonths": zod.array(zod.string()),
+  "salesThroughDate": zod.string().nullable()
+})
+})
+
+
+/**
  * Returns the pre-computed, fully reconciled metrics payload for a member or state head. Every figure is computed by the app from already-loaded Deep Dive data. This endpoint makes NO Anthropic API call. Later phases receive this payload and generate narrative; they never do arithmetic on raw sheet rows. The payload covers: identity, targets, performance, achievement, coverage, customer states, top customers, concentration, visit analytics, visit capacity projection, cost and ROI, product-segment spread (closed FYs), prior-year comparisons, and data quality flags.
  * @summary Phase A1 — verified metrics payload (no AI call)
  */
