@@ -14,3 +14,9 @@ For display-only six-master reporting, use each code's latest reviewed non-null 
 **Why:** Historical registry rows before 1 April 2026 have no master assignment, so a sale-period effective-date join would incorrectly classify every FY2025–26 figure as unmapped. The business approved current classification for cross-FY display comparability.
 
 **How to apply:** Use this rule only on approved master-category display surfaces and their exports. If a code is later moved because of a genuine commercial reclassification rather than a correction, revisit the display decision instead of deleting or bypassing effective history.
+
+Every category-coverage probe must state the environment it queried and must not generalise development findings to production.
+
+**Why:** Development had null `master_category` values while production held 10,417 populated assignments, causing a valid production bridge to be reported incorrectly as defective.
+
+**How to apply:** Label every probe result as development or production, and check the intended environment before concluding that assignments, coverage, or source data are missing.
