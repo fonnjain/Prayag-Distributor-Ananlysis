@@ -1,0 +1,207 @@
+# Replit Prompt 80 — What replaced August, and an audit that cannot lose checks
+
+**Date:** 13 September 2026
+**Scope:** Section A is read-only and urgent. Section B is a code change.
+Section C is a code change. Section D is read-only.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Section A — what replaced August this morning
+
+`register_month_state` for Aug-26 holds:
+
+| Field | Value |
+|---|---|
+| `last_good_rows` | **12,870** |
+| `last_good_amount` | **₹30,41,93,273.69** |
+| `last_replaced_at` | **13 Sep 2026, 07:27:12 UTC** |
+| `frozen_at` | **null** |
+
+And `secondary_sku_line` for Aug-26 holds **zero rows**.
+
+So a month with a nonzero baseline was replaced **this morning** and now has
+nothing in it. That is not "never loaded".
+
+```
+Read-only. Change nothing, reload nothing, do not re-run any loader.
+
+A1. What ran at 07:27:12 UTC on 13 September against Aug-26? Print the
+    ingest ledger entry, the run identity, the trigger, and the outcome.
+
+    The primary ingest ledger built in Prompt 62 records rows added,
+    removed, changed, before and after counts, and rejections. This is
+    exactly what it was built for.
+
+A2. Did that run WRITE zero rows, or did it replace a populated month with
+    an empty one? Print rows_read, rows_written and the before and after
+    counts.
+
+A3. Where did last_good_rows = 12,870 and Rs 30,41,93,273.69 come from? If
+    that baseline was set by an earlier successful load, then August WAS
+    populated at some point and is not simply missing.
+
+    Print every ingest run that has touched Aug-26 secondary_sku_line, with
+    timestamps and row counts.
+
+A4. Note the number: 12,870. The August order booking file has 28,185 rows
+    and secondary_order_line Aug-26 holds 28,185. sale_line Aug-26 holds
+    12,878. 12,870 is close to the sale_line figure, not the SKU figure.
+
+    Is last_good for this month actually describing the PRIMARY register
+    rather than the SKU table? If register_month_state is shared across
+    tables without a table discriminator, that would explain it.
+
+A5. Was anything deleted? Check secondary_sku_line for superseded or voided
+    Aug-26 rows, and the ledger for any removal.
+
+Report only. If rows were deleted this morning, I want the evidence intact
+before anyone reloads.
+```
+
+---
+
+## Section B — the audit must not be able to lose a check
+
+```
+Code change. Show the diff before applying.
+
+Several audit groups return an EMPTY CHECK LIST when their dependencies
+fail. A check that cannot evaluate disappears rather than reporting skip.
+That is how the total moved from 49 to 48, and it is why the missing check
+cannot now be identified.
+
+1. EXPECTED-KEY MANIFEST
+
+   Every audit group declares the checks it expects to produce. The
+   response carries that manifest and compares it against what was
+   actually produced.
+
+   Any expected key with no result is reported explicitly as
+   not-evaluated, with the reason, and counted. It must never be absent.
+
+2. A GROUP THAT THROWS REPORTS, IT DOES NOT VANISH
+
+   Where an outer error currently returns zero checks, return the group's
+   expected keys each marked not-evaluated with the error.
+
+   The audit should be able to say "twelve checks expected, nine ran, three
+   could not, here is why" - not silently report nine.
+
+3. THE TOTAL BECOMES MEANINGFUL
+
+   Expected total, evaluated total, and the difference, on every response.
+   A shrinking total then explains itself.
+
+4. SNAPSHOT HONESTY
+
+   GET /api/audit serves a snapshot up to 15 minutes old while rebuilding
+   in the background. Keep that - it is reasonable - but make it visible:
+   the response already carries refreshing and snapshotSavedAt. Surface
+   them where a reader sees them, not only in the payload.
+
+   If the snapshot is stale AND a rebuild is running, say so plainly.
+
+DO NOT change any individual check's logic, threshold or outcome. This is
+about the audit being able to account for itself.
+
+AFTER APPLYING, print:
+  - the expected-key manifest per group
+  - a response showing expected, evaluated and not-evaluated totals
+  - a forced dependency failure, proving the check reports rather than
+    disappears
+```
+
+---
+
+## Section C — scope check 7.6 to where the mirror exists
+
+```
+Code change. One check.
+
+Check 7.6 compares secondary_sku_line against its brand mirror -
+secondary_register_line with source='pscode3_brand_rollup'.
+
+That mirror has ONLY EVER existed for July 2026:
+
+  FY2023-24   261,566 SKU rows   0 mirror rows
+  FY2024-25   335,255 SKU rows   0 mirror rows
+  FY2025-26   379,439 SKU rows   0 mirror rows
+  FY2026-27   123,326 SKU rows   34,147 mirror rows - July only
+
+So for FY2025-26 the check compares a populated table against rows that
+were never generated. It is a permanently failing historical comparison,
+not evidence of loss.
+
+1. Scope the check to months actually loaded through the dual-write PSCode3
+   path - currently July 2026 only.
+
+2. For months with no expected mirror generation, the check reports
+   NOT APPLICABLE with the reason, not FAIL.
+
+3. Do NOT rebuild the historical mirror to satisfy the check. FY2025-26 is
+   frozen, and rebuilding a frozen year to turn a misapplied check green
+   would be the wrong response.
+
+4. If the mirror SHOULD exist for historical years, that is a separate
+   decision and needs its own justification - the report sets out the
+   guards a safe rebuild would require.
+
+AFTER APPLYING, print check 7.6 for every FY and month, with its new
+status.
+```
+
+---
+
+## Section D — the August SKU question, once A is answered
+
+```
+Read-only. Change nothing.
+
+D1. Given A1-A5, state plainly which of these is true for Aug-26
+    secondary_sku_line:
+
+      never loaded in production
+      loaded and later emptied
+      loaded into a different table and never into this one
+      something else
+
+D2. If it was never loaded, the last_good baseline of 12,870 rows needs
+    explaining. If it was emptied, the ledger should show it.
+
+D3. What is the correct route to load it if the export arrives? August is
+    calendar-frozen with frozen_at null - the same unrepairable state
+    found in September. Does the controlled frozen-drift path work for
+    secondary_sku_line, or only the primary register?
+
+D4. Sweep for the same condition: every month, every fiscal year, every
+    table with a month state - calendar-frozen with frozen_at null.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- **A4 is the possibility I would test first.** 12,870 is suspiciously close to
+  `sale_line` Aug-26 at 12,878, and nowhere near the SKU or order-booking figures.
+  If `register_month_state` is shared across tables without a discriminator, the
+  baseline may be describing the primary register and the whole August SKU picture
+  is being read through the wrong row.
+- **Section B is the one that pays off repeatedly.** An audit that can silently
+  drop a check is unreliable precisely when it matters — straight after a publish.
+  The manifest makes the total self-explaining.
+- **Section C item 3 is deliberate.** The instinct on a red check is to make the
+  data match it. Here the check is misapplied and the data is correct as it stands.
+
+## What the report got right and is worth recording
+
+**No alert treated August's empty SKU month as zero business.** August is excluded
+as unavailable, and only one alert has been raised since 7 September, covering
+April–May. The empty-versus-zero discipline held where it mattered most.
+
+**Breadth trajectory and the distributor push list read `sale_line`**, not the SKU
+table, so they are unaffected by the August absence. Only retailer-level SKU Deep
+Dive and Red Alert B3 depend on it.
