@@ -820,3 +820,17 @@ mtime_ms = 1789291121767
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/d896dca7-1949-4227-a5cf-3d3a5709f5b6/32e4b2d6-911f-4bbf-8132-1d051fb25ce7"
 storage_version_token = "1789291131545535"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "mCpH6YUevGjVDeiPUPaqs"
+uri = "file://reports/prompt-81-rajan-srivastava-sales-deep-dive.xlsx"
+type = "table"
+title = "Rajan Srivastava — Sales Deep Dive"
+description = "Prompt 81 ten-sheet auditable Excel export for FY2026-27, generated from the resolved Sales Deep Dive payload."
+logical_id = "e4571be9-4161-41bb-9fc1-f676c6963e0b"
+content_hash = "sha256:f162f9dac78b1d0fc08dd7caa9e281bfcc845862cba14dd8ea175f793974c241"
+size = 41406
+mtime_ms = 1789298098933
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/e4571be9-4161-41bb-9fc1-f676c6963e0b/524f7009-c489-447a-a10f-2a28534aa91f"
+storage_version_token = "1789298184719879"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

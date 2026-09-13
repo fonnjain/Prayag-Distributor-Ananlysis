@@ -1,0 +1,210 @@
+# Replit Prompt 82 — Overview redesign: performance, cost, growth
+
+**Date:** 13 September 2026
+**Scope:** Section A read-only. Section B is the design. Section C is the build.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Remove
+
+**Retailers**, **Channel Partners**, **Secondary Retail Reach**, **Sales &
+Dispatch**, **Product Mix**. Those live better on Sales Deep Dive, Distributor
+Deep Dive and SKU Deep Dive, where they can be explored.
+
+## What the page is for
+
+Three questions a management team asks every month:
+
+**Are we performing?** · **What is it costing?** · **Where does more sales come
+from?**
+
+The page can be long. It should carry charts, not only cards.
+
+---
+
+## The story the current data already tells
+
+This is what a good Overview would surface, and today's page does not.
+
+**The year inflected in June.** Not "+7.2% YTD" — the shape underneath it:
+
+| | FY26-27 | FY25-26 | Change |
+|---|---:|---:|---:|
+| Apr | ₹13.11 Cr | ₹15.06 Cr | **−13.0%** |
+| May | ₹28.28 Cr | ₹29.62 Cr | −4.5% |
+| Jun | ₹31.43 Cr | ₹29.87 Cr | +5.2% |
+| Jul | ₹32.10 Cr | ₹26.34 Cr | **+21.9%** |
+| Aug | ₹30.42 Cr | ₹25.36 Cr | **+20.0%** |
+
+**Apr–May −7.4%. Jun–Aug +15.2%.** A single YTD percentage hides a turnaround.
+
+**Gross margin varies by a factor of nearly two across categories** — PTMT 76.2%,
+CISTERN 48.7%, C P 40.0%. Revenue mix is therefore a margin decision, and nothing
+on the Overview shows it.
+
+**Revenue is highly concentrated** — the top 100 SKUs are 45.9% of revenue, 560
+codes reach 80%.
+
+**Order booking leads dispatch**, and is up 14.0% on a like-for-like Apr–Jul
+basis. It is the forward indicator and it is not on the page.
+
+**And the month is heavily back-loaded** — 30% of a month's orders by day 19, 44%
+in the last six days. Any mid-month read of the current month is not a trend.
+
+---
+
+## Section A — read-only, what can be served
+
+```
+Read-only. Change nothing.
+
+For each proposed block in Section B, confirm the data exists, name the
+table, and give the current value. Flag anything that cannot be served.
+
+A1. Monthly sale LY vs TY, twelve months, with growth per month.
+A2. Monthly order booking LY vs TY. Note FY2024-25 and FY2025-26 order
+    booking is now loaded - Rs 216.00 Cr and Rs 231.09 Cr.
+A3. Gross margin by category. margin_fact exists but stops at June 2026 and
+    the PTMT Jan-Apr BOM question is unresolved. Say what CAN be shown and
+    for which months.
+A4. Achievement by state head - target, actual, percentage, with numerator
+    and denominator.
+A5. Cost: CTC and T.A. rolled up by head and company. What exists per
+    member, what is missing.
+A6. Category mix by value, six masters, with YoY change per category.
+A7. SKU concentration - cumulative revenue by rank.
+A8. Coverage: retailers visited vs not, dormant retailers, new parties. This
+    is a company-level roll-up, not the removed Retailers card.
+A9. Realisation - weighted discount off MRP by category. The SKU analysis
+    found 61.8% weighted, Sanitaryware best at 56.2%, water tanks worst at
+    70.6%.
+A10. State-level growth: sale and order booking by state, LY vs TY.
+
+For each: available now, available with work, or not available.
+```
+
+---
+
+## Section B — the proposed page
+
+```
+Design for comment. Build nothing yet.
+
+BLOCK 1 - HEADLINE, four cards only
+
+  Sales YTD          value, vs LY, growth %
+  Order booking YTD  value, vs LY, growth %   (the forward indicator)
+  Achievement        actual vs target to date, both sides shown
+  Gross margin       weighted %, and the range across categories
+
+  Every card shows its comparison inline. No card without a comparison.
+
+BLOCK 2 - THE TREND. One chart, the most important on the page.
+
+  Monthly sale LY vs TY, bars or lines, twelve months, growth % labelled.
+  Order booking overlaid as a leading line.
+
+  Beneath it, one sentence stating the shape - currently: "April and May
+  were behind last year; June to August ran 15.2% ahead."
+
+  Provisional months marked.
+
+BLOCK 3 - WHERE GROWTH IS COMING FROM
+
+  By state head: LY, TY, difference, growth %, share of company growth
+  By state: same
+  By category: same, six masters
+
+  Sorted by CONTRIBUTION TO GROWTH, not by size. A large flat state matters
+  less than a small state growing fast.
+
+BLOCK 4 - MARGIN AND MIX
+
+  Category mix by value, with gross margin % beside each.
+  A chart showing revenue share against margin, so a shift toward a
+  low-margin category is visible.
+
+  This is the block that does not exist today and should. Margin varies
+  nearly twofold across categories.
+
+  Where margin data is missing - July onward, and PTMT Jan-Apr - say so on
+  the block rather than omitting the category.
+
+BLOCK 5 - COST AND PRODUCTIVITY
+
+  Company cost ratio: total CTC + T.A. against sales, with both sides shown
+  and the denominator type named
+  Cost per order, sales per rupee of cost
+  By head: cost ratio, with the company figure as a reference line
+  Active members, orders, avg orders per member
+
+BLOCK 6 - CONCENTRATION AND RISK
+
+  Cumulative revenue by SKU rank - the Pareto curve
+  Top 10 SKUs with share
+  Revenue at risk: codes with no MRP (Rs 9.64 Cr), discontinued codes still
+  selling, dormant retailer value
+
+BLOCK 7 - REALISATION
+
+  Weighted discount off MRP, company and by category
+  Movement versus last year if computable
+  Flag categories realising worse than last year - that is margin leaking
+  through discount rather than cost
+
+BLOCK 8 - COVERAGE ROLL-UP
+
+  Company level only: retailers visited vs not, parties giving business,
+  new parties, dormant count and value
+  Not a list. A number with a trend and a link into Sales Deep Dive.
+
+RULES FOR EVERY BLOCK
+  - every percentage shows numerator and denominator
+  - every figure names its source
+  - provisional months marked, per the open-window rule
+  - three states: value, unavailable-with-reason, genuine zero
+  - order booking never labelled sales
+  - six master categories throughout
+  - the intra-month curve means a partial current month is NOT a trend -
+    state that wherever the current month appears
+
+Comment on this before building. Say which blocks are cheap, which need
+work, and which cannot be served yet.
+```
+
+---
+
+## Section C — build
+
+```
+After Section B is agreed. One block at a time, each its own diff and
+publish, in this order:
+
+  C1  Blocks 1 and 2 - headline and trend. Highest value, data exists.
+  C2  Block 3 - growth attribution
+  C3  Blocks 5 and 6 - cost, concentration
+  C4  Block 7 - realisation
+  C5  Block 4 - margin and mix, once margin_fact coverage is resolved
+  C6  Block 8 - coverage roll-up
+
+Remove the Retailers, Channel Partners, Secondary Retail Reach, Sales &
+Dispatch and Product Mix blocks in C1.
+```
+
+---
+
+## Notes
+
+- **Block 2 is the single most valuable change.** A YTD percentage of +7.2% tells a
+  management team almost nothing. The monthly shape tells them the year turned in
+  June, and that is actionable.
+- **Block 4 does not exist anywhere today.** Margin ranges from 40% to 76% across
+  categories, so mix shift moves profit more than volume does — and nothing on the
+  Overview shows it.
+- **Block 3 sorted by contribution to growth, not size**, is the difference between
+  a report and a decision aid.
+- **The removed cards are not lost.** Retailers, channel partners and retail reach
+  belong on the deep dives where they can be drilled. The Overview should carry
+  one roll-up number and a link.
