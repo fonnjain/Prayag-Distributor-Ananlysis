@@ -1113,6 +1113,9 @@ function coreManifest(id: string, fy: string): string[] {
     return ["C1_fy2526_order_booking", "C2_fy2526_sale", "C3_sale_ne_order_booking", "C4_fy2627_order_booking", "C5_fy2627_order_booking", "C6_sale_source_attribution"];
   }
   if (id === "name_match") {
+    // Target Master name matching is retired and formally not applicable.
+    // Do not declare checks that the evaluator intentionally cannot run.
+    if (anchors.target_anchors?.retired) return [];
     return fy === "2026-27"
       ? ["E1_name_match_pct", "E2_unmatched_names", "E3_fy2627_duplicates"]
       : ["E1_name_match_pct", "E2_unmatched_names"];

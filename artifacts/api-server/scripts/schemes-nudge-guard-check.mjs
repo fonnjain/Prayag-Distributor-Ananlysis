@@ -30,6 +30,8 @@
 // on port 5894.
 
 import { spawn } from "node:child_process";
+import { rmSync } from "node:fs";
+import { access, mkdtemp } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -40,6 +42,13 @@ const REQUEST_TIMEOUT_MS = Number(process.env.GUARD_REQUEST_TIMEOUT_MS ?? 60000)
 const OPERATOR_HEADERS = process.env.ADMIN_SECRET
   ? { "X-Admin-Secret": process.env.ADMIN_SECRET }
   : {};
+
+let assertionsEvaluated = 0;
+function couldNotEvaluate(message) {
+  console.error(`COULD NOT EVALUATE scheme-nudge guards — ${message}`);
+  process.exit(2);
+}
+
 const bounded = (url, init = {}) =>
   fetch(url, {
     ...init,
@@ -62,6 +71,7 @@ async function probe(candidate) {
 }
 
 let serverProc = null;
+let serverDistDir = null;
 async function resolveBase() {
   const candidates = [
     process.env.SCHEMES_BASE_URL,
@@ -81,43 +91,37 @@ async function resolveBase() {
 
   if (process.env.SCHEMES_BASE_URL || process.env.COMPARISON_BASE_URL) {
     const pinned = process.env.SCHEMES_BASE_URL ?? process.env.COMPARISON_BASE_URL;
-    console.error(`FATAL: pinned base URL ${pinned} is not responding`);
-    process.exit(2);
+    couldNotEvaluate(`pinned base URL ${pinned} is not responding`);
   }
 
-  // No reachable server — boot a disposable one on port 5894.
+  // No reachable server — build and boot a disposable one on port 5894.
+  // Its output is isolated from every other guard and the managed API workflow.
   const port = Number(process.env.GUARD_SERVER_PORT ?? 5894);
   const apiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  serverDistDir = await mkdtemp(path.join(apiDir, ".guard-dist-scheme-"));
   console.log(
-    `INFO  no running api-server found — booting a disposable one on port ${port}`,
+    `INFO  no running api-server found — building isolated disposable runtime for port ${port}`,
   );
 
-  // Prefer a complete pre-built runtime (avoids a rebuild conflict with live
-  // servers from earlier guard scripts in the same chain). The pino bundling
-  // plugin emits a companion worker that index.mjs loads at startup, so index
-  // alone is not a usable disposable server.
-  const distEntry = path.join(apiDir, "dist", "index.mjs");
-  const workerEntry = path.join(apiDir, "dist", "thread-stream-worker.mjs");
-  const distReady = await import("node:fs/promises").then((fs) =>
-    Promise.all([fs.access(distEntry), fs.access(workerEntry)])
-      .then(() => true)
-      .catch(() => false),
-  );
-
-  if (!distReady) {
-    console.log(`INFO  disposable runtime is incomplete — running build first`);
-    const { execSync } = await import("node:child_process");
-    try {
-      execSync("pnpm run build", { cwd: apiDir, stdio: "inherit" });
-    } catch {
-      console.error("FATAL: build step failed — cannot start disposable api-server");
-      process.exit(2);
-    }
+  const { execSync } = await import("node:child_process");
+  try {
+    execSync("pnpm run build", {
+      cwd: apiDir,
+      stdio: "inherit",
+      env: { ...process.env, API_SERVER_DIST_DIR: serverDistDir },
+    });
+    await Promise.all(
+      ["index.mjs", "thread-stream-worker.mjs", "pino-worker.mjs", "pino-file.mjs", "pino-pretty.mjs"]
+        .map((file) => access(path.join(serverDistDir, file))),
+    );
+  } catch (err) {
+    couldNotEvaluate(`isolated disposable runtime build failed: ${err instanceof Error ? err.message : String(err)}`);
   }
+  const distEntry = path.join(serverDistDir, "index.mjs");
 
   serverProc = spawn(
     "node",
-    ["--enable-source-maps", "./dist/index.mjs"],
+    ["--enable-source-maps", distEntry],
     {
       cwd: apiDir,
       env: { ...process.env, PORT: String(port) },
@@ -130,21 +134,20 @@ async function resolveBase() {
   const deadline = Date.now() + Number(process.env.GUARD_SERVER_BOOT_MS ?? 300000);
   while (Date.now() < deadline) {
     if (serverProc.exitCode != null) {
-      console.error(
-        `FATAL: disposable api-server exited early (code ${serverProc.exitCode})`,
-      );
-      process.exit(2);
+      couldNotEvaluate(`disposable api-server exited early (code ${serverProc.exitCode})`);
     }
     if (await probe(local)) return local;
     await new Promise((r) => setTimeout(r, 3000));
   }
-  console.error("FATAL: disposable api-server did not become ready in time");
-  process.exit(2);
+  couldNotEvaluate("disposable api-server did not become ready in time");
 }
 
 function shutdownServer() {
   if (serverProc) {
     try { process.kill(-serverProc.pid, "SIGTERM"); } catch { /* already gone */ }
+  }
+  if (serverDistDir) {
+    try { rmSync(serverDistDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
   }
 }
 process.on("exit", shutdownServer);
@@ -154,6 +157,7 @@ process.on("SIGINT", () => { shutdownServer(); process.exit(1); });
 
 let failures = 0;
 function check(label, cond, detail = "") {
+  assertionsEvaluated++;
   if (cond) {
     console.log(`  PASS  ${label}`);
   } else {
@@ -222,11 +226,10 @@ if (masterSchemeIds.size === 0) {
   console.log("\nINFO  scheme master is empty — seeding via POST /api/admin/schemes/load");
   const sessionSecret = process.env.SESSION_SECRET ?? "";
   if (!sessionSecret) {
-    console.error(
-      "FATAL: SESSION_SECRET is not set — cannot seed scheme tables; " +
+    couldNotEvaluate(
+      "SESSION_SECRET is not set — cannot seed scheme tables; " +
       "set SESSION_SECRET so the admin seed route can be called",
     );
-    process.exit(2);
   }
   const seedRes = await bounded(`${base}/admin/schemes/load`, {
     method: "POST",
@@ -242,8 +245,7 @@ if (masterSchemeIds.size === 0) {
   );
   if (!seedRes.ok) {
     // Seeding failed — no point running further assertions.
-    console.error("\nFATAL: cannot proceed without scheme data in DB");
-    process.exit(failures === 0 ? 2 : 1);
+    couldNotEvaluate("cannot proceed without scheme data in DB");
   }
 
   // Re-fetch master to populate masterSchemeIds for the assertions below.
@@ -356,6 +358,10 @@ check(
 
 // ── Summary ───────────────────────────────────────────────────────────────────
 
+if (assertionsEvaluated === 0) {
+  couldNotEvaluate("zero business assertions ran");
+}
+console.log(`\nEVALUATED ${assertionsEvaluated} scheme-nudge assertions.`);
 console.log(
   failures === 0
     ? "\nAll scheme nudge guard checks passed."

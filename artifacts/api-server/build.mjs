@@ -11,7 +11,10 @@ globalThis.require = createRequire(import.meta.url);
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 
 async function buildAll() {
-  const distDir = path.resolve(artifactDir, "dist");
+  const configuredDistDir = process.env.API_SERVER_DIST_DIR?.trim();
+  const distDir = configuredDistDir
+    ? path.resolve(configuredDistDir)
+    : path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
