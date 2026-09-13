@@ -1,10 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
+export type AuthRole = 'admin' | 'normal' | 'sales_head' | 'crm' | 'business';
+
 export interface AuthUser {
   id: number;
   email: string;
   displayName: string;
-  role: 'admin' | 'normal';
+  role: AuthRole;
   isActive: boolean;
   mustChangePassword: boolean;
 }

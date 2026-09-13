@@ -7,6 +7,7 @@ import {
   clearLoginFailures,
   createSession,
   hashPassword,
+  isAuthRole,
   isThrottled,
   normalizeEmail,
   publicUserFromRow,
@@ -19,6 +20,7 @@ import {
   safeUser,
   SESSION_COOKIE,
   validateEmail,
+  type AuthRole,
   validatePassword,
   verifyPassword,
   writeAudit,
@@ -32,8 +34,8 @@ function stringValue(value: unknown, max: number): string | null {
   return result && result.length <= max ? result : null;
 }
 
-function validRole(value: unknown): "admin" | "normal" | null {
-  return value === "admin" || value === "normal" ? value : null;
+function validRole(value: unknown): AuthRole | null {
+  return isAuthRole(value) ? value : null;
 }
 
 async function activeAdminCount(client: { query: (sql: string, params?: unknown[]) => Promise<any> }): Promise<number> {
@@ -312,7 +314,7 @@ router.get("/auth/users", requireAdmin, async (req, res) => {
   }
   if (status === "active") where.push("is_active = true");
   if (status === "inactive") where.push("is_active = false");
-  if (role === "admin" || role === "normal") {
+  if (isAuthRole(role)) {
     params.push(role);
     where.push(`role = $${params.length}`);
   }
@@ -370,7 +372,7 @@ router.patch("/auth/users/:id", requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const exists = await rejectLastAdmin(client, id, role !== "normal");
+    const exists = await rejectLastAdmin(client, id, role === "admin");
     if (!exists) {
       await client.query("ROLLBACK");
       return void res.status(404).json({ error: "User not found" });
@@ -383,7 +385,7 @@ router.patch("/auth/users/:id", requireAdmin, async (req, res) => {
                   created_at, updated_at, deactivated_at, locked_until`,
       [id, displayName ?? null, role ?? null],
     );
-    if (role === "normal") {
+    if (role !== undefined && role !== "admin") {
       await client.query(
         `UPDATE auth_sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`,
         [id],

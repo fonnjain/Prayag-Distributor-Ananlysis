@@ -1,10 +1,10 @@
 ---
 name: Application auth system
-description: Custom email/password auth added in Task 367 — tables, session model, admin UI, bootstrap pattern, and security choices.
+description: Custom email/password auth — tables, session model, role authority, admin UI, bootstrap pattern, and security choices.
 ---
 
 ## Tables
-- `auth_users` — email (normalized unique), password_hash (scrypt), role (admin/normal), is_active, locked_until
+- `auth_users` — email (normalized unique), password_hash (scrypt), role, is_active, locked_until
 - `auth_sessions` — opaque token stored as SHA-256 hash; 12h absolute expiry; revocable per-user or individually
 - `auth_audit` — every account mutation and login event; always written in the same DB transaction as the mutation
 - `auth_login_throttle` — IP + normalized-email key; 5 failures → 15-minute lockout
@@ -33,6 +33,13 @@ Never record administrator email addresses in project memory; check the live acc
 - Last-admin guard: `pg_advisory_xact_lock(367054)` serializes concurrent deactivation/demotion; row-level FOR UPDATE prevents count drift
 - Audit writes are transactional — failure rolls back the account/session mutation
 - Password never returned in any API response; tests assert this
+
+## Role authority
+The stored roles are Administrator, Normal User, Sales Head, CRM, and Business. Authorization remains binary: only Administrator has administrative authority; every other role has Normal User authority.
+
+**Why:** the business roles must be independently assignable and filterable before their final permission boundaries are defined, without accidentally granting administrative access.
+
+**How to apply:** treat every role other than Administrator as non-admin for route authorization, last-active-admin protection, and session revocation when an administrator is demoted. Add granular permissions only after a reviewed permission matrix exists.
 
 ## First-login password rule
 - New accounts, newly bootstrapped administrators, and accounts with an administrator-issued password reset must change that supplied password before using protected application routes. The self-service change rejects reuse of the current password and records a transactional audit event.

@@ -17,7 +17,12 @@ const SESSION_DURATION_MS = 12 * 60 * 60 * 1_000;
 const THROTTLE_MAX_FAILURES = 5;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export type AuthRole = "admin" | "normal";
+export const AUTH_ROLES = ["admin", "normal", "sales_head", "crm", "business"] as const;
+export type AuthRole = (typeof AUTH_ROLES)[number];
+
+export function isAuthRole(value: unknown): value is AuthRole {
+  return typeof value === "string" && AUTH_ROLES.includes(value as AuthRole);
+}
 
 export interface AuthUser {
   id: number;
@@ -73,7 +78,7 @@ export function safeUser(row: {
     id: row.id,
     email: row.email,
     displayName: row.display_name,
-    role: row.role === "admin" ? "admin" : "normal",
+    role: isAuthRole(row.role) ? row.role : "normal",
     isActive: Boolean(row.is_active),
     mustChangePassword: Boolean(row.must_change_password),
   };

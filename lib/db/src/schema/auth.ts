@@ -32,7 +32,7 @@ export const authUsers = pgTable(
     deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
   },
   (t) => [
-    check("auth_users_role_check", sql`${t.role} IN ('admin', 'normal')`),
+    check("auth_users_role_check", sql`${t.role} IN ('admin', 'normal', 'sales_head', 'crm', 'business')`),
     index("auth_users_email_normalized_idx").on(t.emailNormalized),
     index("auth_users_active_role_idx").on(t.isActive, t.role),
   ],

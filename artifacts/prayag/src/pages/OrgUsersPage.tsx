@@ -63,6 +63,18 @@ import {
 import { useAuth } from "@/data/auth-context";
 import { UserActivityPanel } from "@/components/user-activity-panel";
 
+const ROLE_OPTIONS = [
+  { value: "normal", label: "Normal User" },
+  { value: "sales_head", label: "Sales Head" },
+  { value: "crm", label: "CRM" },
+  { value: "business", label: "Business" },
+  { value: "admin", label: "Administrator" },
+] as const;
+
+const ROLE_LABELS: Record<string, string> = Object.fromEntries(
+  ROLE_OPTIONS.map((option) => [option.value, option.label]),
+);
+
 export default function OrgUsersPage() {
   const { toast } = useToast();
   const { user: currentUser, logout } = useAuth();
@@ -128,7 +140,7 @@ export default function OrgUsersPage() {
       });
       toast({ title: "User updated" });
       setEditUser(null);
-      if (editUser.id === currentUser?.id && formData.role === "normal") {
+      if (editUser.id === currentUser?.id && formData.role !== "admin") {
         await logout();
       }
     } catch (err: any) {
@@ -231,8 +243,9 @@ export default function OrgUsersPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Roles</SelectItem>
-                <SelectItem value="admin">Administrator</SelectItem>
-                <SelectItem value="normal">Normal User</SelectItem>
+                {ROLE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -285,7 +298,7 @@ export default function OrgUsersPage() {
                         </Badge>
                       ) : (
                         <Badge variant="outline" className="text-muted-foreground">
-                          <Shield className="h-3 w-3 mr-1" /> Normal
+                          <Shield className="h-3 w-3 mr-1" /> {ROLE_LABELS[u.role] ?? u.role}
                         </Badge>
                       )}
                     </TableCell>
@@ -405,8 +418,9 @@ export default function OrgUsersPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="normal">Normal User</SelectItem>
-                    <SelectItem value="admin">Administrator</SelectItem>
+                    {ROLE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -472,8 +486,9 @@ export default function OrgUsersPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="normal">Normal User</SelectItem>
-                    <SelectItem value="admin">Administrator</SelectItem>
+                    {ROLE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

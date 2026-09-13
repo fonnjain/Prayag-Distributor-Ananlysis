@@ -4687,6 +4687,16 @@ const MIGRATIONS: Migration[] = [
         ON canonical_item_category_registry (UPPER(BTRIM(item_code)));
     `,
   },
+  {
+    id: "102_application_auth_roles",
+    sql: `
+      ALTER TABLE auth_users
+        DROP CONSTRAINT IF EXISTS auth_users_role_check;
+      ALTER TABLE auth_users
+        ADD CONSTRAINT auth_users_role_check
+        CHECK (role IN ('admin', 'normal', 'sales_head', 'crm', 'business'));
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

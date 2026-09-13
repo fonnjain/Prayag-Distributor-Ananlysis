@@ -27,6 +27,7 @@ import authRouter from "./auth.js";
 import {
   bootstrapAdministrators,
   hashPassword,
+  safeUser,
   requireAuthenticated,
   requirePasswordChangeComplete,
   requireSameOrigin,
@@ -85,6 +86,19 @@ describe("application authentication", () => {
     expect(validatePassword("123456789")).toBeNull();
     expect(validatePassword("1234567890")).toBe("1234567890");
   });
+
+  it.each(["normal", "sales_head", "crm", "business"] as const)(
+    "preserves the non-admin %s role without granting administrator authority",
+    (role) => {
+      expect(safeUser({
+        id: 9,
+        email: "person@example.com",
+        display_name: "Person",
+        role,
+        is_active: true,
+      }).role).toBe(role);
+    },
+  );
 
   it("rejects protected browser requests but permits resolved API keys", () => {
     const unauthorizedResponse = {
@@ -191,6 +205,26 @@ describe("application authentication", () => {
     expect(mocks.query).not.toHaveBeenCalled();
   });
 
+  it.each(["sales_head", "crm", "business"] as const)(
+    "keeps the %s role at normal-user authority",
+    async (role) => {
+      const identity: RequestHandler = (req, _res, next) => {
+        req.authUser = {
+          id: 8,
+          email: `${role}@example.com`,
+          displayName: role,
+          role,
+          isActive: true,
+          mustChangePassword: false,
+        };
+        next();
+      };
+      const response = await request(authApp(identity)).get("/auth/users");
+      expect(response.status).toBe(403);
+      expect(mocks.query).not.toHaveBeenCalled();
+    },
+  );
+
   it("never returns a password hash from the user list", async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
@@ -255,6 +289,43 @@ describe("application authentication", () => {
     const insertSql = String(client.query.mock.calls[1][0]);
     expect(insertSql).toContain("must_change_password");
     expect(insertSql).toContain("TRUE");
+  });
+
+  it("allows an administrator to create a Sales Head account", async () => {
+    const createdUser = {
+      id: 13,
+      email: "saleshead@example.com",
+      display_name: "Sales Head",
+      role: "sales_head",
+      is_active: true,
+      must_change_password: true,
+      created_at: new Date("2026-01-01T00:00:00Z"),
+      updated_at: new Date("2026-01-01T00:00:00Z"),
+      deactivated_at: null,
+      locked_until: null,
+    };
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [createdUser] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: vi.fn(),
+    };
+    mocks.connect.mockResolvedValueOnce(client);
+
+    const response = await request(authApp(adminIdentity))
+      .post("/auth/users")
+      .send({
+        email: "saleshead@example.com",
+        displayName: "Sales Head",
+        role: "sales_head",
+        password: "supplied-password-123",
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.user.role).toBe("sales_head");
+    expect(client.query.mock.calls[1][1][3]).toBe("sales_head");
   });
 
   it("returns the forced-change flag from the current-session endpoint", async () => {
