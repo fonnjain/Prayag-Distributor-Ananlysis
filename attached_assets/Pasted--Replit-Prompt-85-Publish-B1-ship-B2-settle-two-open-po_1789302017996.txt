@@ -1,0 +1,152 @@
+# Replit Prompt 85 — Publish B1, ship B2, settle two open points
+
+**Date:** 13 September 2026
+**Scope:** Section A is a publish. Section B ships. Sections C and D are
+decisions with my position stated.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Section A — publish B1
+
+Commit `c2121462b7dc284088d0773cd94f26b17d96325d` is verified on the remote.
+Both headline figures reconcile independently: 135.35 ÷ 126.25 = +7.2%, and
+95.59 ÷ 114.09 = 83.8%.
+
+```
+Publish.
+
+After publishing, confirm:
+  - the deployed commit matches origin/main
+  - the Overview renders Sales YTD Rs 135.35 Cr against Rs 126.25 Cr, +7.2%
+  - achievement 83.8%, with Rs 95.59 Cr and Rs 114.09 Cr both visible
+  - the monthly chart shows Apr -13.0%, May -4.5%, Jun +5.2%, Jul +21.9%,
+    Aug +20.0%
+  - September is visibly marked partial and excluded from the narrative
+  - Oct-Mar are blank for the current year, not zero
+  - Retailers, Channel Partners, Secondary Retail Reach, Sales & Dispatch
+    and Product Mix are gone
+```
+
+---
+
+## Section B — SKU concentration
+
+```
+Ship B2 as scoped. Cumulative revenue by SKU rank, recomputed for the
+selected FY and period. Do not hardcode the 45.9% or 560-code anchors.
+
+Top ten SKUs with share. Ships independently of the other risk joins.
+
+Print the Pareto figures as generated for FY2026-27 so they can be checked
+against the earlier analysis.
+```
+
+---
+
+## Section C — realisation may not be buildable from the booking table
+
+This is more significant than the definition question.
+
+```
+Read-only. Change nothing.
+
+Your finding: secondary_order_line stores basic_order_value and
+GST-inclusive dealer_order_value - NOT documented NET and GROSS fields.
+
+So the 45.61% figure cannot be reproduced from the authoritative booking
+series at all. That may make Block 7 unbuildable from that source rather
+than merely undefined.
+
+C1. Confirm that. Which table CAN produce a defensible realisation figure,
+    and on which definition?
+
+      MRP erosion         1 - NET / (MRP x pieces)
+      Recorded discount   1 - NET / GROSS
+
+C2. For the MRP-erosion measure, the two known adjustments must be explicit:
+
+      780 unpriced codes worth Rs 9.64 Cr - excluded, and the exclusion
+      stated on the block, not silently dropped
+      water tanks - litres converted to pieces via tankResolution, which
+      already exists and is proven
+
+    With both applied, print the FY2026-27 figure and its numerator and
+    denominator.
+
+C3. My earlier 61.8% came from the top-100 SKU analysis using MRP x
+    quantity. Confirm whether that reproduces once the two adjustments
+    above are applied, or whether it was computed on a different
+    population - top 100 codes rather than all sales.
+
+    If it was top-100 only, say so plainly. That figure has travelled and
+    should be corrected wherever it was used.
+
+C4. RECOMMEND. Which single realisation measure should the Overview show,
+    from which table, and what must be disclosed alongside it?
+
+    MY POSITION: MRP erosion is the question management asks - how far
+    below list price are we actually selling. But if it cannot be computed
+    cleanly, no figure is better than a figure nobody can reconcile.
+
+Report only. Do not build Block 7 until this is settled.
+```
+
+---
+
+## Section D — completeness threshold
+
+```
+Your recommendation of 75% minimum coverage is accepted, with the basis
+always shown - "142 of 189 members".
+
+ONE REFINEMENT, and it matters.
+
+For COST roll-ups, weight the coverage by COST, not by headcount.
+
+  142 of 189 members is 75% by headcount.
+  Those same 142 could be 95% of total CTC, or 60%, depending on who is
+  missing.
+
+  A company cost ratio built on 75% of people but 60% of cost would be
+  materially wrong at a headline that reads acceptable.
+
+D1. Implement coverage as TWO figures wherever cost is rolled up:
+      headcount coverage    142 of 189
+      cost-weighted coverage  x% of known total CTC
+
+    The 75% gate applies to the cost-weighted figure.
+
+D2. Same principle for margin: the assessment already proposes
+    revenue-weighted coverage for margin claims. Confirm that is
+    revenue-weighted and not row-count weighted.
+
+D3. For coverage roll-ups - visits, retailers - weight by what the metric
+    measures. A member with 400 retailers missing matters more than one
+    with 12.
+
+    Recommend the weighting basis for each roll-up type.
+```
+
+---
+
+## Notes
+
+- **The category bridge answer is worth recording.** It was not a defect — the
+  probe ran against development, where `master_category` is null, while production
+  holds 10,417 populated assignments. That is the third false finding this month
+  traced to environment rather than data. Worth stating the environment explicitly
+  in every future probe.
+- **C is the one that could change the plan.** If realisation cannot be computed
+  from the authoritative booking table, Block 7 may need dropping or rebuilding on
+  a different source. Better known now than half-built.
+- **D1 is a small change with a real failure mode.** Headcount coverage and cost
+  coverage can diverge sharply, and the headline would read fine while the
+  underlying figure was wrong.
+
+## Still blocked, unchanged
+
+**PTMT January–April BOM.** Now affecting the current year — FY2026-27 April PTMT
+reads 86.47% against 76.17% the prior April, roughly **21 percentage points**
+overstated. Block 4 waits on Prayag.
