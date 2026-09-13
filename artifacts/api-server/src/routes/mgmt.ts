@@ -6,6 +6,7 @@ import { writeFile, rename as renameFile, mkdir as mkdirAsync } from "node:fs/pr
 import { dirname } from "node:path";
 import { loadRoster, invalidateRosterCache, hrRosterCsvWritePath, saveRosterCsvToGcs, mgmtSources } from "../lib/mgmt/roster.js";
 import { isAdminToken } from "../lib/adminAuth.js";
+import { requireVerificationEndpointAccess } from "../lib/apiKeyAuth.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import { resolveOrderFileId, getOrderLoadStatus, loadOrderFile } from "../lib/mgmt/orders.js";
 import {
@@ -1211,7 +1212,7 @@ router.post("/mgmt/report", async (req: Request, res: Response): Promise<void> =
 // Reconcile the computed secondary-order-booking report against the signed-off
 // dashboard anchors. Returns per-check pass/warn/fail with app vs expected vs
 // delta%, an internal cross-foot, and any roster head missing from output.
-router.get("/mgmt/verify", async (req: Request, res: Response): Promise<void> => {
+router.get("/mgmt/verify", requireVerificationEndpointAccess, async (req: Request, res: Response): Promise<void> => {
   const raw = req.query.fy;
   const fy = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : await defaultMgmtFy();
   if (!FY_PATTERN.test(fy)) {

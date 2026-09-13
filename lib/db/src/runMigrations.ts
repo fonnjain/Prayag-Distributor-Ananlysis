@@ -4697,6 +4697,24 @@ const MIGRATIONS: Migration[] = [
         CHECK (role IN ('admin', 'normal', 'sales_head', 'crm', 'business'));
     `,
   },
+  {
+    id: "103_verification_service_identity",
+    sql: `
+      ALTER TABLE api_keys
+        ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'full_api';
+
+      ALTER TABLE api_keys
+        DROP CONSTRAINT IF EXISTS api_keys_scope_check;
+      ALTER TABLE api_keys
+        ADD CONSTRAINT api_keys_scope_check
+        CHECK (scope IN ('full_api', 'verification'));
+
+      CREATE INDEX IF NOT EXISTS api_keys_scope_idx ON api_keys (scope);
+      CREATE UNIQUE INDEX IF NOT EXISTS api_keys_single_verification_identity_idx
+        ON api_keys (scope)
+        WHERE scope = 'verification';
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

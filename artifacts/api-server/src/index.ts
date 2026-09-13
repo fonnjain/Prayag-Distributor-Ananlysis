@@ -48,6 +48,7 @@ import { currentOpenFy } from "./lib/fyAnchors.js";
 import { setServerReady } from "./lib/serverReadiness.js";
 import { startServer } from "./lib/startServer.js";
 import { bootstrapAdministrators } from "./lib/auth.js";
+import { bootstrapVerificationIdentity } from "./lib/apiKeyAuth.js";
 import {
   initializeSeasonalCurve,
   startSeasonalCurveScheduler,
@@ -97,6 +98,7 @@ startServer({
       }, 24 * 60 * 60_000).unref();
     }
     await bootstrapAdministrators();
+    await bootstrapVerificationIdentity();
     // A material baseline mismatch must never silently change projection
     // denominators — but it must not take the whole application offline either.
     // The module remains on the checked-in FY2025-26 calibration until an

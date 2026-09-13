@@ -6,6 +6,7 @@ import {
   backfillMissingFromSheets,
   pruneGhostRows,
 } from "../lib/verify/verify.js";
+import { requireVerificationEndpointAccess } from "../lib/apiKeyAuth.js";
 
 const router: IRouter = Router();
 
@@ -16,7 +17,7 @@ function resolveFy(raw: unknown): string | null {
   return fy in REGISTER_SHEET_IDS ? fy : null;
 }
 
-router.get("/verify", async (req: Request, res: Response): Promise<void> => {
+router.get("/verify", requireVerificationEndpointAccess, async (req: Request, res: Response): Promise<void> => {
   const fy = resolveFy(req.query["fy"]);
   if (!fy) {
     res.status(400).json({

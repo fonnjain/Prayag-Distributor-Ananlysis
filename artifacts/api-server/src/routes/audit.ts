@@ -13,6 +13,7 @@ import { runExtraGroups } from "../lib/audit/extraGroups.js";
 import { buildAuditWorkbook } from "../lib/audit/workbook.js";
 import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
 import { currentOpenFy, deriveSaleLineCohortFy, deriveSaleLineClosedFys } from "../lib/fyAnchors.js";
+import { requireVerificationEndpointAccess } from "../lib/apiKeyAuth.js";
 
 const router: IRouter = Router();
 
@@ -60,7 +61,7 @@ async function runAudit(fy: string): Promise<FullVerifyReport> {
 // GET /api/audit?fy=<fy>
 // Returns FullVerifyReport (same shape as /mgmt/verify) but with more groups
 // and the runFullVerify checks (not just the old runVerify secondary checks).
-router.get("/audit", async (req: Request, res: Response): Promise<void> => {
+router.get("/audit", requireVerificationEndpointAccess, async (req: Request, res: Response): Promise<void> => {
   const { fy, valid } = await resolveFy(req.query["fy"]);
   if (!fy) {
     res.status(400).json({ error: `Unknown FY. Valid values: ${valid.join(", ")}` });
@@ -83,7 +84,7 @@ router.get("/audit", async (req: Request, res: Response): Promise<void> => {
 // GET /api/audit/download?fy=<fy>
 // Returns a .xlsx workbook with 8 tabs: Summary, Checks, Failures, Source Health,
 // Unmatched Names, Head Reconciliation, Cross-foots, Anchors.
-router.get("/audit/download", async (req: Request, res: Response): Promise<void> => {
+router.get("/audit/download", requireVerificationEndpointAccess, async (req: Request, res: Response): Promise<void> => {
   const { fy, valid } = await resolveFy(req.query["fy"]);
   if (!fy) {
     res.status(400).json({ error: `Unknown FY. Valid values: ${valid.join(", ")}` });
