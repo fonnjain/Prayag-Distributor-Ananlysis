@@ -848,3 +848,17 @@ mtime_ms = 1789298494536
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/9666543f-8d6e-48b3-b419-363e5f7a2a64/84210395-5258-429c-b45a-1a17c6ffc00a"
 storage_version_token = "1789298500785721"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "Zr9Dz-mdmNf8rDjuF1Leh"
+uri = "file://reports/guard-failure-analysis-2026-09-13.docx"
+type = "word_document"
+title = "Guard Failure Analysis — 13 September 2026"
+description = "Word document covering every failing workflow, reported figures, failure timing, classification, audit-manifest findings, and required actions."
+logical_id = "1398ca41-cbda-448b-9642-be6e51ce13b8"
+content_hash = "sha256:eb896668bff3c16ea75cfc21eccb2c97c9d65e8d81e4473f5ec877910336de9e"
+size = 42470
+mtime_ms = 1789309919576
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/1398ca41-cbda-448b-9642-be6e51ce13b8/4b081d2f-03ee-4b38-9fcd-e93ffd0472db"
+storage_version_token = "1789309928319385"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
