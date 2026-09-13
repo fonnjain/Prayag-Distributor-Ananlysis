@@ -1,0 +1,162 @@
+# Replit Prompt 79 — Unstable audit counts, and two live failures
+
+**Date:** 13 September 2026
+**Scope:** All read-only. Change nothing, rebuild nothing, load nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+The verification identity works — 200 on all four approved endpoints, 403 on an
+unrelated GET and on a mutation, `/healthz` still public. It immediately surfaced
+three things.
+
+---
+
+## Section A — the audit endpoint gave two different answers
+
+This is the one I would take first. An audit that reports different totals for
+the same question is a problem in the instrument, not the data.
+
+```
+Read-only. Change nothing.
+
+Identical requests to GET /api/audit returned different totals before
+settling:
+
+  first read   43 pass, 2 pending, 1 fail, 2 skip, 1 warning
+  final three  40 pass, 2 pending, 2 fail, 2 skip, 2 warnings
+
+The three final reads were identical. The change was attributed to
+production warming and refreshing data.
+
+A1. What makes the count vary? Print what each check depends on and which
+    of those can be unavailable or mid-refresh at request time.
+
+A2. Did the CHECKS change, or their RESULTS? 43 pass falling to 40 with the
+    total moving from 49 to 48 suggests checks themselves appeared or
+    disappeared, not only their outcomes. Which happened?
+
+A3. If a check cannot evaluate because its input is refreshing, what does it
+    currently return - pass, skip, or is it omitted entirely? Omitting it
+    would explain the changing total and would be the worst of the three.
+
+A4. Is there any state - cache, warm-up flag, ingest generation - that the
+    audit could consult to know whether its inputs are settled?
+
+A5. SHOULD IT REFUSE TO ANSWER? Describe what a "not yet stable" response
+    would look like, and what would consume it. A provisional result
+    reported as final is worse than no result, particularly straight after
+    a publish - which is exactly when this endpoint gets called.
+
+    Describe only. Do not build it.
+
+A6. How many times has the audit been read since the verification identity
+    was created, and did any other pair of reads disagree? If this is
+    reproducible it is a defect; if it happened once at cold start it is
+    still worth knowing the window.
+
+Report only.
+```
+
+---
+
+## Section B — check 7.6, the brand mirror is empty
+
+```
+Read-only. Change nothing, rebuild nothing.
+
+Check 7.6 reports the PSCode3 SKU table against its brand-level mirror for
+FY2025-26:
+
+  expected NET   Rs 2,31,09,13,869
+  actual mirror  Rs 0
+  difference     -100%
+  months         every month, April 2025 to March 2026
+
+B1. Confirm the mirror table name and its current row count for FY2025-26
+    and for every other fiscal year. Is it empty for one year or all of
+    them?
+
+B2. What writes it? The July 2026 one-off PSCode 3 loader wrote both
+    secondary_sku_line and a brand mirror in a single transaction. The
+    April-June path wrote only the SKU table.
+
+    Is that the only writer? If so, the mirror was only ever populated for
+    the months that loader covered.
+
+B3. What READS the mirror? If nothing reads it, this is an unreconciled
+    artefact rather than a figure anyone sees. If something does read it,
+    print what, and what that surface currently shows.
+
+B4. Does audit 7.6 compare a table nobody uses? That would make it a
+    permanently failing check rather than a live data problem - which is
+    its own issue, because a check that always fails stops being read.
+
+B5. If the mirror should be rebuilt, what would that involve? FY2025-26 is
+    frozen. Describe the path and its guards. Do not rebuild anything.
+
+Report only.
+```
+
+---
+
+## Section C — check 12.1, August SKU rows are absent
+
+```
+Read-only. Change nothing, load nothing.
+
+Check 12.1 reports Aug-26 secondary_sku_line rows against 60% of the prior
+like-month:
+
+  required floor  19,417 rows
+  production      0 rows
+  difference      -100%
+
+Development has 8,602 because the Product-Wise file was loaded there.
+Production has never had them - that file is order booking and went to
+secondary_order_line.
+
+C1. Confirm Aug-26 secondary_sku_line in production: rows, value, frozen_at.
+    Is it anchored at zero, or calendar-frozen with frozen_at NULL?
+
+C2. If it is calendar-frozen and unanchored, it is in the same state that
+    trapped the primary register in September. Check every month across
+    every fiscal year for that condition.
+
+C3. Which surfaces read Aug-26 from secondary_sku_line, and what do they
+    show today - zero, blank, or unavailable? SKU Deep Dive, breadth
+    trajectory, the push list, Red Alert B3.
+
+C4. Has B3 or any other alert fired on the empty month since 7 September?
+    Print every alert raised since then.
+
+C5. The check compares against 60% of a prior like-month. With the month
+    genuinely empty rather than short-loaded, is FAIL the right outcome, or
+    should it distinguish "not loaded" from "loaded and short"?
+
+    Those are different problems and the same red status hides which one it
+    is.
+
+Report only. Do not load, unfreeze or adjust anything.
+```
+
+---
+
+## Notes
+
+- **Section A first.** Two of the three failures are known and understood; the
+  unstable count is not, and it undermines the tool used to establish everything
+  else. A3 is the specific worry — if a check that cannot evaluate is silently
+  omitted, the total moves and nothing says why.
+- **B4 is the question that decides B's priority.** If nothing reads the mirror,
+  7.6 is a check on an unused artefact, and a permanently red check trains people
+  to ignore the audit. That is worse than the mirror being empty.
+- **C5 is the same distinction this project keeps meeting.** "Not loaded" and
+  "loaded and short" are different conditions with the same red status, and only
+  one of them is a data problem.
+
+## Not in this prompt
+
+The **freshness check recovered on its own** — 504 hours in development was an
+artefact of interval schedulers being suppressed outside production. Production
+reads 0 hours, ingested 07:31 this morning, 162 members covered. Correctly not
+counted as a failure.
