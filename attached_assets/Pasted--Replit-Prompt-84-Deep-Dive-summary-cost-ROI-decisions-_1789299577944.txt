@@ -1,0 +1,189 @@
+# Replit Prompt 84 — Deep Dive summary: cost, ROI, decisions
+
+**Date:** 13 September 2026
+**Scope:** Section A rebuilds the summary. Section B fixes the other sheets.
+Section C is one UI change.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## What is wrong with the current summary
+
+The data is right. The presentation buries the finding.
+
+**Neel Kamal Choure's story, which the sheet contains and does not tell:**
+
+| | |
+|---|---:|
+| YTD cost, CTC + T.A. | **₹2,59,750** |
+| Sales received | **₹7,19,342** |
+| **Cost ratio** | **36.1%** |
+| Sales per rupee of cost | ₹2.77 |
+| Achievement against target | **8.5%** |
+| Shortfall | ₹77.39 lakh |
+| Direct dealer OB | **₹0** |
+
+Rajan Srivastava's cost ratio is **2.66%**. This member is **fourteen times
+worse**, and that figure sits in row 20 of a flat 31-row list, unformatted, under
+the verdict "Review cost efficiency".
+
+**Other faults:**
+
+Raw unformatted numbers — `0.08504203500694672`, `2126722.3099999996`.
+
+Ten columns wide, four of them data-integrity — Numerator, Denominator, Source,
+Reason. Those belong on a working sheet, not a decision page.
+
+Verdicts that decide nothing — "Figure available", "Shape available", "Coverage
+signal".
+
+**And a real inconsistency:** total retailers 59, visited 46, non-visited 18.
+46 + 18 = 64.
+
+---
+
+## Section A — rebuild the summary sheet
+
+```
+Code change. Show the diff before applying.
+
+Replace "Summary for Decision" with a sheet built top-down by importance.
+
+BLOCK 1 - COST AND ROI TO THE COMPANY. This goes FIRST.
+
+  What this person costs        YTD CTC + T.A., and the monthly rate
+  What they returned            sales received, order booking
+  Cost ratio                    cost / sales, as a percentage
+  Return per rupee of cost      sales / cost, and OB / cost
+  Versus the peer benchmark     the company or state-head median cost
+                                ratio, so 36.1% reads as fourteen times
+                                worse rather than as a number
+
+  Then ONE plain line. For this member it should read close to:
+
+    "Costs Rs 2.60 L year to date and returned Rs 7.19 L of sales - a cost
+     ratio of 36.1% against a company norm of roughly 3%. Order booking of
+     Rs 23.23 L has not converted."
+
+BLOCK 2 - ATTAINMENT
+
+  Target to date, sales received, achievement %, SHORTFALL IN RUPEES
+  Secondary OB against secondary target
+  Direct dealer OB against primary target - Rs 0 against Rs 4.00 L is a
+  finding, not a blank
+
+  Show the rupee gap, not only the percentage. "8.5%" is abstract;
+  "Rs 77.39 lakh behind" is not.
+
+BLOCK 3 - WHAT IS AND IS NOT WORKING
+
+  Order booking Rs 23.23 L against sales received Rs 7.19 L - booking is
+  three times sales. Either conversion is failing or the two measure
+  different things. Say which.
+
+  Coverage: visited, not visited, parties giving business
+  Business per retailer against the peer median
+  New retailers and new-party value
+
+BLOCK 4 - RISK
+
+  Concentration HHI with a plain reading, not the raw index
+  Segment coverage, 11 of 22
+  Dormant retailers, count and value
+  Anything unavailable rather than zero, listed
+
+BLOCK 5 - TREND
+
+  Prior-year quarterly shape, as percentages of the prior year
+  Current-year same-period comparison where available, marked unavailable
+  where not
+
+FORMATTING RULES
+  - Indian number format throughout. No 0.08504203500694672.
+  - percentages as percentages, one or two decimals
+  - four columns maximum: what, figure, comparison, what it means
+  - REMOVE Numerator, Denominator, Source and Reason from this sheet.
+    Move them to a "Working detail" sheet for anyone who wants to check.
+  - verdicts must decide something: "Below target by Rs 77.39 L",
+    "Cost ratio 14x the company norm", "No direct dealer business".
+    Never "Figure available".
+  - a blank that means unavailable is grey with its reason; a genuine zero
+    shows 0
+
+AFTER APPLYING, print the rebuilt Summary sheet for this member exactly as
+generated.
+```
+
+---
+
+## Section B — the other sheets
+
+```
+B1. THE COVERAGE ARITHMETIC DOES NOT ADD UP.
+
+    Total retailers 59, visited 46, non-visited 18. 46 + 18 = 64.
+
+    Print all three with their sources. One is measuring a different
+    population - probably visited counting visit events or a wider roster.
+    Fix or label.
+
+B2. "ORDERS / DAY" IS MISLABELLED.
+
+    The Cost sheet shows "Orders / day  27325.39". That is order booking
+    VALUE per working day, identical to the summary's "Order booking value
+    per working day". It is not a count of orders.
+
+    Rename, and add a real orders-per-day count if one exists.
+
+B3. COVERAGE AND VISITS IS 163 ROWS. PROFILE IS 65.
+
+    Print what is in each. A profile sheet with 65 rows is carrying
+    something other than profile - probably the unmapped "extra" fields.
+
+    Apply the same rule as the summary: anything that is source plumbing
+    goes to a working-detail sheet, not a named analytical sheet.
+
+B4. Confirm the Cost sheet keeps ONE cost ratio, recomputed, with its
+    denominator type stated. It currently does - 36.1%, SALES_RECEIVED.
+    That is right and should not change.
+
+B5. The Info sheet should state the peer benchmark used in Block 1 - which
+    population the median cost ratio came from, and over what period.
+```
+
+---
+
+## Section C — make the AI report collapsible
+
+```
+UI change. Sales Deep Dive page.
+
+The AI REPORT section renders in full and pushes everything below it down.
+Make it collapsible, collapsed by default, with the Regenerate, Guard Test
+and Download PDF buttons visible on the header row.
+
+Keep the "Requires review - 5 of 205 tokens could not be matched" banner
+visible even when collapsed. An unmatched-token warning that hides itself
+is worse than no warning.
+
+Separately, and not part of this change: those five unmatched tokens show
+raw payload paths in the narrative - "[performance.totalOB]",
+"[identity.workingDays]", "[identity.fy]". Print what the matcher is doing
+and why five tokens failed, for a follow-up.
+```
+
+---
+
+## Notes
+
+- **Block 1 is the whole request.** What the person costs, what they returned, and
+  the ratio between them — against a benchmark, at the top, in one line anyone can
+  act on.
+- **The peer comparison is what turns a number into a decision.** 36.1% means
+  nothing alone. 36.1% against a company norm of around 3% is a conversation with
+  a state head.
+- **B1 is a genuine inconsistency** and would undermine the sheet if anyone checked
+  it. 46 + 18 = 64 against a stated total of 59.
+- **The data-integrity columns are not wasted** — they should exist, on a working
+  sheet. The objection is to them sharing space with a decision.
