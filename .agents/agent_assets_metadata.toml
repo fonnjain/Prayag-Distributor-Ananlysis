@@ -806,3 +806,17 @@ mtime_ms = 1789288101747
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/3d3e66bf-036b-4646-93bf-49766fe775e3/d9d7d930-5e84-4397-82b9-b00b5476e289"
 storage_version_token = "1789288109075376"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "QUV3BkYgAZHUOWO9QIffT"
+uri = "file://reports/prompt-80-pre-application-investigation-and-proposed-diff.docx"
+type = "word_document"
+title = "Prompt 80 — Investigation and Proposed Diff"
+description = "Word document containing the read-only Sections A/D findings and the proposed, unapplied Sections B/C audit changes."
+logical_id = "d896dca7-1949-4227-a5cf-3d3a5709f5b6"
+content_hash = "sha256:fbff1180312f2c8c062623ca5fba18aab5abe5f78d155a0b5aab652258e3603e"
+size = 42034
+mtime_ms = 1789291121767
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/d896dca7-1949-4227-a5cf-3d3a5709f5b6/32e4b2d6-911f-4bbf-8132-1d051fb25ce7"
+storage_version_token = "1789291131545535"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

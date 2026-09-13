@@ -1,0 +1,218 @@
+# Replit Prompt 81 — Sales Deep Dive export: everything, organised
+
+**Date:** 13 September 2026
+**Scope:** Section A is read-only and must come first. Section B is the export.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## What is wanted
+
+The Download Excel button exists. It must now carry **everything on the page**,
+grouped into meaningful worksheets, with a **summary sheet built for a business
+decision** rather than a dump of fields.
+
+---
+
+## Section A — five things on the page to fix or explain first
+
+These would otherwise be exported as they stand.
+
+```
+Read-only. Change nothing.
+
+A1. DATE OF JOINING RENDERS AS CURRENCY.
+
+    The Profile section shows "DATE OF JOINING — Rs 41,004".
+
+    41004 is a date serial, not an amount. As an Excel serial it is
+    early 2012. Confirm the underlying value and why it is being formatted
+    as rupees.
+
+A2. TWO DIFFERENT COST RATIOS, 100x APART.
+
+      COST section          "COST RATIO (COST / SALE)  0.02%"
+      ACHIEVEMENT DETAIL    "COST RATIO (SALE)         2.66%"
+
+    CTC Rs 95,834 plus T.A. Rs 28,262 is Rs 1,24,096 against sales received
+    of Rs 1.54 Cr - that is 0.08% monthly, or 2.66% if CTC is annualised
+    over the year to date.
+
+    Print both calculations with their numerators and denominators. One of
+    them is almost certainly wrong, and both appear on the same page.
+
+A3. THREE CTC FIGURES.
+
+      COST              "MONTHLY CTC     Rs 95,834"
+      productivity      "CTC             Rs 3.83 L"
+      productivity      "CTC (FY 24-25)  Rs 95,834"
+
+    Rs 3.83 L is four times Rs 95,834 - consistent with four elapsed months.
+    So one is monthly, one is year-to-date, and the third is labelled
+    FY24-25 while holding the monthly figure.
+
+    Confirm which is which and correct the labels.
+
+A4. THE "OTHER" SECTION LEAKS INTERNAL FIELD NAMES.
+
+      TOTALVISITSOFBUSINESSRECEIVEDPART   170
+      TOTALVISITSOFVISITEDBUTNOBUSINESS    13
+      TARGETCALCULATEDBGBF             Rs 1.90 Cr
+      DIFFERENCEINTARGETSHCX                0
+      ORDERBOOKINGFROMSECONDARYORDER...  Rs 1.57 Cr
+      DIFFERENCEIJCZ                    -0.77
+      ORDERBOOKINGFROMSECONDARYORDERBOOKINGREPORT20  Rs 1.57 Cr
+
+    These are raw source column names with generated suffixes. Print what
+    each one means and where it comes from.
+
+    Which of them duplicate a named field already on the page? TARGET-
+    CALCULATEDBGBF at Rs 1.90 Cr equals Total Target (to date). ORDER-
+    BOOKINGFROMSECONDARYORDER... at Rs 1.57 Cr appears twice.
+
+    Anything meaningful gets a proper label. Anything duplicated or
+    internal does not go in the export.
+
+A5. SEGMENT SPREAD USES A DIFFERENT TAXONOMY.
+
+    It lists C.P. 5000 SERIES, CPVC DURALIFE, SWR DRAINTECH, P.T.M.T. SYMET
+    - the CRM Category Name vocabulary, 22 values.
+
+    The decision taken is the six masters everywhere. This section is on
+    brand_canon from secondary_register_line, which has no item code and
+    cannot join the registry.
+
+    Confirm that, and confirm this section must therefore keep its own
+    vocabulary and say so - rather than being silently inconsistent with
+    every other grouping in the app.
+
+Report before building the export.
+```
+
+---
+
+## Section B — the export
+
+```
+Code change. Show the diff before applying.
+
+The Download Excel button must carry every figure on the page, grouped into
+worksheets, with a decision-focused summary.
+
+SHEET 1 - SUMMARY FOR DECISION
+
+  Not a field dump. Five questions a sales head actually asks, each
+  answered with the figure, the comparison, and a plain verdict line.
+
+  1. Are they hitting target?
+       Total target to date, sale received, achievement %
+       Secondary OB vs secondary target; DD order vs primary target
+       SHOW NUMERATOR AND DENOMINATOR beside every percentage
+
+  2. Are they growing?
+       Sale YTD vs same period last year
+       OB YTD vs same period last year
+       prior-year quarterly actuals for shape
+
+  3. Are they covering their retailers?
+       total retailers, visited, non-visited
+       parties giving business, business per retailer
+       new retailers and new party orders
+
+  4. Are they cost-effective?
+       CTC and T.A. against sales received, clearly monthly or YTD
+       cost ratio with its basis stated
+       avg sales per day, avg visits per day, orders
+
+  5. Where is the risk?
+       segment concentration - HHI and coverage
+       dormant retailers count and value
+       any figure marked unavailable rather than zero
+
+  Each block: the numbers, then one short line of what it means. No
+  narrative beyond that.
+
+SHEET 2 - TARGETS AND ACHIEVEMENT
+  every target field, every achievement, each with numerator, denominator
+  and source. Elapsed months and how the to-date targets were derived.
+
+SHEET 3 - PERFORMANCE AND PRIOR PERIOD
+  order booking, direct dealer order, sales received
+  current FY vs prior FY, full year and by quarter
+  the Period Analysis table - YTD, Q1-Q4, Month, Full Year
+
+SHEET 4 - COVERAGE AND VISITS
+  retailer coverage, business breakdown, counterwise
+  lead and non-lead visits, distributor and direct dealer counters
+  productivity: working hours, GPS km, avg distance, orders
+
+SHEET 5 - COST
+  CTC monthly and YTD clearly distinguished, T.A., cost ratio with basis
+  blank and grey where the source does not exist - never zero
+
+SHEET 6 - SEGMENT SPREAD
+  register NET, segment coverage, cross-sell depth, HHI
+  NET by segment with value and share
+  STATE THE VOCABULARY: this uses secondary register brand segments, not
+  the six master categories, and say why
+
+SHEET 7 - RECONCILIATION
+  A-vs-B order booking: dashboard Data tab against working sheet
+  If source B has not resolved, say "not yet loaded", not blank
+
+SHEET 8 - DORMANT RETAILERS
+  all 63, not the top 20 shown on screen
+  name, last FY seen, last month, value
+
+SHEET 9 - PROFILE
+  state, working state, date of joining AS A DATE, employee code,
+  old/new, channel, target range
+
+SHEET 10 - INFO
+  member, head, designation, HQ
+  FY, period, filters, data-read timestamp
+  source of each dataset
+  provisional months
+  which figures are order booking and which are dispatch
+  any field omitted and why
+
+RULES
+  - Indian number format, as already applied elsewhere
+  - percentages as percentages, two decimals, with both sides shown
+  - three states: value, blank-grey-with-reason, genuine zero
+  - never label order booking as sales
+  - do NOT export the raw "OTHER" fields from A4 - export what they mean,
+    properly labelled, or leave them out
+  - freeze panes, sensible widths
+
+AFTER APPLYING, print the sheet list with row counts for this member, the
+Summary sheet as generated, and the Info sheet.
+```
+
+---
+
+## Notes
+
+- **A1 and A2 are real defects, not formatting.** A date shown as ₹41,004, and two
+  cost ratios a hundred times apart on the same page. Both would export as they
+  stand.
+- **A4 matters because those fields are already visible to users.** `DIFFERENCEIJCZ`
+  and `TARGETCALCULATEDBGBF` are internal column names with generated suffixes.
+  Either they mean something and deserve a label, or they should not be on the
+  page at all.
+- **Sheet 1 is the point of the whole request.** Everything else is organisation.
+  The summary answers five questions and shows both sides of every percentage —
+  which is the fix for the recurring problem of a figure that cannot be
+  reconciled from what is beside it.
+- **A5 is the honest exception.** Segment spread runs on brand segments from the
+  secondary register, which has no item code and cannot join the registry. That is
+  a real constraint, not an oversight — and the sheet should say so rather than
+  look inconsistent.
+
+## One thing the page already does well
+
+The banner *"FY2026-27 secondary register covers Jul-26–Jul-26 (1 month) only;
+later months are not loaded yet"* is exactly right. It states the limitation
+rather than showing a small number without explanation. Carry that wording into
+the export.
