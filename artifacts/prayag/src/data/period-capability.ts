@@ -40,7 +40,9 @@ const PAGE_CAPABILITIES: Record<string, PeriodCapability> = {
   // ── FY_ONLY — honours the FY selector; sub-year period has no effect ──────
   // Source is YTD-only or the page has not yet been wired for monthly slicing.
   // Move to FULL after fixing, one page at a time (PA2 priority order).
-  "overview":                "FY_ONLY",
+  // B1 performance keeps its existing open-FY semantics; the isolated B2
+  // SKU Pareto block explicitly consumes the selected FY and period range.
+  "overview":                "FULL",
   "pending":                 "FY_ONLY",   // Pending Orders
   "sources":                 "FY_ONLY",   // Data Sources
   "reports":                 "FY_ONLY",

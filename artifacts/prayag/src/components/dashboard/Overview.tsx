@@ -2,12 +2,14 @@ import { trunc2 } from "@/lib/trunc";
 import { formatCompact, CHART_COLORS } from "@/data/dataset";
 import { KPICard } from "./shared";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from "recharts";
+import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList, AreaChart, Area, ReferenceLine } from "recharts";
 import { CSVLink } from "react-csv";
 import { Download, IndianRupee, Target, Database, AlertCircle } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useGetOverviewPerformance } from "@workspace/api-client-react";
+import { useGetOverviewPerformance, useGetOverviewSkuPareto, type OverviewSkuParetoResponse } from "@workspace/api-client-react";
+import { useGlobalFilter } from "@/data/global-filter-context";
+import { prepareSkuParetoChartData } from "./OverviewSkuParetoLogic";
 import { prepareChartData, formatGrowthLabel, getNarrativeSummary, NarrativeSummary, getAchievementText, formatCroreExact, getAchievementDetails } from "./OverviewLogic";
 
 function OverviewSkeleton() {
@@ -96,8 +98,131 @@ function NarrativeBlock({ summary }: { summary: NarrativeSummary }) {
   );
 }
 
+function SkuParetoBlock({
+  data,
+  isLoading,
+  isError,
+  gridColor,
+}: {
+  data: OverviewSkuParetoResponse | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  gridColor: string;
+}) {
+  if (isLoading) {
+    return (
+      <Card data-testid="overview-sku-pareto-loading">
+        <CardHeader className="px-5 pt-5 pb-2"><Skeleton className="h-5 w-56" /></CardHeader>
+        <CardContent className="px-5 pb-5 pt-2"><Skeleton className="h-[260px] w-full" /></CardContent>
+      </Card>
+    );
+  }
+  if (isError || !data) {
+    return (
+      <Card data-testid="overview-sku-pareto-error">
+        <CardHeader><CardTitle className="text-base font-semibold">SKU revenue concentration</CardTitle></CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          SKU Pareto data is unavailable; the rest of Overview is still available.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const chartData = prepareSkuParetoChartData(data.entries);
+  const formatRank = (rank: number | null) => rank == null ? "—" : `Rank ${rank}`;
+
+  return (
+    <Card data-testid="overview-sku-pareto">
+      <CardHeader className="px-5 pt-5 pb-2">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="text-base font-semibold">Cumulative revenue by SKU rank</CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              {data.fy} · {data.periodLabel} · {data.skuCount.toLocaleString()} nonblank raw codes
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center text-xs" aria-label="Pareto threshold ranks">
+            <div className="rounded border border-border px-2 py-1"><div className="font-semibold">50%</div><div className="text-muted-foreground">{formatRank(data.thresholds.reach50Rank)}</div></div>
+            <div className="rounded border border-border px-2 py-1"><div className="font-semibold">80%</div><div className="text-muted-foreground">{formatRank(data.thresholds.reach80Rank)}</div></div>
+            <div className="rounded border border-border px-2 py-1"><div className="font-semibold">90%</div><div className="text-muted-foreground">{formatRank(data.thresholds.reach90Rank)}</div></div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="px-2 sm:px-5 pb-3 pt-2">
+        <div id="overview-sku-pareto-summary" className="sr-only">
+          <p>
+            Cumulative revenue chart for {data.skuCount.toLocaleString()} raw SKU codes,
+            total revenue {formatCompact(data.totalRevenueInr)}. 50 percent is reached at rank {formatRank(data.thresholds.reach50Rank)},
+            80 percent at {formatRank(data.thresholds.reach80Rank)}, and 90 percent at {formatRank(data.thresholds.reach90Rank)}.
+          </p>
+          <ol>
+            {data.entries.map((entry) => (
+              <li key={`summary-${entry.rank}`}>
+                Rank {entry.rank}, raw SKU code {entry.code}: {entry.sharePct.toFixed(4)} percent of revenue,
+                cumulative {entry.cumulativeSharePct.toFixed(4)} percent.
+              </li>
+            ))}
+          </ol>
+        </div>
+        {chartData.length === 0 ? (
+          <div className="h-[220px] flex items-center justify-center text-sm text-muted-foreground">No nonblank SKU revenue in this period.</div>
+        ) : (
+          <div role="img" aria-describedby="overview-sku-pareto-summary" aria-label="Cumulative revenue by SKU rank">
+            <ResponsiveContainer width="100%" height={260} debounce={0}>
+              <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 4, bottom: 8 }}>
+              <defs>
+                <linearGradient id="sku-pareto-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={CHART_COLORS.blue} stopOpacity={0.32} />
+                  <stop offset="100%" stopColor={CHART_COLORS.blue} stopOpacity={0.04} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={gridColor} />
+              <XAxis dataKey="rank" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+              <YAxis domain={[0, 100]} tickLine={false} axisLine={false} tick={{ fontSize: 11 }} tickFormatter={(value) => `${value}%`} width={42} />
+              <Tooltip
+                formatter={(value: number) => [`${value.toFixed(2)}%`, "Cumulative share"]}
+                labelFormatter={(label) => `SKU rank ${label}`}
+              />
+              <ReferenceLine y={50} stroke="#a1a1aa" strokeDasharray="4 4" />
+              <ReferenceLine y={80} stroke="#a1a1aa" strokeDasharray="4 4" />
+              <ReferenceLine y={90} stroke="#a1a1aa" strokeDasharray="4 4" />
+              <Area type="monotone" dataKey="cumulativeSharePct" name="Cumulative share" stroke={CHART_COLORS.blue} fill="url(#sku-pareto-fill)" strokeWidth={2} isAnimationActive={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        <div className="overflow-x-auto mt-2">
+          <table className="w-full text-xs" aria-label="Top ten SKU revenue share">
+            <thead><tr className="border-b border-border text-left text-muted-foreground"><th className="py-2 pr-3">Rank</th><th className="py-2 pr-3">Raw SKU code</th><th className="py-2 pr-3 text-right">Revenue</th><th className="py-2 text-right">Share</th></tr></thead>
+            <tbody>
+              {data.topTen.map((entry) => (
+                <tr key={`${entry.rank}-${entry.code}`} className="border-b border-border/50">
+                  <td className="py-1.5 pr-3 font-mono">{entry.rank}</td>
+                  <td className="py-1.5 pr-3 font-medium">{entry.code}</td>
+                  <td className="py-1.5 pr-3 text-right font-mono">{formatCompact(entry.revenueInr)}</td>
+                  <td className="py-1.5 text-right font-mono">{entry.sharePct.toFixed(2)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+      <CardFooter className="px-5 pb-5 pt-0 text-xs text-muted-foreground flex flex-col items-start gap-1">
+        <span>Total: {formatCompact(data.totalRevenueInr)} · Source: {data.source}</span>
+        <span>Basis: {data.basis}</span>
+      </CardFooter>
+    </Card>
+  );
+}
+
 export default function Overview() {
   const { data, isLoading, isError } = useGetOverviewPerformance();
+  const { fy, effectivePeriodFrom, effectivePrimaryPeriodTo } = useGlobalFilter();
+  const skuPareto = useGetOverviewSkuPareto({
+    fy,
+    monthFrom: effectivePeriodFrom,
+    monthTo: effectivePrimaryPeriodTo,
+  });
   const { theme } = useTheme();
   const isDark = theme === "dark";
 
@@ -200,6 +325,9 @@ export default function Overview() {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500" data-testid="overview-dashboard">
+      <p className="text-xs text-muted-foreground" data-testid="overview-period-scope">
+        Performance KPIs and trend retain the existing open-FY Overview basis. The selected FY and period above scope the SKU Pareto block below.
+      </p>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* KPI 1: YTD Sales vs Prior */}
         <KPICard
@@ -333,6 +461,12 @@ export default function Overview() {
           </span>
         </CardFooter>
       </Card>
+      <SkuParetoBlock
+        data={skuPareto.data}
+        isLoading={skuPareto.isLoading}
+        isError={skuPareto.isError}
+        gridColor={gridColor}
+      />
     </div>
   );
 }

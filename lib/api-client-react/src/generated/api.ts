@@ -53,6 +53,7 @@ import type {
   GetMgmtDistributorDeepDiveParams,
   GetMgmtDistributorTierOverrideParams,
   GetOverviewPerformanceParams,
+  GetOverviewSkuParetoParams,
   GetPrimaryTargetsParams,
   GetSalesPeopleTreeParams,
   GetSalesPersonDeepDiveParams,
@@ -76,6 +77,7 @@ import type {
   MgmtVerifyResult,
   OkResponse,
   OverviewPerformanceResponse,
+  OverviewSkuParetoResponse,
   PrimaryTargetsResponse,
   SalesRepReport,
   SalesTree,
@@ -825,6 +827,91 @@ export function useGetOverviewPerformance<TData = Awaited<ReturnType<typeof getO
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetOverviewPerformanceQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetOverviewSkuParetoUrl = (params?: GetOverviewSkuParetoParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/overview/sku-pareto?${stringifiedParams}` : `/api/overview/sku-pareto`
+}
+
+/**
+ * Returns revenue concentration by raw SKU code from the development database sale_line_current.amount. The selected fiscal month range is applied before grouping. This isolated block performs no joins to MRP, item master, catalogue, discontinued, margin, dormant, secondary, or risk tables.
+ * @summary Contract-first overview SKU Pareto
+ */
+export const getOverviewSkuPareto = async (params?: GetOverviewSkuParetoParams, options?: RequestInit): Promise<OverviewSkuParetoResponse> => {
+
+  return customFetch<OverviewSkuParetoResponse>(getGetOverviewSkuParetoUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOverviewSkuParetoQueryKey = (params?: GetOverviewSkuParetoParams,) => {
+    return [
+    `/api/overview/sku-pareto`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetOverviewSkuParetoQueryOptions = <TData = Awaited<ReturnType<typeof getOverviewSkuPareto>>, TError = ErrorType<ErrorResponse>>(params?: GetOverviewSkuParetoParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOverviewSkuPareto>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOverviewSkuParetoQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOverviewSkuPareto>>> = ({ signal }) => getOverviewSkuPareto(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOverviewSkuPareto>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOverviewSkuParetoQueryResult = NonNullable<Awaited<ReturnType<typeof getOverviewSkuPareto>>>
+export type GetOverviewSkuParetoQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Contract-first overview SKU Pareto
+ */
+
+export function useGetOverviewSkuPareto<TData = Awaited<ReturnType<typeof getOverviewSkuPareto>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetOverviewSkuParetoParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOverviewSkuPareto>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOverviewSkuParetoQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

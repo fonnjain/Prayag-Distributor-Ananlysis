@@ -885,6 +885,37 @@ export interface OverviewPerformanceResponse {
   coverage: OverviewPerformanceCoverage;
 }
 
+export interface OverviewSkuParetoEntry {
+  rank: number;
+  code: string;
+  revenueInr: number;
+  sharePct: number;
+  cumulativeSharePct: number;
+}
+
+export interface OverviewSkuParetoThresholds {
+  /** @nullable */
+  reach50Rank: number | null;
+  /** @nullable */
+  reach80Rank: number | null;
+  /** @nullable */
+  reach90Rank: number | null;
+}
+
+export interface OverviewSkuParetoResponse {
+  fy: string;
+  monthFrom: number;
+  monthTo: number;
+  periodLabel: string;
+  totalRevenueInr: number;
+  skuCount: number;
+  source: string;
+  basis: string;
+  thresholds: OverviewSkuParetoThresholds;
+  entries: OverviewSkuParetoEntry[];
+  topTen: OverviewSkuParetoEntry[];
+}
+
 export type AnalyticsReportYoy = {
   overall: AnalyticsYoy;
   territory: AnalyticsYoy;
@@ -2541,6 +2572,26 @@ export type GetOverviewPerformanceParams = {
  * @pattern ^\d{4}-\d{2}$
  */
 fy?: string;
+};
+
+export type GetOverviewSkuParetoParams = {
+/**
+ * Fiscal year, e.g. 2026-27 (defaults to the open fiscal year).
+ * @pattern ^\d{4}-\d{2}$
+ */
+fy?: string;
+/**
+ * First fiscal month, 1=Apr (defaults to Overview YTD start).
+ * @minimum 1
+ * @maximum 12
+ */
+monthFrom?: number;
+/**
+ * Last fiscal month, 12=Mar (defaults to Overview YTD end).
+ * @minimum 1
+ * @maximum 12
+ */
+monthTo?: number;
 };
 
 export type GetAiPayloadParams = {

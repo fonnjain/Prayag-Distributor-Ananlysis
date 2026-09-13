@@ -25,3 +25,10 @@ describe("snapshot-only report pages", () => {
     }
   });
 });
+
+describe("Overview period contract", () => {
+  it("exposes sub-year selection for the period-aware SKU Pareto block", () => {
+    expect(getCapabilityForPath("/")).toBe("FULL");
+    expect(getCapabilityForPath("/overview")).toBe("FULL");
+  });
+});

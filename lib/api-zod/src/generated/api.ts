@@ -341,6 +341,56 @@ export const GetOverviewPerformanceResponse = zod.object({
 
 
 /**
+ * Returns revenue concentration by raw SKU code from the development database sale_line_current.amount. The selected fiscal month range is applied before grouping. This isolated block performs no joins to MRP, item master, catalogue, discontinued, margin, dormant, secondary, or risk tables.
+ * @summary Contract-first overview SKU Pareto
+ */
+export const getOverviewSkuParetoQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+export const getOverviewSkuParetoQueryMonthFromMax = 12;
+export const getOverviewSkuParetoQueryMonthFromMultipleOf = 1;
+
+export const getOverviewSkuParetoQueryMonthToMax = 12;
+export const getOverviewSkuParetoQueryMonthToMultipleOf = 1;
+
+
+
+export const GetOverviewSkuParetoQueryParams = zod.object({
+  "fy": zod.coerce.string().regex(getOverviewSkuParetoQueryFyRegExp).optional().describe('Fiscal year, e.g. 2026-27 (defaults to the open fiscal year).'),
+  "monthFrom": zod.coerce.number().min(1).max(getOverviewSkuParetoQueryMonthFromMax).multipleOf(getOverviewSkuParetoQueryMonthFromMultipleOf).optional().describe('First fiscal month, 1=Apr (defaults to Overview YTD start).'),
+  "monthTo": zod.coerce.number().min(1).max(getOverviewSkuParetoQueryMonthToMax).multipleOf(getOverviewSkuParetoQueryMonthToMultipleOf).optional().describe('Last fiscal month, 12=Mar (defaults to Overview YTD end).')
+})
+
+export const GetOverviewSkuParetoResponse = zod.object({
+  "fy": zod.string(),
+  "monthFrom": zod.number(),
+  "monthTo": zod.number(),
+  "periodLabel": zod.string(),
+  "totalRevenueInr": zod.number(),
+  "skuCount": zod.number(),
+  "source": zod.string(),
+  "basis": zod.string(),
+  "thresholds": zod.object({
+  "reach50Rank": zod.number().nullable(),
+  "reach80Rank": zod.number().nullable(),
+  "reach90Rank": zod.number().nullable()
+}),
+  "entries": zod.array(zod.object({
+  "rank": zod.number(),
+  "code": zod.string(),
+  "revenueInr": zod.number(),
+  "sharePct": zod.number(),
+  "cumulativeSharePct": zod.number()
+})),
+  "topTen": zod.array(zod.object({
+  "rank": zod.number(),
+  "code": zod.string(),
+  "revenueInr": zod.number(),
+  "sharePct": zod.number(),
+  "cumulativeSharePct": zod.number()
+}))
+})
+
+
+/**
  * Returns the pre-computed, fully reconciled metrics payload for a member or state head. Every figure is computed by the app from already-loaded Deep Dive data. This endpoint makes NO Anthropic API call. Later phases receive this payload and generate narrative; they never do arithmetic on raw sheet rows. The payload covers: identity, targets, performance, achievement, coverage, customer states, top customers, concentration, visit analytics, visit capacity projection, cost and ROI, product-segment spread (closed FYs), prior-year comparisons, and data quality flags.
  * @summary Phase A1 — verified metrics payload (no AI call)
  */
