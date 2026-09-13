@@ -792,3 +792,17 @@ mtime_ms = 1789228755315
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/621e19d8-994d-4dca-aafa-c1ed7f46b29b/5d6ef935-5426-494c-bfdc-1935ea6f344d"
 storage_version_token = "1789228768807913"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "MGF3LSZSrhUowHinpJz9z"
+uri = "file://reports/prompt-79-read-only-investigation.docx"
+type = "word_document"
+title = "Prompt 79 — Read-Only Investigation Report"
+description = "Downloadable Word document covering audit-count instability, the PSCode3 brand mirror, and missing August 2026 SKU data."
+logical_id = "3d3e66bf-036b-4646-93bf-49766fe775e3"
+content_hash = "sha256:8ec29e9ff35045ee26ca112ba0664395fe9467a45f5fb134eafdb77c7007abe6"
+size = 44447
+mtime_ms = 1789288101747
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/3d3e66bf-036b-4646-93bf-49766fe775e3/d9d7d930-5e84-4397-82b9-b00b5476e289"
+storage_version_token = "1789288109075376"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
