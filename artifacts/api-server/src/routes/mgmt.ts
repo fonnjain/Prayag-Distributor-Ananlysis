@@ -63,6 +63,7 @@ import { isFrozen } from "../lib/customers/registerSync.js";
 import { monthFreezeAt } from "../lib/registers/monthlyReplace.js";
 import {
   buildDeepDiveExport,
+  buildDeepDivePeriodAnalysis,
   type DeepDiveMonthlyRow,
 } from "../lib/mgmt/deepDiveExport.js";
 import { provisionalMonthsExportInfo } from "../lib/exportInfo.js";
@@ -1475,10 +1476,38 @@ router.get("/mgmt/deep-dive/export", async (req: Request, res: Response): Promis
           achievementPct: r.achievementPct == null ? null : Number(r.achievementPct),
           notYetRecorded: Boolean(r.notYetRecorded),
         }));
+        const priorQuarterly = [
+          result.kpis.lastYearQ1, result.kpis.lastYearQ2,
+          result.kpis.lastYearQ3, result.kpis.lastYearQ4,
+        ];
+        const sortedPeriodMonths = periodMonths ? [...new Set(periodMonths)].sort((a, b) => a - b) : [];
+        const quarterIndex = sortedPeriodMonths.length === 3
+          && sortedPeriodMonths[2] - sortedPeriodMonths[0] === 2
+          && sortedPeriodMonths.every((month, i) => month === sortedPeriodMonths[0] + i)
+          && (sortedPeriodMonths[0] - 1) % 3 === 0
+          ? Math.floor((sortedPeriodMonths[0] - 1) / 3) : null;
+        const exactFullYear = sortedPeriodMonths.length === 12
+          && sortedPeriodMonths.every((month, i) => month === i + 1);
+        const priorFullYearOb = exactFullYear && priorQuarterly.every((v): v is number => v != null)
+          ? priorQuarterly.reduce<number>((sum, v) => sum + v, 0) : null;
+        const priorSamePeriodOb = quarterIndex != null && priorQuarterly[quarterIndex] != null
+          ? priorQuarterly[quarterIndex]
+          : exactFullYear ? priorFullYearOb : null;
         return buildDeepDiveExport({
           fy,
           kpis: result.kpis,
           monthlyRows,
+          periodAnalysis: buildDeepDivePeriodAnalysis(
+            result.retailerDetail?.status === "ok" ? result.retailerDetail.months : null,
+            periodMonths,
+            monthlyRows,
+            {
+              priorSamePeriodOb,
+              priorFullYearOb,
+              priorSamePeriodSales: null,
+              priorFullYearSales: null,
+            },
+          ),
           periodLabel: period.label,
           periodMonths,
           dataReadAt: result.dataReadAt,
@@ -1489,6 +1518,10 @@ router.get("/mgmt/deep-dive/export", async (req: Request, res: Response): Promis
           retailerRowCount: result.retailerDetail?.status === "ok"
             ? result.retailerDetail.rows.length
             : null,
+          retailerDetail: result.retailerDetail,
+          roiCost: result.roiCost,
+          skuSpread: result.skuSpread,
+          winBack: result.winBack,
           skuSpreadIncluded: result.skuSpread != null,
           winBackIncluded: result.winBack != null,
         });

@@ -4,3 +4,4 @@
 // the Zod schema constants (e.g. GetSalesPersonReportsParams = zod.object({...}))
 // and the identically-named TypeScript interfaces in ./generated/types.
 export * from "./generated/api";
+export * from "./salesDeepDiveExtraManifest";

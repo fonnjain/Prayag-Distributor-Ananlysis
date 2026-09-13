@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { achBandBg, achBandText } from "@/lib/achievementBands";
 import { SalesPersonReport } from "./SalesPersonReport";
 import { useGlobalFilter, isFyClosed } from "@/data/global-filter-context";
+import { SALES_DEEP_DIVE_EXTRA_MANIFEST } from "@workspace/api-zod";
 
 const BASE = import.meta.env.BASE_URL ?? "/";
 const API = `${BASE}api`.replace(/\/\//g, "/");
@@ -2614,6 +2615,7 @@ export default function SalesDeepDive() {
                       disabled={exporting}
                       className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium hover:bg-muted/50 disabled:cursor-wait disabled:opacity-60"
                       data-testid="button-download-sales-deep-dive"
+                      title="Exports the resolved page figures into ten auditable sheets; unavailable values remain blank and grey with a reason."
                     >
                       {exporting
                         ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
@@ -3076,7 +3078,7 @@ function ExtraFieldsSections({ extra }: { extra: Record<string, number | string 
   const sections = EXTRA_SECTION_GROUPS.map(({ section, keys }) => {
     const entries = keys.flatMap((k) => {
       if (!(k in extra)) return [];
-      if (SUPPRESS_KEYS.has(k)) return [];
+      if (SUPPRESS_KEYS.has(k) || SALES_DEEP_DIVE_EXTRA_MANIFEST[k]?.suppressed === true) return [];
       listed.add(k);
       return [[k, extra[k]] as [string, number | string | null]];
     });
@@ -3084,7 +3086,10 @@ function ExtraFieldsSections({ extra }: { extra: Record<string, number | string 
   }).filter((s) => s.entries.length > 0);
 
   // Catch anything not in any group (suppressed keys are silently dropped)
-  const otherEntries = Object.entries(extra).filter(([k]) => !listed.has(k) && !SUPPRESS_KEYS.has(k));
+  const otherEntries = Object.entries(extra).filter(([k]) =>
+    !listed.has(k) && !SUPPRESS_KEYS.has(k) &&
+    SALES_DEEP_DIVE_EXTRA_MANIFEST[k]?.suppressed !== true &&
+    SALES_DEEP_DIVE_EXTRA_MANIFEST[k] != null);
   if (otherEntries.length > 0) {
     sections.push({ section: "Other", entries: otherEntries as [string, number | string | null][] });
   }
@@ -3097,7 +3102,7 @@ function ExtraFieldsSections({ extra }: { extra: Record<string, number | string 
           {entries.map(([k, v]) => (
             <Tile
               key={k}
-              label={EXTRA_LABELS[k] ?? k.charAt(0) + k.slice(1).toLowerCase()}
+              label={SALES_DEEP_DIVE_EXTRA_MANIFEST[k]?.label ?? EXTRA_LABELS[k] ?? k.charAt(0) + k.slice(1).toLowerCase()}
               value={fmtExtra(k, v)}
             />
           ))}
