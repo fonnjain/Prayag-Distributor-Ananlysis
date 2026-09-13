@@ -20,12 +20,15 @@ import {
 import { upsertMemberTargets } from "../lib/mgmt/memberTargetsStore.js";
 import { invalidateMgmtDataCache } from "./mgmt.js";
 import { getCachedStateDashboard, loadStateDashboard } from "../lib/mgmt/stateDashboard.js";
-import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
+import { invalidateSnapshots, serveWithSnapshot } from "../lib/payloadSnapshot.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
 
 const router: IRouter = Router();
 
 const TARGETS_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
+// v1 could persist a response before the asynchronous State Head Dashboard
+// load completed, leaving valid secondary plans represented as null/zero.
+const TARGETS_SNAPSHOT_VERSION = "v2";
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 // Default FY derives from the calendar so the page never opens on a stale year.
@@ -60,13 +63,12 @@ router.get("/targets", async (req: Request, res: Response): Promise<void> => {
 
     let secDash = getCachedStateDashboard(fy);
     if (!secDash) {
-      if (isFrozen(fy)) {
-        // Frozen FY: the snapshot may be served as final, so it must not be
-        // persisted with missing secondary plans — block on the load once.
-        secDash = await loadStateDashboard(fy).catch(() => null);
-      } else {
-        void loadStateDashboard(fy).catch(() => {});
-      }
+      // Never persist a transient null-plan payload. Existing snapshots remain
+      // available while this complete refresh runs in the background.
+      secDash = await loadStateDashboard(fy);
+    }
+    if (!secDash) {
+      throw new Error(`Secondary target plans are unavailable for FY${fy}`);
     }
 
     const secPlanByKey = new Map<string, (number | null)[]>();
@@ -110,7 +112,7 @@ router.get("/targets", async (req: Request, res: Response): Promise<void> => {
     // space stays bounded.
     const payload = !stateHead
       ? await serveWithSnapshot({
-          key: `targets|${fy}`,
+          key: `targets|${TARGETS_SNAPSHOT_VERSION}|${fy}`,
           ttlMs: TARGETS_SNAPSHOT_TTL_MS,
           build,
           log: req.log,
@@ -291,6 +293,7 @@ router.post("/targets", async (req: Request, res: Response): Promise<void> => {
     // Reports and management snapshots read targets via loadTargetsForFy;
     // drop cached payloads so the new values show up immediately.
     invalidateMgmtDataCache(fy);
+    invalidateSnapshots("targets|");
     req.log.info(
       { fy, updated: result.updated, appended: result.appended, updatedBy },
       "member targets saved",

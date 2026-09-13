@@ -247,6 +247,11 @@ export default function SecondaryTargetsEditor() {
           <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading...
           </div>
+        ) : targets.isError ? (
+          <div className="mx-6 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            Accurate secondary targets are temporarily unavailable. Existing values were not replaced with zero; please retry in a minute.
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -267,10 +272,9 @@ export default function SecondaryTargetsEditor() {
               <tbody className="divide-y">
                 {members.map((m, idx) => {
                   const annual = m.saved?.annual.secondary ?? 0;
-                  const monthlyArr = coerceMonthly(m.saved?.monthly.secondary ?? []);
-                  const savedDisplay = annual > 0 || monthlyArr.length > 0
-                    ? toDisplayValues(annual, monthlyArr, cadence)
-                    : Array<number>(colCount).fill(0);
+                  // Use the same source precedence as edit initialization so
+                  // State Head Dashboard plans remain visible after refetch.
+                  const savedDisplay = savedDisplayVals(m, cadence);
                   const vals = edits.get(m.name) ?? emptyEdits(cadence);
                   const isDirty = vals.some((v, i) => parseCr(v) !== (savedDisplay[i] ?? 0));
                   const hasSaved = annual > 0;
