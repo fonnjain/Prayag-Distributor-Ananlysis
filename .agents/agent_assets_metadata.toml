@@ -834,3 +834,17 @@ mtime_ms = 1789298098933
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/e4571be9-4161-41bb-9fc1-f676c6963e0b/524f7009-c489-447a-a10f-2a28534aa91f"
 storage_version_token = "1789298184719879"
 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[[outputs]]
+id = "6jl6W6s6e4nent1teVOlg"
+uri = "file://reports/prompt-82-overview-redesign-read-only-assessment.docx"
+type = "word_document"
+title = "Prompt 82 — Overview Redesign Assessment"
+description = "Word document containing the complete read-only data assessment, design comments, verified figures, source notes, and recommended build sequence."
+logical_id = "9666543f-8d6e-48b3-b419-363e5f7a2a64"
+content_hash = "sha256:af2d3f855e8aaa99576b5d6e7c7ee894fc432348ca3241881a6e8a5a713c3ae8"
+size = 43471
+mtime_ms = 1789298494536
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/9666543f-8d6e-48b3-b419-363e5f7a2a64/84210395-5258-429c-b45a-1a17c6ffc00a"
+storage_version_token = "1789298500785721"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
