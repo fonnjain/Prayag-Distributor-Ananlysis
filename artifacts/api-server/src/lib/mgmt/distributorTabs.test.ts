@@ -143,14 +143,16 @@ beforeAll(async () => {
     `ALTER TABLE ${SCHEMA}.secondary_sku_line ADD COLUMN IF NOT EXISTS retailer_id text`,
   );
 
-  // Minimal sale_line_current table — empty; primary queries return no rows
-  // (buildSecondaryTab proceeds with primaryMatched=false, which is valid).
+  // Minimal sale_line_current table.  The qty column is required by
+  // computeCategoryMultipliers, which derives the category price index from
+  // amount-per-unit across the two FYs.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS ${SCHEMA}.sale_line_current (
       fy          text,
       month_label text,
       customer    text,
       amount      numeric,
+      qty         numeric,
       is_territory boolean,
       state_canon text,
       station     text,
@@ -158,11 +160,37 @@ beforeAll(async () => {
       group_canon text
     )
   `);
+  // Older test schemas predate the quantity column.
+  await pool.query(
+    `ALTER TABLE ${SCHEMA}.sale_line_current ADD COLUMN IF NOT EXISTS qty numeric`,
+  );
 
   // Remove leftovers from any previous interrupted run.
   await pool.query(
     `DELETE FROM ${SCHEMA}.secondary_sku_line WHERE fy IN ($1, $2)`,
     [CUR_FY, BASE_FY],
+  );
+  await pool.query(
+    `DELETE FROM ${SCHEMA}.sale_line_current WHERE fy IN ($1, $2)`,
+    [CUR_FY, BASE_FY],
+  );
+
+  // Seed primary-register rows for the category price index.  CODE1 and CODE2
+  // are both in SegA and retain the same baseline quantity while their prices
+  // rise 20% from BASE_FY to CUR_FY:
+  //   BASE_FY: 30 units × ₹100 = ₹3,000
+  //   CUR_FY:  30 units × ₹120 = ₹3,600
+  // computeCategoryMultipliers therefore returns a deterministic SegA
+  // multiplier of 1.2 for the SKU-evolution real-terms assertions below.
+  await pool.query(
+    `INSERT INTO ${SCHEMA}.sale_line_current
+       (fy, month_label, customer, amount, qty, is_territory, code, group_canon)
+     VALUES
+       ($1, 'Apr-25', $3, 1000, 10, true, 'CODE1', 'SegA'),
+       ($1, 'May-25', $3, 2000, 20, true, 'CODE2', 'SegA'),
+       ($2, 'Apr-26', $3, 1200, 10, true, 'CODE1', 'SegA'),
+       ($2, 'May-26', $3, 2400, 20, true, 'CODE2', 'SegA')`,
+    [BASE_FY, CUR_FY, TEST_DIST],
   );
 
   // Seed current FY rows.
@@ -259,6 +287,10 @@ beforeAll(async () => {
 afterAll(async () => {
   await pool.query(
     `DELETE FROM ${SCHEMA}.secondary_sku_line WHERE fy IN ($1, $2)`,
+    [CUR_FY, BASE_FY],
+  );
+  await pool.query(
+    `DELETE FROM ${SCHEMA}.sale_line_current WHERE fy IN ($1, $2)`,
     [CUR_FY, BASE_FY],
   );
 });
@@ -505,6 +537,26 @@ describe("buildSkuEvolution — baseline months through the full query chain", (
     expect(side.totalBaseline).toBeGreaterThan(0);
     // And existing SKU (CODE1 present in both sides) must be found.
     expect(side.existing.codes).toBeGreaterThan(0);
+  });
+
+  it("computes deterministic real-terms values from the category price index", async () => {
+    const result = await buildSkuEvolution(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    expect(result.secondary).not.toBeNull();
+    const side = result.secondary!;
+
+    // Keep explicit presence checks so a missing category index cannot silently
+    // turn the real-terms fields back into nullable values.
+    expect(side.deflator).not.toBeNull();
+    expect(side.realCurrent).not.toBeNull();
+    expect(side.realGrowth).not.toBeNull();
+
+    // SegA prices rise from ₹100/unit to ₹120/unit in the seeded sale register.
+    // The secondary side is ₹1,700 baseline (including the dormant-retailer
+    // fixture rows) and ₹2,300 current for the selected months, hence
+    // 2300 / 1.2 and (2300 / 1.2) - 1700 in real terms.
+    expect(side.deflator).toBeCloseTo(1.2, 10);
+    expect(side.realCurrent).toBeCloseTo(2300 / 1.2, 10);
+    expect(side.realGrowth).toBeCloseTo(2300 / 1.2 - 1700, 10);
   });
 });
 
