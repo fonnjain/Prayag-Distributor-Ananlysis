@@ -90,7 +90,7 @@ describe("Product-Wise month immutability", () => {
   });
 
   it("refuses every frozen-month replacement, including a month that was never loaded", () => {
-    const frozen = new Date("2026-09-07T00:00:00Z");
+    const frozen = new Date("2026-11-30T18:30:00Z");
     expect(productWiseAug26MonthStatus(true, null, frozen)).toBe("frozen_verified");
     expect(productWiseAug26MonthStatus(false, null, frozen)).toBe("frozen_verified");
     expect(() => assertProductWiseAug26MonthWritable({ hasLoad: true, closedAt: null }, frozen))
@@ -101,19 +101,12 @@ describe("Product-Wise month immutability", () => {
 });
 
 describe("Product-Wise frozen/open range overlap", () => {
-  it("uses monthFreezeAt directly: August is frozen on the 7th while September remains open", () => {
-    const now = new Date("2026-09-07T00:00:00.000Z");
+  it("uses the current four-month rule: Aug-26 freezes at 1 Dec 2026 00:00 IST", () => {
+    const now = new Date("2026-11-30T18:30:00.000Z");
     const august = productWiseRangeMonthPlan({
       month: "Aug-26",
       incomingRows: 8_900,
       rowsBefore: 8_602,
-      sharedFrozenAt: null,
-      now,
-    });
-    const september = productWiseRangeMonthPlan({
-      month: "Sep-26",
-      incomingRows: 1_250,
-      rowsBefore: 17,
       sharedFrozenAt: null,
       now,
     });
@@ -124,18 +117,12 @@ describe("Product-Wise frozen/open range overlap", () => {
       rowsAfter: 8_602,
       freezeAt: monthFreezeAt("Aug-26"),
     });
-    expect(september).toMatchObject({
-      action: "loaded",
-      rowsBefore: 17,
-      rowsAfter: 1_250,
-      freezeAt: null,
-    });
     const beforeFreeze = productWiseRangeMonthPlan({
       month: "Aug-26",
       incomingRows: 8_900,
       rowsBefore: 8_602,
       sharedFrozenAt: null,
-      now: new Date("2026-09-06T23:59:59.999Z"),
+      now: new Date("2026-11-30T18:29:59.999Z"),
     });
     expect(beforeFreeze).toMatchObject({
       action: "loaded",
@@ -143,6 +130,7 @@ describe("Product-Wise frozen/open range overlap", () => {
       rowsAfter: 8_900,
       freezeAt: null,
     });
+    expect(monthFreezeAt("Aug-26")).toEqual(new Date("2026-11-30T18:30:00.000Z"));
     expect(productWiseMonthFreezeDecision(
       "Aug-26",
       null,

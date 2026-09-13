@@ -34,6 +34,7 @@ export type HealthCheck = {
   actual: number | null;
   deltaPct: number | null;
   status: CheckStatus;
+  evaluation?: "evaluated" | "not_evaluated";
   note?: string;
 };
 
@@ -43,14 +44,79 @@ export type CheckGroup = {
   available: boolean;
   pendingNote?: string;
   checks: HealthCheck[];
+  /** The checks this group promised before reading any of its dependencies. */
+  expectedKeys: string[];
+  totals: CheckTotals;
+};
+
+export type CheckTotals = {
+  expected: number;
+  evaluated: number;
+  notEvaluated: number;
 };
 
 export type FullVerifyReport = {
   fy: string;
   overall: "pass" | "warn" | "fail";
   groups: CheckGroup[];
+  totals: CheckTotals;
+  meta?: { snapshotSavedAt?: number; refreshing?: boolean; stale?: boolean };
   computedAt: string;
 };
+
+/**
+ * Complete a group against its pre-declared manifest.  A dependency failure
+ * must not make checks disappear: missing manifest entries are represented as
+ * pending rows (the existing pending/skip semantics remain unchanged).
+ */
+export function finalizeCheckGroup(group: Omit<CheckGroup, "expectedKeys" | "totals">, manifest: readonly string[]): CheckGroup {
+  const expectedKeys = [...new Set(manifest)];
+  const checks = [...group.checks];
+  const present = new Set(checks.map((check) => check.key));
+  const undeclared = checks.filter((check) => !expectedKeys.includes(check.key));
+  if (undeclared.length > 0) {
+    throw new Error(`Audit group ${group.id} produced undeclared check key(s): ${undeclared.map((check) => check.key).join(", ")}`);
+  }
+  for (const key of expectedKeys) {
+    if (!present.has(key)) {
+      checks.push({
+        key,
+        label: `Not evaluated — ${key}`,
+        unit: "text",
+        expected: null,
+        actual: null,
+        deltaPct: null,
+        status: "pending",
+        evaluation: "not_evaluated",
+        note: `NOT EVALUATED: expected check ${key} did not run because a dependency failed or was unavailable.${group.pendingNote ? ` ${group.pendingNote}` : ""}`,
+      });
+    }
+  }
+  const finalizedChecks = checks.map((check) => ({
+    ...check,
+    evaluation: check.evaluation ?? (check.note?.includes("NOT EVALUATED") ? "not_evaluated" : "evaluated"),
+  }));
+  const evaluated = finalizedChecks.filter((check) => check.evaluation === "evaluated").length;
+  return {
+    ...group,
+    checks: finalizedChecks,
+    expectedKeys,
+    totals: { expected: expectedKeys.length, evaluated, notEvaluated: expectedKeys.length - evaluated },
+  };
+}
+
+export function totalsForGroups(groups: readonly CheckGroup[]): CheckTotals {
+  return groups.reduce(
+    (totals, group) => {
+      return {
+        expected: totals.expected + group.totals.expected,
+        evaluated: totals.evaluated + group.totals.evaluated,
+        notEvaluated: totals.notEvaluated + group.totals.notEvaluated,
+      };
+    },
+    { expected: 0, evaluated: 0, notEvaluated: 0 },
+  );
+}
 
 // ── Anchor config types ────────────────────────────────────────────────────────
 
@@ -191,7 +257,7 @@ function tgtPeriodSec(target: TargetRow, mFrom: number, mTo: number): number | n
 
 // ── Group A + B: Targets and Achievement ──────────────────────────────────────
 
-async function runTargetsAndAchievementSet(fy: string): Promise<CheckGroup> {
+async function evaluateTargetsAndAchievementSet(fy: string): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const anchors = getAnchors();
   // Target Master is retired — secondary targets and CTC now come live from the
   // STATE HEAD DASHBOARD Google Sheet. All Group A and B checks are disabled.
@@ -210,11 +276,27 @@ async function runTargetsAndAchievementSet(fy: string): Promise<CheckGroup> {
 
   try {
     // Load both FY target maps (always needed for A1 cross-FY total row count)
-    const [map2526, map2627, roster] = await Promise.all([
-      loadTargetsForFy("2025-26").catch((): Map<string, TargetRow> => new Map()),
-      loadTargetsForFy("2026-27").catch((): Map<string, TargetRow> => new Map()),
-      loadRoster().catch(() => ({ members: [] as { normKey: string }[] })),
+    const [map2526Result, map2627Result, rosterResult] = await Promise.allSettled([
+      loadTargetsForFy("2025-26"),
+      loadTargetsForFy("2026-27"),
+      loadRoster(),
     ]);
+    if (map2526Result.status === "rejected" || map2627Result.status === "rejected" || rosterResult.status === "rejected") {
+      logger.warn(
+        { fy, errors: [map2526Result, map2627Result, rosterResult].filter((r) => r.status === "rejected").map((r) => String(r.reason)) },
+        "verifyFull: target dependency failed",
+      );
+      return {
+        id: "targets_achievement",
+        label: "Groups A + B — Target Load and Achievement",
+        available: false,
+        pendingNote: "Target Master or roster dependency failed — checks were not evaluated.",
+        checks: [],
+      };
+    }
+    const map2526 = map2526Result.value;
+    const map2627 = map2627Result.value;
+    const roster = rosterResult.value;
 
     const ta = anchors.target_anchors;
     const targetAnchor2526 = ta?.["2025-26"] as TargetFyAnchor | undefined;
@@ -401,9 +483,12 @@ async function runTargetsAndAchievementSet(fy: string): Promise<CheckGroup> {
         `Booking: ₹${(agg2526.totalSaleAmount / 1e7).toFixed(2)} Cr; Target: ₹${(totalSecTarget2526 / 1e7).toFixed(2)} Cr`,
       ));
     } else if (!agg2526) {
-      checks.push(pendingCheck("B1_fy2526_company_achievement",
+      checks.push({ ...pendingCheck("B1_fy2526_company_achievement",
         "B1 — FY2025-26 company achievement",
-        "Secondary order booking file for FY2025-26 not available."));
+        "Secondary order booking file for FY2025-26 not available."),
+        evaluation: "not_evaluated",
+        note: "NOT EVALUATED: Secondary order booking file for FY2025-26 not available.",
+      });
     } else {
       checks.push(skipCheck("B1_fy2526_company_achievement",
         "B1 — FY2025-26 company achievement",
@@ -415,9 +500,16 @@ async function runTargetsAndAchievementSet(fy: string): Promise<CheckGroup> {
     if (Object.keys(memberAchievements).length > 0) {
       const agg2627 = await loadOrderFile("2026-27").catch(() => null);
       if (!agg2627) {
-        checks.push(pendingCheck("B2_B3_member_achievements",
-          "B2/B3 — FY2026-27 per-member Q1 achievement",
-          "FY2026-27 secondary order booking file not yet available (expected known gap)."));
+        let checkIdx = 2;
+        for (const memberName of Object.keys(memberAchievements)) {
+          const key = `B${checkIdx}_${normName(memberName)}_achievement`;
+          checks.push({
+            ...pendingCheck(key, `B${checkIdx} — ${memberName} FY2026-27 Q1 achievement`, "FY2026-27 secondary order booking file not yet available (expected known gap)."),
+             evaluation: "not_evaluated",
+             note: "NOT EVALUATED: FY2026-27 secondary order booking file not yet available.",
+          });
+          checkIdx++;
+        }
       } else {
         let checkIdx = 2;
         for (const [memberName, expectedAch] of Object.entries(memberAchievements)) {
@@ -477,7 +569,7 @@ async function runTargetsAndAchievementSet(fy: string): Promise<CheckGroup> {
 // ── Group C: Sale vs Order Booking ────────────────────────────────────────────
 // Always covers both FYs regardless of the fy query param.
 
-async function runSaleOrderBookingSet(): Promise<CheckGroup> {
+async function evaluateSaleOrderBookingSet(): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const anchors = getAnchors();
   const checks: HealthCheck[] = [];
   const primary2526 = anchors.primary_anchors["2025-26"] as PrimaryFyAnchor | undefined;
@@ -507,11 +599,11 @@ async function runSaleOrderBookingSet(): Promise<CheckGroup> {
       `Source: Secondary Order Booking FY2025-26 (spreadsheet 1aNQ2Tcz…). Anchor is the STATE HEAD DASHBOARD figure (₹231.09 Cr). The retired transaction-file basis (₹240.14 Cr) is a historical reference only.`,
     ));
   } else {
-    checks.push(pendingCheck(
+    checks.push({ ...pendingCheck(
       "C1_fy2526_order_booking",
       "C1 — FY2025-26 Order Booking",
       "Secondary FY2025-26 order booking file not available.",
-    ));
+    ), evaluation: "not_evaluated", note: "NOT EVALUATED: Secondary FY2025-26 order booking file not available." });
   }
 
   // C2: FY2025-26 Sale (primary dispatch, Taxable Value)
@@ -529,7 +621,7 @@ async function runSaleOrderBookingSet(): Promise<CheckGroup> {
     const errNote = sale2526?.error
       ? `Load error: ${sale2526.error}`
       : "State Head Sale 2025-26 sheet returned no data — check sheet ID and access.";
-    checks.push(pendingCheck("C2_fy2526_sale", "C2 — FY2025-26 Sale", errNote));
+    checks.push({ ...pendingCheck("C2_fy2526_sale", "C2 — FY2025-26 Sale", errNote), evaluation: "not_evaluated", note: `NOT EVALUATED: ${errNote}` });
   }
 
   // C3: Sale ≠ Order Booking (hard fail if equal; must differ by > 30%)
@@ -553,11 +645,11 @@ async function runSaleOrderBookingSet(): Promise<CheckGroup> {
           : `Sale ₹${(sale2526Total / 1e7).toFixed(2)} Cr vs Booking ₹${(ob2526Total / 1e7).toFixed(2)} Cr — difference ${diffPct.toFixed(1)}%.`,
     });
   } else {
-    checks.push(skipCheck(
+    checks.push({ ...skipCheck(
       "C3_sale_ne_order_booking",
       "C3 — FY2025-26 Sale ≠ Order Booking",
       "Cannot compare — one or both sources unavailable.",
-    ));
+    ), evaluation: "not_evaluated", note: "NOT EVALUATED: Cannot compare — one or both sources unavailable." });
   }
 
   // C4: FY2026-27 PRIMARY Order Booking (taxable value from order-book sheet).
@@ -587,7 +679,7 @@ async function runSaleOrderBookingSet(): Promise<CheckGroup> {
     const errNote = obs2627?.error
       ? `Load error: ${obs2627.error}`
       : "Order Book FY2026-27 returned no data.";
-    checks.push(pendingCheck("C4_fy2627_order_booking", "C4 — FY2026-27 Primary Order Booking", errNote));
+    checks.push({ ...pendingCheck("C4_fy2627_order_booking", "C4 — FY2026-27 Primary Order Booking", errNote), evaluation: "not_evaluated", note: `NOT EVALUATED: ${errNote}` });
   }
 
   // C5: FY2026-27 Order Booking = pending (no secondary file exists)
@@ -623,7 +715,7 @@ async function runSaleOrderBookingSet(): Promise<CheckGroup> {
 
 // ── Group E: Name matching ─────────────────────────────────────────────────────
 
-async function runNameMatchSet(fy: string): Promise<CheckGroup> {
+async function evaluateNameMatchSet(fy: string): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const anchors = getAnchors();
   // Target Master is retired — name-matching checks no longer applicable.
   if (anchors.target_anchors?.retired) {
@@ -640,10 +732,21 @@ async function runNameMatchSet(fy: string): Promise<CheckGroup> {
   const checks: HealthCheck[] = [];
 
   try {
-    const [targetMap, roster] = await Promise.all([
-      loadTargetsForFy(fy).catch((): Map<string, TargetRow> => new Map()),
-      loadRoster().catch(() => ({ members: [] as { normKey: string; name: string }[] })),
+    const [targetResult, rosterResult] = await Promise.allSettled([
+      loadTargetsForFy(fy),
+      loadRoster(),
     ]);
+    if (targetResult.status === "rejected" || rosterResult.status === "rejected") {
+      return {
+        id: "name_match",
+        label: `Group E — Name Matching (${fy})`,
+        available: false,
+        pendingNote: "Target Master or roster dependency failed — checks were not evaluated.",
+        checks: [],
+      };
+    }
+    const targetMap = targetResult.value;
+    const roster = rosterResult.value;
 
     if (targetMap.size === 0) {
       return {
@@ -774,7 +877,7 @@ async function runNameMatchSet(fy: string): Promise<CheckGroup> {
 
 // ── Set 1: Secondary order booking (contains Group D per-head checks) ──────────
 
-async function runSecondarySet(fy: string): Promise<CheckGroup> {
+async function evaluateSecondarySet(fy: string): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   if (!hasVerifyAnchors(fy)) {
     return {
       id: "secondary",
@@ -818,7 +921,7 @@ async function runSecondarySet(fy: string): Promise<CheckGroup> {
 
 type PrimaryAnchors = Record<string, PrimaryFyAnchor | unknown>;
 
-async function runPrimarySet(fy: string): Promise<CheckGroup> {
+async function evaluatePrimarySet(fy: string): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const anchors = getAnchors();
   const fyAnchor = (anchors.primary_anchors as PrimaryAnchors)[fy] as PrimaryFyAnchor | undefined;
 
@@ -959,7 +1062,7 @@ async function probeSheet(spreadsheetId: string): Promise<SourceProbeResult> {
   }
 }
 
-async function runSourceHealthSet(): Promise<CheckGroup> {
+async function evaluateSourceHealthSet(): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const anchors = getAnchors();
   const checks: HealthCheck[] = await Promise.all(
     anchors.source_list.map(async (src): Promise<HealthCheck> => {
@@ -986,6 +1089,89 @@ async function runSourceHealthSet(): Promise<CheckGroup> {
 
 // ── Entry point ────────────────────────────────────────────────────────────────
 
+function coreManifest(id: string, fy: string): string[] {
+  const anchors = getAnchors();
+  if (id === "targets_achievement") {
+    const target = anchors.target_anchors;
+    if (target?.retired) return [];
+    const keys = [
+      "A1_total_rows", "A2_fy2526_with_target", "A3_fy2627_with_target",
+      "A4_fy2526_target_total", "A5_fy2627_q1_target", "A6_fy2526_no_target",
+      "A7_fy2627_no_target", "A8_sujan_ghata_fy2526", "A9_monthly_only_violation",
+      "B1_fy2526_company_achievement", "B4_no_zero_pct_without_target",
+    ];
+    const a2627 = target?.["2026-27"] as TargetFyAnchor | undefined;
+    if (a2627?.targetMonthlyRatio != null) keys.push("B_monthly_ratio");
+    let achievementIndex = 2;
+    for (const memberName of Object.keys(a2627?.memberAchievements ?? {})) {
+      keys.push(`B${achievementIndex}_${normName(memberName)}_achievement`);
+      achievementIndex++;
+    }
+    return keys;
+  }
+  if (id === "sale_order_booking") {
+    return ["C1_fy2526_order_booking", "C2_fy2526_sale", "C3_sale_ne_order_booking", "C4_fy2627_order_booking", "C5_fy2627_order_booking", "C6_sale_source_attribution"];
+  }
+  if (id === "name_match") {
+    return fy === "2026-27"
+      ? ["E1_name_match_pct", "E2_unmatched_names", "E3_fy2627_duplicates"]
+      : ["E1_name_match_pct", "E2_unmatched_names"];
+  }
+  if (id === "primary") {
+    const anchor = anchors.primary_anchors[fy] as PrimaryFyAnchor | undefined;
+    const keys = [`primary_live_count_${fy}`];
+    if (anchor?.total != null || (anchor?.closedMonths?.length && anchor.closedMonthsTotal != null)) keys.push(`primary_total_${fy}`);
+    for (const head of Object.keys(anchor?.perHead ?? {})) keys.push(`primary_head_${normHead(head)}_${fy}`);
+    if (!anchor) keys.push(`primary_total_${fy}`);
+    return keys;
+  }
+  if (id === "secondary") {
+    if (!hasVerifyAnchors(fy)) return [];
+    const anchor = readVerifyAnchors<Record<string, any>>().fy_anchors?.[fy] as Record<string, unknown>;
+    const keys = ["saleReportTotal"];
+    if (anchor?.orders != null) keys.push("orders");
+    if (anchor?.activeRetailers != null) keys.push("activeRetailers");
+    if (anchor?.activeMembers != null) keys.push("orderBookingNames");
+    for (const head of Object.keys((anchor?.perHeadSale ?? {}) as Record<string, unknown>)) keys.push(`head:${head}`);
+    keys.push("attributedCoverage");
+    return keys;
+  }
+  if (id === "source_health") {
+    return anchors.source_list.map((source) => `source_${source.key}`);
+  }
+  return [];
+}
+
+async function runTargetsAndAchievementSet(fy: string): Promise<CheckGroup> {
+  const manifest = coreManifest("targets_achievement", fy);
+  return finalizeCheckGroup(await evaluateTargetsAndAchievementSet(fy), manifest);
+}
+
+async function runSaleOrderBookingSet(): Promise<CheckGroup> {
+  const manifest = coreManifest("sale_order_booking", "2025-26");
+  return finalizeCheckGroup(await evaluateSaleOrderBookingSet(), manifest);
+}
+
+async function runNameMatchSet(fy: string): Promise<CheckGroup> {
+  const manifest = coreManifest("name_match", fy);
+  return finalizeCheckGroup(await evaluateNameMatchSet(fy), manifest);
+}
+
+async function runSecondarySet(fy: string): Promise<CheckGroup> {
+  const manifest = coreManifest("secondary", fy);
+  return finalizeCheckGroup(await evaluateSecondarySet(fy), manifest);
+}
+
+async function runPrimarySet(fy: string): Promise<CheckGroup> {
+  const manifest = coreManifest("primary", fy);
+  return finalizeCheckGroup(await evaluatePrimarySet(fy), manifest);
+}
+
+async function runSourceHealthSet(): Promise<CheckGroup> {
+  const manifest = coreManifest("source_health", "2025-26");
+  return finalizeCheckGroup(await evaluateSourceHealthSet(), manifest);
+}
+
 export async function runFullVerify(fy: string): Promise<FullVerifyReport> {
   const [targetsAndAch, saleOrderBooking, secondary, primary, nameMatch, sourceHealth] = await Promise.all([
     runTargetsAndAchievementSet(fy),
@@ -1006,5 +1192,5 @@ export async function runFullVerify(fy: string): Promise<FullVerifyReport> {
       ? "warn"
       : "pass";
 
-  return { fy, overall, groups, computedAt: new Date().toISOString() };
+  return { fy, overall, groups, totals: totalsForGroups(groups), computedAt: new Date().toISOString() };
 }

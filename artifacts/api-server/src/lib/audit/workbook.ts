@@ -138,6 +138,11 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: FullVerifyReport, fy: s
   ws.getColumn(2).width = 36;
 
   const allChecks = report.groups.flatMap((g) => g.checks);
+  const reportTotals = report.totals ?? {
+    expected: allChecks.length,
+    evaluated: allChecks.filter((c) => ["pass", "warn", "fail"].includes(c.status)).length,
+    notEvaluated: allChecks.filter((c) => !["pass", "warn", "fail"].includes(c.status)).length,
+  };
   const counts = { pass: 0, warn: 0, fail: 0, pending: 0, skip: 0 };
   for (const c of allChecks) counts[c.status as keyof typeof counts] = (counts[c.status as keyof typeof counts] ?? 0) + 1;
 
@@ -146,6 +151,9 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: FullVerifyReport, fy: s
     ["Fiscal Year", fy],
     ["Groups run", report.groups.length],
     ["Total checks", allChecks.length],
+    ["Expected checks", reportTotals.expected],
+    ["Evaluated checks", reportTotals.evaluated],
+    ["Not evaluated", reportTotals.notEvaluated],
     ["Pass", counts.pass],
     ["Warn", counts.warn],
     ["Fail", counts.fail],
@@ -174,8 +182,8 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: FullVerifyReport, fy: s
 
 function buildChecksSheet(wb: ExcelJS.Workbook, report: FullVerifyReport, fy: string): void {
   const ws = wb.addWorksheet("Checks");
-  addHeaderRow(ws, ["Group", "Check", "Status", "Actual", "Expected", "Delta%", "Source Sheet", "Note"], [28, 52, 10, 18, 18, 10, 42, 60]);
-  ws.autoFilter = "A1:H1";
+  addHeaderRow(ws, ["Group", "Check", "Status", "Evaluation", "Actual", "Expected", "Delta%", "Source Sheet", "Note"], [28, 52, 10, 16, 18, 18, 10, 42, 60]);
+  ws.autoFilter = "A1:I1";
 
   for (const group of report.groups) {
     for (const c of group.checks) {
@@ -183,6 +191,7 @@ function buildChecksSheet(wb: ExcelJS.Workbook, report: FullVerifyReport, fy: st
         group.label,
         c.label,
         c.status.toUpperCase(),
+        c.evaluation === "not_evaluated" ? "NOT EVALUATED" : "EVALUATED",
         fmtActual(c),
         fmtExpected(c),
         fmtDeltaPct(c.deltaPct),

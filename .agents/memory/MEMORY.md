@@ -148,3 +148,5 @@
 - [State-head Excel drill-down scope](state-head-excel-drilldown-scope.md) — reference-style R1/R2 exports apply head filters directly in both FYs; do not reuse web prior-customer remapping.
 - [Secondary monthly export availability](secondary-monthly-export-availability.md) — monthly inclusion is per selected member; preserve each recorded cell even when other cells in a not-yet-recorded row are unavailable.
 - [Verification service identity](verification-service-identity.md) — production reconciliation uses one scoped non-human Bearer identity; exact GET allowlist, hashed credential, audited rotation.
+- [Register month-state boundaries](register-month-state-boundaries.md) — shared primary/SKU rows cannot gain a discriminator in place; SKU completeness intentionally precedes the later replacement freeze.
+- [Audit manifest invariants](audit-manifest-invariants.md) — each group declares keys before dependencies; missing results stay visible and N/A remains evaluated.

@@ -8,6 +8,7 @@ import {
   runFullVerify,
   type FullVerifyReport,
   type CheckGroup,
+  totalsForGroups,
 } from "../lib/mgmt/verifyFull.js";
 import { runExtraGroups } from "../lib/audit/extraGroups.js";
 import { buildAuditWorkbook } from "../lib/audit/workbook.js";
@@ -22,6 +23,9 @@ const router: IRouter = Router();
 // never frozen — an audit must keep re-checking live sources in the
 // background, otherwise it would hide new drift.
 const AUDIT_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
+// Response shape now includes per-group manifests/evaluation totals. Keep it
+// isolated from legacy snapshots whose checks could be absent after failures.
+const AUDIT_SNAPSHOT_VERSION = "v2";
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 
@@ -55,7 +59,7 @@ async function runAudit(fy: string): Promise<FullVerifyReport> {
       ? "warn"
       : "pass";
 
-  return { ...base, groups, overall };
+  return { ...base, groups, overall, totals: totalsForGroups(groups) };
 }
 
 // GET /api/audit?fy=<fy>
@@ -69,7 +73,7 @@ router.get("/audit", requireVerificationEndpointAccess, async (req: Request, res
   }
   try {
     const report = await serveWithSnapshot({
-      key: `audit|${fy}`,
+      key: `audit|${AUDIT_SNAPSHOT_VERSION}|${fy}`,
       ttlMs: AUDIT_SNAPSHOT_TTL_MS,
       build: () => runAudit(fy) as unknown as Promise<Record<string, unknown>>,
       log: req.log,

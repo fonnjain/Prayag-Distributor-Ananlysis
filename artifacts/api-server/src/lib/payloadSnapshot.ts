@@ -153,6 +153,7 @@ export async function serveWithSnapshot<T extends AnyPayload>(opts: {
         ...prevMeta,
         snapshotSavedAt: snap.savedAt.getTime(),
         refreshing: true,
+        stale: true,
       },
     } as unknown as T;
   }

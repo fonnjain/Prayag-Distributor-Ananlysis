@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { RefreshCw, CheckCircle, AlertTriangle, XCircle, Clock, Minus, Download, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDashboard } from "@/data/dashboard-context";
+import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ type HealthCheck = {
   actual: number | null;
   deltaPct: number | null;
   status: CheckStatus;
+  evaluation: "evaluated" | "not_evaluated";
   note?: string;
 };
 
@@ -48,6 +50,8 @@ type FullVerifyReport = {
   fy: string;
   overall: "pass" | "warn" | "fail";
   groups: CheckGroup[];
+  totals?: { expected: number; evaluated: number; notEvaluated: number };
+  meta?: { snapshotSavedAt?: number; refreshing?: boolean; stale?: boolean };
   computedAt: string;
 };
 
@@ -267,6 +271,15 @@ export default function DataHealth() {
 
   const { syncedAt } = useDashboard();
 
+  // Audit is snapshot-first just like the dashboard data route.  Keep showing
+  // the saved report while a live run is in flight, then swap in the fresh
+  // report without blanking the page.
+  useSnapshotRefresh(
+    report?.meta,
+    report ? `/api/audit?fy=${encodeURIComponent(fy)}` : null,
+    (payload) => setReport(payload as FullVerifyReport),
+  );
+
   const runAudit = useCallback(() => {
     setLoading(true);
     setError(null);
@@ -458,14 +471,20 @@ export default function DataHealth() {
 
       {/* Overall badge */}
       {report && (
-        <div className={cn("border rounded-md px-4 py-2.5 text-sm font-medium", overallColor)}>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className={cn("border rounded-md px-4 py-2.5 text-sm font-medium flex-1", overallColor)}>
           {report.overall === "fail" && "Fail — data does not match approved anchors"}
           {report.overall === "warn" && "Warning — minor discrepancies detected"}
           {report.overall === "pass" && "Pass — all checks within tolerance"}
           <span className="text-xs font-normal opacity-70 ml-2">({report.fy})</span>
           <span className="text-xs font-normal opacity-50 ml-2">
-            {report.groups.length} groups · {report.groups.flatMap((g) => g.checks).length} checks
+            {report.groups.length} groups · {report.totals?.expected ?? report.groups.flatMap((g) => g.checks).length} expected · {report.totals?.evaluated ?? report.groups.flatMap((g) => g.checks).length} evaluated · {report.totals?.notEvaluated ?? 0} not evaluated
           </span>
+          </div>
+          <SnapshotBanner meta={report.meta} />
+          {report.meta?.stale && !report.meta.refreshing && (
+            <span className="text-xs text-amber-700 dark:text-amber-300">Saved audit is stale — refresh in progress.</span>
+          )}
         </div>
       )}
 

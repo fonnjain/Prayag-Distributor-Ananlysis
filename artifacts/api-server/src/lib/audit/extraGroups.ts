@@ -1,7 +1,7 @@
 // Extra audit check groups: Group 1.1 (truncation), Group 6 (report logic), Group 7 (cross-foots),
 // Group 8 (pending cross-check), Group 9 (SAP data freshness).
 // These extend the core verifyFull groups with data-depth and computation-correctness checks.
-import type { CheckGroup, HealthCheck, CheckStatus } from "../mgmt/verifyFull.js";
+import { finalizeCheckGroup, type CheckGroup, type HealthCheck, type CheckStatus } from "../mgmt/verifyFull.js";
 import { loadOrderFile } from "../mgmt/orders.js";
 import { db, pool, saleLines } from "@workspace/db";
 import { eq, and, sql, ilike, inArray } from "drizzle-orm";
@@ -15,6 +15,9 @@ import { listSheetTabs, readTabRowsChunked } from "../registers/sheetsApi.js";
 import { BOOKING_SHEETS, readBookingAggregated } from "../mgmt/primarySheets.js";
 import { currentOpenFy, priorFy } from "../fyAnchors.js";
 import { getProductWiseAug26Freshness } from "../secondary/productWiseAug26.js";
+import { JUL26_PSCODE3 } from "../secondary/pscode3Jul26.js";
+import { classifySkuBrandMirror } from "./skuBrandMirror.js";
+import { completedMonthLabels } from "../redAlert/skuCanary.js";
 
 // ── Anchor types ───────────────────────────────────────────────────────────────
 
@@ -54,7 +57,7 @@ const auditAnchors = rawAuditAnchors as unknown as AuditAnchors;
 
 // ── Group 1.1 — Truncation check ──────────────────────────────────────────────
 
-export async function runTruncationGroup(): Promise<CheckGroup> {
+async function evaluateTruncationGroup(): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const checks: HealthCheck[] = [];
   const suspicious = new Set(auditAnchors.truncation.suspicious_row_counts);
   const sourceConfig = auditAnchors.truncation.sources;
@@ -86,7 +89,8 @@ export async function runTruncationGroup(): Promise<CheckGroup> {
           actual: null,
           deltaPct: null,
           status: "skip",
-          note: `Secondary OB ${fy} file not available — upload it to run this check.`,
+          evaluation: "not_evaluated",
+          note: `NOT EVALUATED: Secondary OB ${fy} file not available — upload it to run this check.`,
         });
         continue;
       }
@@ -121,7 +125,8 @@ export async function runTruncationGroup(): Promise<CheckGroup> {
         actual: null,
         deltaPct: null,
         status: "skip",
-        note: "Could not load order file — check server logs.",
+        evaluation: "not_evaluated",
+        note: "NOT EVALUATED: Could not load order file — check server logs.",
       });
     }
   }
@@ -136,7 +141,7 @@ export async function runTruncationGroup(): Promise<CheckGroup> {
 
 // ── Group 6 — Report logic spot-checks ────────────────────────────────────────
 
-export async function runReportLogicGroup(fy: string): Promise<CheckGroup> {
+async function evaluateReportLogicGroup(fy: string): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   if (fy !== auditAnchors.report_logic.cy_fy) {
     return {
       id: "report_logic",
@@ -226,7 +231,8 @@ export async function runReportLogicGroup(fy: string): Promise<CheckGroup> {
         actual: null,
         deltaPct: null,
         status: "skip",
-        note: "DB query failed — check server logs.",
+        evaluation: "not_evaluated",
+        note: "NOT EVALUATED: DB query failed — check server logs.",
       });
     }
   }
@@ -241,7 +247,7 @@ export async function runReportLogicGroup(fy: string): Promise<CheckGroup> {
 
 // ── Group 7 — Cross-foots ─────────────────────────────────────────────────────
 
-export async function runCrossFootGroup(fy: string): Promise<CheckGroup> {
+async function evaluateCrossFootGroup(fy: string): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const cfAnchor = auditAnchors.crossfoot[fy];
   const checks: HealthCheck[] = [];
 
@@ -292,53 +298,85 @@ export async function runCrossFootGroup(fy: string): Promise<CheckGroup> {
         actual: null,
         deltaPct: null,
         status: "warn",
-        note: `Could not compare mirror to sheet: ${err instanceof Error ? err.message : String(err)}`,
+        evaluation: "not_evaluated",
+        note: `NOT EVALUATED: Could not compare mirror to sheet: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
   }
 
   // 7.6 PSCode3 sku table vs brand-level mirror (secondary_register_line,
-  // source='pscode3_brand_rollup'). The loader refreshes both in one transaction;
-  // this flags any per-month NET drift if they ever diverge (e.g. partial manual edits).
+  // source='pscode3_brand_rollup'). The check is intentionally scoped to
+  // provenance rows written by the protected dual-write loader. Historical
+  // secondary rows predate that loader and mirror absence for them is N/A.
   try {
-    const mirrorRes = await pool.query(
-      `SELECT COALESCE(s.month_label, m.month_label) AS month_label,
-              COALESCE(s.net, 0)::numeric AS sku_net,
-              COALESCE(m.net, 0)::numeric AS mirror_net
-       FROM (SELECT month_label, SUM(net_amount::numeric) AS net
-             FROM secondary_sku_line WHERE fy = $1 GROUP BY 1) s
-       FULL OUTER JOIN
-            (SELECT month_label, SUM(net_amount::numeric) AS net
-             FROM secondary_register_line WHERE fy = $1 AND source = 'pscode3_brand_rollup' GROUP BY 1) m
-       ON s.month_label = m.month_label
-       ORDER BY 1`,
-      [fy],
-    );
-    if (mirrorRes.rows.length > 0) {
-      const badMonths: string[] = [];
-      let skuTotal = 0;
-      let mirrorTotal = 0;
-      for (const r of mirrorRes.rows as any[]) {
-        const skuNet = Number(r.sku_net);
-        const mirrorNet = Number(r.mirror_net);
-        skuTotal += skuNet;
-        mirrorTotal += mirrorNet;
-        if (Math.abs(skuNet - mirrorNet) > 1) badMonths.push(String(r.month_label));
-      }
-      checks.push({
-        key: "cf_7_6_sku_vs_brand_mirror",
-        label: `7.6 — PSCode3 sku table = brand-level mirror per month (${fy})`,
-        unit: "money",
-        expected: Math.round(skuTotal),
-        actual: Math.round(mirrorTotal),
-        deltaPct: skuTotal !== 0 ? ((mirrorTotal - skuTotal) / skuTotal) * 100 : null,
-        status: badMonths.length === 0 ? "pass" : "fail",
-        note:
-          badMonths.length === 0
-            ? `All ${mirrorRes.rows.length} month(s) match: sku NET ₹${(skuTotal / 1e7).toFixed(2)} Cr = mirror NET ₹${(mirrorTotal / 1e7).toFixed(2)} Cr.`
-            : `NET mismatch in month(s): ${badMonths.join(", ")} — re-run scripts/pscode3-load.ts --write (refreshes both tables in one transaction) or scripts/pscode3-brand-backfill.ts --write.`,
-      });
-    }
+    const [provenanceRes, mirrorRes] = await Promise.all([
+      pool.query<{ month_label: string; source: string; row_count: string; net_amount: string }>(
+        `SELECT DISTINCT ON (month_label) month_label, source, row_count, net_amount
+           FROM secondary_sku_load_provenance
+          WHERE fy = $1 AND source = $2
+          ORDER BY month_label, uploaded_at DESC, id DESC`,
+        [fy, JUL26_PSCODE3.skuSource],
+      ),
+      pool.query<{
+        month_label: string;
+        sku_rows: string;
+        sku_net: string;
+        mirror_rows: string;
+        mirror_net: string;
+      }>(
+        `SELECT COALESCE(s.month_label, m.month_label) AS month_label,
+                COALESCE(s.row_count, 0)::int AS sku_rows,
+                COALESCE(s.net, 0)::numeric AS sku_net,
+                COALESCE(m.row_count, 0)::int AS mirror_rows,
+                COALESCE(m.net, 0)::numeric AS mirror_net
+          FROM (SELECT month_label, COUNT(*)::int AS row_count, SUM(net_amount::numeric) AS net
+                FROM secondary_sku_line
+               WHERE fy = $1 AND source = $2
+               GROUP BY 1) s
+         FULL OUTER JOIN
+              (SELECT month_label, COUNT(*)::int AS row_count, SUM(net_amount::numeric) AS net
+                FROM secondary_register_line
+               WHERE fy = $1 AND source = $3
+               GROUP BY 1) m
+         ON s.month_label = m.month_label
+         ORDER BY 1`,
+        [fy, JUL26_PSCODE3.skuSource, JUL26_PSCODE3.brandSource],
+      ),
+    ]);
+    const classification = classifySkuBrandMirror({
+      provenance: provenanceRes.rows.map((row) => ({
+        monthLabel: String(row.month_label),
+        source: row.source,
+        rowCount: row.row_count,
+        netAmount: row.net_amount,
+      })),
+      monthlyTotals: mirrorRes.rows.map((row) => ({
+        monthLabel: String(row.month_label),
+        skuRows: row.sku_rows,
+        skuNet: row.sku_net,
+        mirrorRows: row.mirror_rows,
+        mirrorNet: row.mirror_net,
+      })),
+      protectedSource: JUL26_PSCODE3.skuSource,
+    });
+    checks.push({
+      key: "cf_7_6_sku_vs_brand_mirror",
+      label: `7.6 — PSCode3 sku table = brand-level mirror per month (${fy})`,
+      unit: "money",
+      expected: classification.status === "skip" ? null : Math.round(classification.skuTotal),
+      actual: classification.status === "skip" ? null : Math.round(classification.mirrorTotal),
+      deltaPct:
+        classification.status === "skip" || classification.skuTotal === 0
+          ? null
+          : ((classification.mirrorTotal - classification.skuTotal) / classification.skuTotal) * 100,
+      status: classification.status,
+      note:
+        classification.status === "skip"
+          ? `N/A — no authoritative ${JUL26_PSCODE3.skuSource} dual-write provenance for FY${fy}; historical/non-provenance mirror absence is not a failure.`
+          : classification.status === "pass"
+            ? `All ${classification.authoritativeMonths.length} authoritative month(s) match: sku NET ₹${(classification.skuTotal / 1e7).toFixed(2)} Cr = mirror NET ₹${(classification.mirrorTotal / 1e7).toFixed(2)} Cr.`
+            : `NET mismatch in authoritative month(s): ${classification.badMonths.join(", ")} — re-run the protected PSCode3 dual-write loader.`,
+    });
   } catch (err) {
     logger.warn({ err, fy }, "audit: sku vs brand mirror cross-check threw");
     checks.push({
@@ -349,7 +387,8 @@ export async function runCrossFootGroup(fy: string): Promise<CheckGroup> {
       actual: null,
       deltaPct: null,
       status: "warn",
-      note: `Could not compare sku table to brand mirror: ${err instanceof Error ? err.message : String(err)}`,
+        evaluation: "not_evaluated",
+        note: `NOT EVALUATED: Could not compare sku table to brand mirror: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
 
@@ -479,7 +518,10 @@ export async function runCrossFootGroup(fy: string): Promise<CheckGroup> {
       label: `Group 7 — Cross-foots (${fy})`,
       available: false,
       pendingNote: "Cross-foot verification failed — check server logs.",
-      checks: [],
+      // Preserve independent checks (7.0 and 7.6) that completed before the
+      // secondary order-booking dependency failed. Group finalization will
+      // synthesize NOT EVALUATED rows only for missing 7.1–7.5 keys.
+      checks,
     };
   }
 }
@@ -489,7 +531,7 @@ export async function runCrossFootGroup(fy: string): Promise<CheckGroup> {
 // sheet (REPORT 2, in units). They are different measures in different units;
 // the check just surfaces both figures so a large directional divergence is visible.
 
-async function runPendingCrossCheckGroup(): Promise<CheckGroup> {
+async function evaluatePendingCrossCheckGroup(): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const checks: HealthCheck[] = [];
   try {
     const result = await loadFactoryPending();
@@ -591,7 +633,7 @@ async function runPendingCrossCheckGroup(): Promise<CheckGroup> {
 // The SAP source sheet ID is read from register_sheets.json → sap_source.
 // The check only runs for FY2026-27; for other FYs it is skipped.
 
-async function runSapLagGroup(): Promise<CheckGroup> {
+async function evaluateSapLagGroup(): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const OPEN_FY = "2026-27";
   const registerSheets = rawRegisterSheets as unknown as {
     registers: Record<string, string>;
@@ -631,7 +673,7 @@ async function runSapLagGroup(): Promise<CheckGroup> {
         available: true,
         checks: [
           {
-            key: "sap_lag_no_data",
+            key: "sap_lag_open_month",
             label: "9.1 — SAP vs derived register: latest open month",
             unit: "count",
             expected: null,
@@ -790,7 +832,7 @@ export function classifySecondaryPipelineFreshness(
   };
 }
 
-async function runSecondaryPipelineGroup(): Promise<CheckGroup> {
+async function evaluateSecondaryPipelineGroup(): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const { currentOpenFy } = await import("../fyAnchors.js");
   const openFy = currentOpenFy();
 
@@ -860,7 +902,7 @@ async function runSecondaryPipelineGroup(): Promise<CheckGroup> {
   }
 }
 
-async function runSkuCanaryGroup(): Promise<CheckGroup> {
+async function evaluateSkuCanaryGroup(): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const { runSkuWipeCanary } = await import("../redAlert/skuCanary.js");
   const groupLabel = "Group 12 — SKU wipe canary (secondary_sku_line vs register_month_state)";
 
@@ -920,35 +962,22 @@ async function runSkuCanaryGroup(): Promise<CheckGroup> {
       });
     }
 
-    // R4: frozen months with zero secondary rows
-    if (result.frozenEmptyResults.length === 0) {
-      checks.push({
-        key: "sku_canary_r4_none",
-        label: "12.4 — R4: frozen months with zero secondary_sku_line rows",
-        unit: "count",
-        expected: 0,
-        actual: 0,
-        deltaPct: null,
-        status: "pass",
-        note: "No frozen months found in register_month_state — R4 not applicable.",
-      });
-    } else {
-      for (const fr of result.frozenEmptyResults) {
-        const status: CheckStatus = fr.pass ? "pass" : "fail";
-        checks.push({
-          key: `sku_canary_r4_${fr.fy.replace("-", "")}_${fr.monthLabel.replace("-", "")}`,
-          label: `12.4 — R4 ${fr.fy} ${fr.monthLabel}: frozen primary month must have secondary data`,
-          unit: "count",
-          expected: 1,
-          actual: fr.secondaryRows,
-          deltaPct: null,
-          status,
-          note: fr.pass
-            ? `${fr.fy} ${fr.monthLabel}: frozen at ${fr.frozenAt.slice(0, 10)}, ${fr.secondaryRows.toLocaleString()} secondary rows present — OK.`
-            : `FAIL: ${fr.fy} ${fr.monthLabel} is frozen (frozen_at=${fr.frozenAt.slice(0, 10)}) but has ZERO secondary_sku_line rows. This is the exact scenario that produced July-26 false-positive S1 alerts.`,
-        });
-      }
-    }
+    // R4 is intentionally one stable manifest row. The canary's frozen-month
+    // query is dependency data, so individual month keys cannot be declared
+    // before that query; the note retains the affected month details.
+    const r4Failures = result.frozenEmptyResults.filter((fr) => !fr.pass);
+    checks.push({
+      key: "sku_canary_r4_summary",
+      label: "12.4 — R4: frozen months with zero secondary_sku_line rows",
+      unit: "count",
+      expected: 0,
+      actual: r4Failures.length,
+      deltaPct: null,
+      status: r4Failures.length === 0 ? "pass" : "fail",
+      note: r4Failures.length === 0
+        ? "No frozen months found without secondary data."
+        : `FAIL: ${r4Failures.map((fr) => `${fr.fy} ${fr.monthLabel} (${fr.secondaryRows} rows)`).join(", ")}.`,
+    });
 
     return { id: "sku_canary", label: groupLabel, available: true, checks };
   } catch (err) {
@@ -958,12 +987,22 @@ async function runSkuCanaryGroup(): Promise<CheckGroup> {
       label: groupLabel,
       available: false,
       pendingNote: `SKU canary check failed — check server logs: ${err instanceof Error ? err.message : String(err)}`,
-      checks: [],
+      checks: extraManifest("sku_canary", "2025-26").map((key) => ({
+        key,
+        label: `Not evaluated — ${key}`,
+        unit: "text" as const,
+        expected: null,
+        actual: null,
+        deltaPct: null,
+        status: "pending" as const,
+        evaluation: "not_evaluated" as const,
+        note: "NOT EVALUATED: SKU canary dependency failed before this check could run.",
+      })),
     };
   }
 }
 
-async function runProductWiseFreshnessGroup(): Promise<CheckGroup> {
+async function evaluateProductWiseFreshnessGroup(): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   try {
     const freshness = await getProductWiseAug26Freshness();
     const status: CheckStatus = freshness.status === "frozen_verified"
@@ -1010,7 +1049,7 @@ async function runProductWiseFreshnessGroup(): Promise<CheckGroup> {
 // registers and then locked. Unlike a self-referential total, this check CAN
 // fail: if a sync, migration, or manual write ever changes a closed FY, the
 // row count or amount drifts off its anchor and this group flags it.
-export async function runFrozenAnchorGroup(): Promise<CheckGroup> {
+async function evaluateFrozenAnchorGroup(): Promise<Omit<CheckGroup, "expectedKeys" | "totals">> {
   const frozen = (rawFrozenRegisters as { frozen: Record<string, { rows: number; amountRupees: number }> }).frozen;
   const checks: HealthCheck[] = [];
   try {
@@ -1055,16 +1094,17 @@ export async function runFrozenAnchorGroup(): Promise<CheckGroup> {
     }
   } catch (err) {
     logger.error({ err }, "audit: frozen-anchor group failed");
-    checks.push({
-      key: "frozen_anchor_error",
-      label: "Frozen register anchor reconciliation",
-      unit: "text",
+    checks.push(...extraManifest("frozen-anchors", "2025-26").map((key) => ({
+      key,
+      label: `Not evaluated — ${key}`,
+      unit: "text" as const,
       expected: null,
       actual: null,
       deltaPct: null,
-      status: "fail",
-      note: `Could not read sale_line to reconcile against frozen anchors: ${err instanceof Error ? err.message : String(err)}`,
-    });
+      status: "pending" as const,
+      evaluation: "not_evaluated" as const,
+      note: `NOT EVALUATED: could not read sale_line to reconcile against frozen anchors: ${err instanceof Error ? err.message : String(err)}`,
+    })));
   }
   return {
     id: "frozen-anchors",
@@ -1072,6 +1112,84 @@ export async function runFrozenAnchorGroup(): Promise<CheckGroup> {
     available: true,
     checks,
   };
+}
+
+function extraManifest(id: string, fy: string): string[] {
+  if (id === "truncation") return ["truncation_2025-26", "truncation_2026-27"];
+  if (id === "report_logic") {
+    return auditAnchors.report_logic.checks.map((a) => `report_logic_${a.id.replace(/\./g, "_")}`);
+  }
+  if (id === "crossfoot") return [
+    "cf_7_0_ob_mirror_vs_sheet", "cf_7_6_sku_vs_brand_mirror", "cf_7_1_member_eq_company",
+    "cf_7_2_no_negatives", "cf_7_3_member_count", "cf_7_4_retailer_count", "cf_7_5_no_dup_heads",
+  ];
+  if (id === "pending_crosscheck") return ["pending_factory_qty", "pending_derived_value", "pending_consistency"];
+  if (id === "sap_lag") return ["sap_lag_open_month"];
+  if (id === "frozen-anchors") {
+    const frozen = (rawFrozenRegisters as { frozen: Record<string, { rows: number; amountRupees: number }> }).frozen;
+    return Object.entries(frozen).flatMap(([anchorFy, anchor]) => [
+      `frozen_rows_${anchorFy}`,
+      ...(anchor.amountRupees > 0 ? [`frozen_amount_${anchorFy}`] : []),
+    ]);
+  }
+  if (id === "secondary_pipeline") return ["secondary_pipeline_freshness"];
+  if (id === "sku_canary") {
+    const completed = completedMonthLabels(currentOpenFy(), new Date());
+    return [
+      ...(completed.length > 0
+        ? completed.map((month) => `sku_canary_r1_${month.replace("-", "")}`)
+        : ["sku_canary_r1_na"]),
+      "sku_canary_r2_total",
+      "sku_canary_r4_summary",
+    ];
+  }
+  if (id === "productwise_freshness") return ["productwise_month_immutability"];
+  return [];
+}
+
+export async function runTruncationGroup(): Promise<CheckGroup> {
+  const manifest = extraManifest("truncation", "2025-26");
+  return finalizeCheckGroup(await evaluateTruncationGroup(), manifest);
+}
+
+export async function runReportLogicGroup(fy: string): Promise<CheckGroup> {
+  const manifest = extraManifest("report_logic", fy);
+  return finalizeCheckGroup(await evaluateReportLogicGroup(fy), manifest);
+}
+
+export async function runCrossFootGroup(fy: string): Promise<CheckGroup> {
+  const manifest = extraManifest("crossfoot", fy);
+  return finalizeCheckGroup(await evaluateCrossFootGroup(fy), manifest);
+}
+
+async function runPendingCrossCheckGroup(): Promise<CheckGroup> {
+  const manifest = extraManifest("pending_crosscheck", "2025-26");
+  return finalizeCheckGroup(await evaluatePendingCrossCheckGroup(), manifest);
+}
+
+async function runSapLagGroup(): Promise<CheckGroup> {
+  const manifest = extraManifest("sap_lag", "2025-26");
+  return finalizeCheckGroup(await evaluateSapLagGroup(), manifest);
+}
+
+async function runSecondaryPipelineGroup(): Promise<CheckGroup> {
+  const manifest = extraManifest("secondary_pipeline", "2025-26");
+  return finalizeCheckGroup(await evaluateSecondaryPipelineGroup(), manifest);
+}
+
+async function runSkuCanaryGroup(): Promise<CheckGroup> {
+  const manifest = extraManifest("sku_canary", "2025-26");
+  return finalizeCheckGroup(await evaluateSkuCanaryGroup(), manifest);
+}
+
+async function runProductWiseFreshnessGroup(): Promise<CheckGroup> {
+  const manifest = extraManifest("productwise_freshness", "2025-26");
+  return finalizeCheckGroup(await evaluateProductWiseFreshnessGroup(), manifest);
+}
+
+export async function runFrozenAnchorGroup(): Promise<CheckGroup> {
+  const manifest = extraManifest("frozen-anchors", "2025-26");
+  return finalizeCheckGroup(await evaluateFrozenAnchorGroup(), manifest);
 }
 
 export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
@@ -1087,5 +1205,15 @@ export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
       runSkuCanaryGroup(),
       runProductWiseFreshnessGroup(),
     ]);
-  return [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline, skuCanary, productWiseFreshness];
+  return [
+    truncation,
+    reportLogic,
+    crossFoot,
+    pendingCrossCheck,
+    sapLag,
+    frozenAnchors,
+    secondaryPipeline,
+    skuCanary,
+    productWiseFreshness,
+  ];
 }

@@ -43,6 +43,15 @@ function statusCounts(checks) {
   return counts;
 }
 
+function evaluationCounts(checks) {
+  const counts = { evaluated: 0, not_evaluated: 0 };
+  for (const check of checks) {
+    const evaluation = String(check?.evaluation ?? "unknown");
+    if (evaluation in counts) counts[evaluation]++;
+  }
+  return counts;
+}
+
 async function jsonCheck(path, summarize) {
   const response = await get(path);
   const contentType = response.headers.get("content-type") ?? "";
@@ -72,12 +81,39 @@ await jsonCheck("/mgmt/verify", (body) => ({
 await jsonCheck("/audit", (body) => {
   const groups = Array.isArray(body.groups) ? body.groups : [];
   const checks = groups.flatMap((group) => Array.isArray(group?.checks) ? group.checks : []);
+  const validEvaluations = checks.every(
+    (check) => check?.evaluation === "evaluated" || check?.evaluation === "not_evaluated",
+  );
+  const groupManifestsConsistent = groups.every((group) => {
+    const expectedKeys = Array.isArray(group?.expectedKeys) ? group.expectedKeys : [];
+    const groupChecks = Array.isArray(group?.checks) ? group.checks : [];
+    const totals = group?.totals;
+    return expectedKeys.length === groupChecks.length &&
+      totals?.expected === expectedKeys.length &&
+      totals?.evaluated + totals?.notEvaluated === totals?.expected;
+  });
+  const totalsConsistent = Boolean(
+    body.totals &&
+    body.totals.expected === checks.length &&
+    body.totals.evaluated + body.totals.notEvaluated === body.totals.expected,
+  );
+  if (!validEvaluations || !groupManifestsConsistent || !totalsConsistent) {
+    throw new Error(
+      `Audit manifest invariant failed: validEvaluations=${validEvaluations}, ` +
+      `groupManifestsConsistent=${groupManifestsConsistent}, totalsConsistent=${totalsConsistent}`,
+    );
+  }
   return {
     fy: body.fy ?? null,
     overall: body.overall ?? null,
     groups: groups.length,
     checks: checks.length,
+    totals: body.totals ?? null,
     checkStatuses: statusCounts(checks),
+    evaluationCounts: evaluationCounts(checks),
+    validEvaluations,
+    groupManifestsConsistent,
+    totalsConsistent,
   };
 });
 
