@@ -154,3 +154,4 @@
 - [Isolated API guard builds](isolated-api-guard-builds.md) — parallel guards need unique build outputs under the API package tree so external ESM dependencies still resolve.
 - [Resolution register semantics](resolution-register-semantics.md) — HOLD blocks only named measures with explicit exclusions; PENDING never blocks; closed evidence is immutable.
 - [External pricing feed contract](external-pricing-feed-contract.md) — never let omitted periods become zero; expose coverage and use gross-margin language, not profit.
+- [Pre-gate router scoping](pre-gate-router-scoping.md) — routers mounted before session auth must path-scope every router-level guard or they can intercept all protected application routes.
