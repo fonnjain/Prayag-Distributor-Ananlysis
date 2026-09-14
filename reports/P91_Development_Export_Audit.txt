@@ -24,13 +24,12 @@ Data-read timestamp: 13/9/2026, 7:07:54 am
 
 === State-head Sales Deep Dive ===
 Sheet list with data-row counts:
-- Team summary: 20 data rows
-- Members: 76 data rows
-- Cost and ROI: 78 data rows
-- Missing data: 23 data rows
-- Info: 23 data rows
+- Team summary: 19 data rows
+- Members: 75 data rows
+- Cost and ROI: 77 data rows
+- Missing data: 22 data rows
+- Info: 22 data rows
 Info sheet as generated:
-Field: Value
 Scope: All members under state head Sandeep Dadheech
 State head: Sandeep Dadheech
 FY: 2026-27
