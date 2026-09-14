@@ -869,3 +869,18 @@ uri = "file://reports/P007_SALES_MRP_Generator_Design_Inputs.docx"
 type = "word_document"
 title = "P007 — SALES: MRP Generator Design Inputs"
 description = "Read-only production report covering catalogue sales coverage, FY2025-26 concentration, June 2026 category gross margins, HOLD exclusions, and current absent-code analysis."
+logical_id = "136496df-61f8-458b-806f-4ec07b253f0a"
+
+[[outputs]]
+id = "AFQDMnVCkADnS_hUwYhcG"
+uri = "file://reports/P008_SALES_Hyphen_Normalisation_Report.docx"
+type = "word_document"
+title = "P008 — SALES Hyphen Normalisation Report"
+description = "Word report covering recovered codes and values, updated unresolved totals, resolver breakdown, product attribution changes, near-match candidates, and FY2025-26 reconciliation."
+logical_id = "c6b57fe6-fa78-4bad-8136-51d6ed0e7f4e"
+content_hash = "sha256:2066c7385c7fda4d43429e11e329e880dfa3a793ee9c60057be92e9e7e8b34cb"
+size = 39338
+mtime_ms = 1789373901362
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/c6b57fe6-fa78-4bad-8136-51d6ed0e7f4e/cfaf6b56-4018-492d-b0fa-930538d1cc52"
+storage_version_token = "1789373910766769"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
