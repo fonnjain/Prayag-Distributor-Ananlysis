@@ -14,6 +14,7 @@ import { useState, useEffect, useMemo, Fragment } from "react";
 import { AlertTriangle, Lock, TrendingUp, TrendingDown, RefreshCw, ChevronUp, ChevronDown, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { normalizeSchemeMaster, type SchemeMasterView } from "./schemeMasterAdapter";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -134,19 +135,6 @@ type AnnualRow = {
   schemeId: string;
 };
 
-type SchemeMaster = {
-  schemes: Array<{
-    id: string;
-    name: string;
-    basis: string;
-    slabs: Array<{ threshold: number; rate: number | null; reward?: string | null; rewardType: string }>;
-    stateRestriction?: string[];
-  }>;
-  basketMap: Record<string, string>;
-  conditions: Record<string, unknown>;
-  trips: Array<{ label: string; requirement: string; threshold: number }>;
-};
-
 // ── Success types ─────────────────────────────────────────────────────────────
 
 type SuccessRow = {
@@ -207,7 +195,8 @@ export default function SchemeNudgeEngine() {
 
   const [cockpitData, setCockpitData] = useState<CockpitResult | null>(null);
   const [annualData, setAnnualData] = useState<{ rows: AnnualRow[]; completeMonths: string[] } | null>(null);
-  const [masterData, setMasterData] = useState<SchemeMaster | null>(null);
+  const [masterData, setMasterData] = useState<SchemeMasterView | null>(null);
+  const [masterError, setMasterError] = useState<string | null>(null);
   const [successData, setSuccessData] = useState<SuccessResult | null>(null);
   const [successLoading, setSuccessLoading] = useState(false);
   const [successHeadFilter, setSuccessHeadFilter] = useState("all");
@@ -245,10 +234,21 @@ export default function SchemeNudgeEngine() {
   }
 
   function fetchMaster() {
+    setMasterError(null);
     fetch("/api/schemes/master")
-      .then((r) => r.json())
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const message = asErrorMessage(payload) ?? `Request failed with HTTP ${response.status}`;
+          throw new Error(message);
+        }
+        return normalizeSchemeMaster(payload);
+      })
       .then(setMasterData)
-      .catch(() => {});
+      .catch((error) => {
+        setMasterData(null);
+        setMasterError(error instanceof Error ? error.message : String(error));
+      });
   }
 
   function fetchSuccess() {
@@ -999,7 +999,14 @@ export default function SchemeNudgeEngine() {
       {/* ── SCHEME MASTER ──────────────────────────────────────────────────── */}
       {tab === "master" && (
         <div className="space-y-4">
-          {!masterData ? (
+          {masterError ? (
+            <div className="rounded border border-destructive/40 bg-destructive/10 px-3 py-3 text-xs text-destructive">
+              <p>Could not load Scheme Master: {masterError}</p>
+              <Button variant="outline" size="sm" className="mt-2 h-7" onClick={fetchMaster}>
+                Retry
+              </Button>
+            </div>
+          ) : !masterData ? (
             <div className="text-xs text-muted-foreground py-6 text-center">Loading scheme master...</div>
           ) : (
             <>
@@ -1026,7 +1033,7 @@ export default function SchemeNudgeEngine() {
                       {scheme.slabs.map((s, i) => (
                         <tr key={i} className="border-t">
                           <td className="py-0.5 tabular-nums">
-                            {scheme.basis === "single_invoice_qty"
+                            {scheme.basis.includes("quantity")
                               ? `${s.threshold} units`
                               : `≥ ${inr(s.threshold)}`}
                           </td>
@@ -1049,6 +1056,12 @@ export default function SchemeNudgeEngine() {
       )}
     </div>
   );
+}
+
+function asErrorMessage(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const error = (value as { error?: unknown }).error;
+  return typeof error === "string" && error.trim() ? error : null;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
