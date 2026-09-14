@@ -78,33 +78,17 @@ function inr(n: number): string {
   return n.toLocaleString("en-IN");
 }
 
-import EngineTargets from "./EngineTargets";
-
 export default function Targets() {
-  const [tab, setTab] = useState<"user" | "engine">("user");
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
-      <div className="inline-flex rounded-md border border-border/50 p-0.5 text-sm">
-        <button
-          onClick={() => setTab("user")}
-          className={cn(
-            "px-4 py-1.5 rounded font-medium transition-colors",
-            tab === "user" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          User Filled
-        </button>
-        <button
-          onClick={() => setTab("engine")}
-          className={cn(
-            "px-4 py-1.5 rounded font-medium transition-colors",
-            tab === "engine" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          Engine Generated
-        </button>
+      <div className="rounded-md border border-border/50 bg-muted/20 px-4 py-3 text-sm">
+        <p className="font-medium">Committed and manually entered targets</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          This page holds canonical target entry. AI-generated proposals are reviewed separately
+          on AI Targets and do not become committed values automatically.
+        </p>
       </div>
-      {tab === "user" ? <UserFilledTargets /> : <EngineTargets />}
+      <UserFilledTargets />
     </div>
   );
 }

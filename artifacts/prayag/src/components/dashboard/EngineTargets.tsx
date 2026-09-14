@@ -73,7 +73,16 @@ type EngineResult = {
   realTerms: {
     nominalPct: number;
     realPct: number | null;
-    context: { fy: string; valueCr: number; nominalPct: number | null; realPct: number | null }[];
+    context: Array<{
+      fy: string;
+      valueCr: number;
+      nominalPct: number | null;
+      realPct: number | null;
+      kind: "actual" | "projected";
+      basis: string;
+      actualYtdCr: number | null;
+      seasonalSharePct: number | null;
+    }>;
   };
   combined: {
     base: number;
@@ -115,11 +124,11 @@ function lakh(n: number): string {
 // ── Component ────────────────────────────────────────────────────────────────
 
 const SUBTABS = [
-  { key: "combined", label: "Combined" },
-  { key: "oldSku", label: "Existing Sales Old SKU" },
-  { key: "newSku", label: "Existing Sales New SKU" },
-  { key: "newCustomers", label: "New Customers" },
-  { key: "people", label: "People (Secondary)" },
+  { key: "combined", label: "Primary · Combined" },
+  { key: "oldSku", label: "Primary · Old SKU" },
+  { key: "newSku", label: "Primary · New SKU" },
+  { key: "newCustomers", label: "Primary · New Customers" },
+  { key: "people", label: "Secondary · People" },
 ] as const;
 
 type SubTab = (typeof SUBTABS)[number]["key"];
@@ -271,6 +280,12 @@ export default function EngineTargets() {
 
   return (
     <div className="space-y-6">
+      <div className="rounded-md border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+        <b className="text-foreground">Basis:</b> Primary tabs use PostgreSQL{" "}
+        <code>sale_line_current</code> company dispatch; Secondary People uses PostgreSQL{" "}
+        <code>secondary_sku_line</code> retailer booking. The two proposal totals are separate and
+        are never summed.
+      </div>
       {/* Sub-tabs */}
       <div className="inline-flex rounded-md border border-border/50 p-0.5 text-sm flex-wrap">
         {SUBTABS.map((t) => (
@@ -373,7 +388,13 @@ function CombinedTab(props: {
   const contextLine = useMemo(() => {
     const parts = realTerms.context
       .filter((c) => c.nominalPct != null)
-      .map((c) => `FY${c.fy}: ${fmtPct(c.nominalPct)} nominal / ${fmtPct(c.realPct)} real`);
+      .map((c) => {
+        const value = `₹${c.valueCr.toFixed(2)} Cr`;
+        if (c.kind === "projected") {
+          return `FY${c.fy} projected ${value} (${c.basis}): ${fmtPct(c.nominalPct)} nominal / ${fmtPct(c.realPct)} real`;
+        }
+        return `FY${c.fy} actual ${value}: ${fmtPct(c.nominalPct)} nominal / ${fmtPct(c.realPct)} real`;
+      });
     return parts.join(" · ");
   }, [realTerms]);
 
@@ -412,7 +433,10 @@ function CombinedTab(props: {
             </div>
           </div>
           {contextLine && (
-            <p className="text-xs text-muted-foreground">For context, the business did: {contextLine}.</p>
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>For context: {contextLine}.</p>
+              <p>Source: PostgreSQL <code>sale_line_current</code>. The open FY excludes incomplete months.</p>
+            </div>
           )}
           <div>
             <p className="text-sm font-medium mb-1.5">

@@ -82,6 +82,7 @@ const NAV: NavGroup[] = [
       { id: "reports",         label: "Reports",         path: "/reports",         icon: FileSpreadsheet },
       { id: "company-reports", label: "Company Reports", path: "/company-reports", icon: BarChartIcon },
       { id: "comparison",      label: "Comparison",      path: "/comparison",      icon: LineChart },
+      { id: "ai-targets",      label: "AI Targets",      path: "/ai-targets",      icon: Bot },
       { id: "targets",         label: "Targets",         path: "/targets",         icon: Target },
       { id: "pending",         label: "Pending Orders",  path: "/pending",         icon: ClipboardList },
       { id: "data-health",     label: "Data Health",     path: "/data-health",     icon: ShieldCheck },

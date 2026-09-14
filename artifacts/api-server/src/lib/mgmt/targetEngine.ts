@@ -14,6 +14,9 @@ import { sql } from "drizzle-orm";
 import { PROJECT_HEAD_CANON } from "../sku/catalogue.js";
 import { computeCategoryMultipliers, computeCompanyMultiplier } from "../customers/laspeyres.js";
 import { getSeasonality, type SegmentSeasonality } from "../sku/skuK4.js";
+import { getSeasonalCalibration } from "../seasonal.js";
+import { isMonthComplete } from "../analytics/analytics.js";
+import { projectFromCompleteMonths } from "./targetContextProjection.js";
 import { loadTargetsForFy } from "./targets.js";
 import { loadMemberTargetSnapshots } from "./deepDiveData.js";
 import { loadDistributorTmMap } from "./distributorTmMap.js";
@@ -106,7 +109,16 @@ export type EngineResult = {
   realTerms: {
     nominalPct: number;
     realPct: number | null;
-    context: { fy: string; valueCr: number; nominalPct: number | null; realPct: number | null }[];
+    context: {
+      fy: string;
+      valueCr: number;
+      nominalPct: number | null;
+      realPct: number | null;
+      kind: "actual" | "projected";
+      basis: string;
+      actualYtdCr: number | null;
+      seasonalSharePct: number | null;
+    }[];
   };
   combined: {
     base: number;
@@ -287,7 +299,7 @@ export async function computeEngineTargets(opts: {
   // Real-terms line + context (nominal from the register, real via Laspeyres).
   const realPct =
     companyMultiplier != null ? ((1 + inc) / companyMultiplier - 1) * 100 : null;
-  const context = await realTermsContext(baselineFy);
+  const context = await realTermsContext(baselineFy, now);
 
   // Combined tab: weights split the GROWTH, never the total.
   const w = params.weights;
@@ -573,10 +585,11 @@ function normaliseWeights(w: Partial<EngineWeights> | undefined): EngineWeights 
   return { oldSku: o, newSku: n, newCustomers: c };
 }
 
-/** Nominal + real growth context for the loaded closed years and current YTD. */
+/** Nominal + real growth context: closed-FY actuals plus an open-FY seasonal projection. */
 async function realTermsContext(
   baselineFy: string,
-): Promise<{ fy: string; valueCr: number; nominalPct: number | null; realPct: number | null }[]> {
+  now: Date,
+): Promise<EngineResult["realTerms"]["context"]> {
   try {
     const res = await db.execute(sql`
       SELECT fy, sum(amount::float8) AS value FROM sale_line_current GROUP BY fy ORDER BY fy`);
@@ -584,27 +597,48 @@ async function realTermsContext(
     const byFy = new Map(rows.map((r) => [r.fy, Number(r.value)]));
     const fys = [...byFy.keys()].sort();
     const openFy = fys[fys.length - 1];
-    // For the open FY, nominal must compare LIKE months (Apr–Jul vs Apr–Jul),
-    // not YTD against the prior full year.
-    let openFyLikePrev: number | null = null;
+
+    let openProjection: ReturnType<typeof projectFromCompleteMonths> = null;
+    let projectionBasis = "";
     if (openFy && openFy > baselineFy) {
       const monthsRes = await db.execute(sql`
-        SELECT DISTINCT substring(month_label, 1, 3) AS m
-        FROM sale_line_current WHERE fy = ${openFy} AND month_label IS NOT NULL`);
-      const months = (((monthsRes as any).rows ?? monthsRes) as { m: string }[]).map((r) => r.m);
-      if (months.length > 0) {
-        const prevRes = await db.execute(sql`
-          SELECT sum(amount::float8) AS value FROM sale_line_current
-          WHERE fy = ${priorFy(openFy)}
-            AND substring(month_label, 1, 3) IN (${sql.join(months.map((m) => sql`${m}`), sql`, `)})`);
-        const v = Number((((prevRes as any).rows ?? prevRes) as any[])[0]?.value);
-        if (Number.isFinite(v) && v > 0) openFyLikePrev = v;
-      }
+        SELECT month_label,
+               sum(amount::float8) AS value,
+               max(invoice_date)::text AS max_invoice_date
+        FROM sale_line_current
+        WHERE fy = ${openFy} AND month_label IS NOT NULL
+        GROUP BY month_label`);
+      const monthRows = ((monthsRes as any).rows ?? monthsRes) as {
+        month_label: string;
+        value: string;
+        max_invoice_date: string | null;
+      }[];
+      const calibration = getSeasonalCalibration();
+      const monthIndex = new Map(
+        calibration.monthNames.map((month, index) => [month.slice(0, 3).toLowerCase(), index]),
+      );
+      const completeRows = monthRows.flatMap((row) => {
+        if (!isMonthComplete(row.month_label, row.max_invoice_date, now.getTime())) return [];
+        const index = monthIndex.get(row.month_label.slice(0, 3).toLowerCase());
+        return index == null
+          ? []
+          : [{
+              amount: Number(row.value),
+              fiscalMonthIndex: index,
+              monthLabel: row.month_label,
+            }];
+      });
+      openProjection = projectFromCompleteMonths(completeRows, calibration.monthly);
+      projectionBasis = calibration.derivedFrom;
     }
-    const out: { fy: string; valueCr: number; nominalPct: number | null; realPct: number | null }[] = [];
+
+    const out: EngineResult["realTerms"]["context"] = [];
     for (const f of fys) {
-      const prev = f === openFy && openFyLikePrev != null ? openFyLikePrev : byFy.get(priorFy(f));
-      const nominal = prev && prev > 0 ? (byFy.get(f)! / prev - 1) * 100 : null;
+      const projection = f === openFy ? openProjection : null;
+      const isProjected = projection != null;
+      const value = projection?.projectedFullYear ?? byFy.get(f)!;
+      const prev = byFy.get(priorFy(f));
+      const nominal = prev && prev > 0 ? (value / prev - 1) * 100 : null;
       let real: number | null = null;
       if (nominal != null) {
         try {
@@ -617,9 +651,15 @@ async function realTermsContext(
       }
       out.push({
         fy: f,
-        valueCr: round2(byFy.get(f)! / 1e7),
+        valueCr: round2(value / 1e7),
         nominalPct: nominal != null ? round1(nominal) : null,
         realPct: real != null ? round1(real) : null,
+        kind: isProjected ? "projected" : "actual",
+        basis: projection
+          ? `${projection.completeMonths.join(", ")} complete actuals ÷ ${round2(projection.seasonalShare * 100)}% of ${projectionBasis}`
+          : "complete full-year actual",
+        actualYtdCr: projection ? round2(projection.actualYtd / 1e7) : null,
+        seasonalSharePct: projection ? round2(projection.seasonalShare * 100) : null,
       });
     }
     return out;

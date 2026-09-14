@@ -60,6 +60,7 @@ const PAGE_CAPABILITIES: Record<string, PeriodCapability> = {
   "resources":               "NONE",  // Coverage — roster snapshot only, no FY dimension in source
   "comparison":              "NONE",  // page has its own period builder (C2)
   "targets":                 "NONE",  // local FY selector inside the component
+  "ai-targets":              "NONE",  // target FY is derived by each proposal engine
   "data-health":             "NONE",  // local FY selector inside the component
 
 };
