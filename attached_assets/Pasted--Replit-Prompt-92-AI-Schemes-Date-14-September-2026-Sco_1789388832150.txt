@@ -1,0 +1,291 @@
+# Replit Prompt 92 — AI Schemes
+
+**Date:** 14 September 2026
+**Scope:** Section A is read-only and decides feasibility. Sections B–D are the
+design. Section E is the phased build.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**A new page: `/ai-schemes`.** Separate from `/ai-targets`, which proposes
+targets. This proposes schemes.
+
+---
+
+## The finding this is built on
+
+**A scarce SKU is not one customers buy little of. It is one almost nobody
+buys.**
+
+| Band | Codes | Sales per code | Customers per SKU | Value per pair |
+|---|---:|---:|---:|---:|
+| VERY HIGH | 122 | ₹55.1 L | 158.8 | ₹34,671 |
+| HIGH | 437 | ₹9.23 L | 43.7 | ₹21,113 |
+| MEDIUM | 958 | ₹2.10 L | 11.1 | ₹18,958 |
+| LOW | 1,041 | ₹51,681 | 3.2 | ₹16,150 |
+| SCARCE | 1,423 | ₹9,487 | 1.3 | ₹7,298 |
+| DORMANT | 6,464 | — | 0 | — |
+
+Sales per code differ **580×** top to bottom. Customers per SKU differ **122×**.
+Value per pair differs only **4.8×**.
+
+**Distribution explains the gap, not order size.** So a percentage discount aimed
+at making someone buy *more* of a scarce SKU targets the wrong variable.
+
+**Breadth is the lever, and secondary is where it is visible:**
+
+| | Primary | Secondary |
+|---|---:|---:|
+| Customers | 572 distributors | **9,078 retailers** |
+| SKUs each | 95 | **~14** |
+| Pair density | 2.4% | **0.35%** |
+
+**+2 SKUs per retailer ≈ ₹8.29 Cr** of secondary order booking, valued at a
+**marginal** pair of ₹4,568 — not the ₹18,271 average, which is dragged up by a
+small number of large pairs.
+
+---
+
+## Section A — read-only. Can this be built?
+
+```
+Read-only. Change nothing. Every number below is an estimate from aggregate
+figures and must be replaced by the real one.
+
+A1. THE PAIR MATRIX. From secondary_sku_line, for FY2025-26 and FY2026-27:
+      distinct retailer x item pairs
+      active retailers
+      distinct SKUs
+      density
+      the VALUE DISTRIBUTION of pairs - deciles, so the marginal pair value
+      is measured rather than assumed
+
+    My estimate: 126,480 pairs, 9,078 retailers, 0.35% density, marginal
+    pair ~Rs 4,568. Replace all four.
+
+A2. BANDS FROM REAL DATA. Rebuild the five bands on cumulative revenue and
+    print codes, value and share per band. My figures came from the
+    Products export; confirm against sale_line_current.
+
+    Add DORMANT: catalogue codes with zero sales. I estimate 6,464 of
+    10,445.
+
+A3. CUSTOMERS PER SKU BY BAND. This is the whole premise and I ESTIMATED
+    it by scaling. Compute it properly from secondary_sku_line - distinct
+    retailers per SKU, by band.
+
+    If the 122x spread does not hold, the design changes.
+
+A4. PEER SETS. Can a comparable-retailer set be built? What attributes
+    exist - state, distributor, size band, segments bought, months active?
+
+    With 9,078 retailers a peer set should be statistically real. With 572
+    distributors it would not be.
+
+A5. MARGIN JOIN. Scheme depth is capped by margin, which lives in
+    margin_fact keyed on item_code. secondary_sku_line is keyed on item
+    code too.
+
+    Confirm the two join. Print coverage: how many sold SKUs have a
+    margin figure, and what share of value they carry.
+
+    KNOWN GAPS: margin stops at June 2026, PTMT Jan-Apr is held H1, and
+    780 codes worth Rs 9.36 Cr have no MRP at all (P3).
+
+A6. CANNIBALISATION. Is there any way to distinguish a retailer adding a
+    SKU from a retailer switching between two similar SKUs?
+
+    If not, say so. An engine that cannot tell incremental from
+    substitution will confidently recommend paying for both.
+
+A7. What does the existing nudge engine already compute that this can
+    reuse? territoryResolver, audienceFilter, the ROI filter, the slab
+    arithmetic.
+
+Report before any design is fixed.
+```
+
+---
+
+## Section B — the model
+
+```
+Design, for comment. Build nothing.
+
+TWO INDEPENDENT AXES. Depth is set by margin; posture is set by band.
+They must not be collapsed - every band contains every margin tier.
+
+  VERY HIGH   26.55 Cr rich | 26.59 mid | 14.03 thin | 0 bare
+  SCARCE       0.49 Cr rich |  0.58 mid |  0.26 thin | 0.02 bare
+
+AXIS 1 - MARGIN TIER sets the CEILING. Cap scheme cost at ~12-15% of the
+category's gross margin:
+
+  RICH  >=55%   PTMT 68.5, Connection 59.3, Water tank 56.9   max 8%
+  MID   40-55%  CPVC ft 49.5, Cistern 48.7, AGRI 42.0         max 6%
+  THIN  27-40%  CP 40.0, UPVC 39.7, SWR 34.3, Sink 30.6       max 4%
+  BARE  <27%    Garden pipe 14.3, CPVC pipe 18.6, AGRI 18.3   NO CASH
+                                                              SCHEME
+
+  Note the pipe/fitting split: CPVC fittings 49.5% vs CPVC pipe 18.6%.
+  AGRI fittings 42.0% vs AGRI pipe 18.3%. Same family, different economics.
+
+AXIS 2 - BAND sets the POSTURE:
+
+  VERY HIGH   NO push scheme. 122 codes at 159 retailers each - there is
+              no breadth left to buy. A 3% scheme costs Rs 2.02 Cr to
+              subsidise sales that happen anyway.
+  HIGH        Protect only. Light threshold slabs to hold share.
+  MEDIUM      The main prize. 958 codes at ~11 retailers each. Breadth
+              push within the margin cap.
+  LOW         Aggressive breadth within cap.
+  SCARCE      NO CASH. Non-price levers only - see below.
+  DORMANT     Trial and sampling. Not a percentage scheme.
+
+THREE MECHANICS, and two of them cost nothing:
+
+  1. FIRST-ORDER RELIEF
+     A one-time incentive on a retailer's FIRST purchase of a target SKU.
+     Paid once per pair, never again. The pair, once created, is worth
+     Rs 4,568 in its first year and more thereafter.
+
+  2. QUALIFYING BREADTH CONDITION - free
+     The main volume slab unlocks only if the order includes n SKUs from
+     the target group. A retailer who would have qualified anyway pays you
+     nothing and takes the range.
+
+  3. WEIGHTED COUNTING - free
+     Target-SKU billing counts 1.5x toward the existing slab. No new cash,
+     faster slab crossing. The existing engine already computes that
+     arithmetic.
+
+  Mechanics 2 and 3 matter most for BARE-margin categories, which cannot
+  fund a cash scheme at any depth.
+
+  scheme_item_group already exists with 22 values, so group scoping is in
+  the data model.
+
+TARGETING - the peer gap
+
+  For each (retailer, SKU) pair that does NOT exist:
+    does the retailer's peer set buy it?
+    peer set = same state + similar size + overlapping segments
+    score = peer penetration x SKU margin x band priority
+
+  Rank offers by expected incremental gross contribution, not by SKU size.
+
+PAYBACK - every proposal must pass
+
+  At 45% blended margin:
+    2% scheme needs  4.4% incremental volume
+    3% scheme needs  6.7%
+    5% scheme needs 11.1%
+    8% scheme needs 17.8%
+
+  A proposal that cannot state its breakeven is not shown.
+```
+
+---
+
+## Section C — guardrails
+
+```
+Non-negotiable. Any of these failing means the proposal is suppressed.
+
+C1. NEVER propose on held data. H1 PTMT Jan-Apr has no usable cost basis -
+    margin overstated ~21 points. The Resolution register must be consulted
+    at proposal time, not at display time.
+
+C2. NEVER propose where margin is unknown. 780 codes, Rs 9.36 Cr (P3). No
+    margin, no cap, no proposal.
+
+C3. NEVER exceed the margin cap. Print the cost as a percentage of gross
+    margin on every proposal, not just the scheme rate.
+
+C4. NEVER propose without a breakeven. Cost, required lift, and the
+    assumption behind it, on the face of the proposal.
+
+C5. A PROPOSAL IS NOT A SCHEME. Everything lands in a proposals table.
+    Nothing becomes live without a person accepting it. Same rule as
+    engine_targets.
+
+C6. SCHEME ELIGIBILITY VOCABULARY IS RING-FENCED. scheme_item_group is 22
+    separate values, deliberately not the category registry. A category
+    remap must never silently change who qualifies. This engine READS it
+    and never writes it.
+
+C7. CANNIBALISATION. Until A6 is answered, every proposal carries a
+    substitution warning naming the nearest SKUs in the same group.
+
+C8. Do not touch the existing nudge engine. This proposes new schemes; that
+    one nudges toward existing slabs. Different jobs.
+```
+
+---
+
+## Section D — the page
+
+```
+/ai-schemes. Proposals, not schemes.
+
+  TAB 1  BREADTH OPPORTUNITY
+    the pair matrix - density, SKUs per retailer, retailers per SKU
+    by band and by category
+    the headline: what +1, +2, +3 SKUs per retailer is worth at the
+    MEASURED marginal pair value
+
+  TAB 2  PROPOSALS
+    ranked by expected incremental gross contribution
+    each showing: target SKUs, audience, mechanic, depth, cost, cost as
+    % of margin, breakeven lift, peer evidence, substitution warning
+    accept / reject / hold, with the decision recorded
+
+  TAB 3  SKU BANDS
+    the five bands plus dormant, with codes, value, retailers per SKU,
+    margin tier and what each band is eligible for
+
+  TAB 4  MARGIN HEADROOM
+    by category: gross margin, max scheme, what is currently being spent
+    coverage stated - which months, which categories are held
+
+  TAB 5  ACCEPTED
+    proposals that became schemes, and what happened to them afterwards.
+    Without this the engine never learns whether it was right.
+
+EVERY FIGURE: source named, coverage stated, three states, held periods
+explicit.
+```
+
+---
+
+## Section E — build order
+
+```
+E1  Section A only. Read-only. It may invalidate the design.
+E2  The pair matrix and band computation - Tab 1 and Tab 3. No proposals.
+    This alone is useful: nobody can currently see that a scarce SKU is
+    scarce because 1.3 retailers buy it.
+E3  Margin headroom - Tab 4. Reads margin_fact and the registry.
+E4  Peer sets and the gap score. The hard part.
+E5  Proposals with the three mechanics - Tab 2.
+E6  Accepted tracking - Tab 5.
+
+E2 and E3 are worth shipping even if E4 onward never happens. The
+diagnosis has value without the prescription.
+```
+
+---
+
+## Notes
+
+- **A3 is the load-bearing check.** I estimated customers-per-SKU by scaling to
+  reconcile a known pair total. If the real spread is not roughly 122×, the
+  premise weakens and the design should change.
+- **Mechanics 2 and 3 are the important ones.** Garden Pipe at 14.3% margin cannot
+  fund a cash scheme at any depth, and it is not alone — CPVC pipe is 18.6%, AGRI
+  pipe 18.3%. A free mechanic is the only mechanic available there.
+- **C1 is why the Resolution register exists.** An engine proposing schemes off
+  held margin data would be the most expensive possible consumer of a figure we
+  know is wrong.
+- **E2 alone justifies the work.** Today nobody can see that the difference between
+  a top SKU and a scarce one is 122× in distribution and 4.8× in order size. That
+  changes what you do about it.
