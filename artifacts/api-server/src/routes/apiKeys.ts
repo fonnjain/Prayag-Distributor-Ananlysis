@@ -21,6 +21,9 @@ router.get("/keys", async (req, res) => {
         isRevoked: apiKeys.isRevoked,
         createdAt: apiKeys.createdAt,
         lastUsedAt: apiKeys.lastUsedAt,
+        lastUsedMethod: apiKeys.lastUsedMethod,
+        lastUsedPath: apiKeys.lastUsedPath,
+        lastUsedStatus: apiKeys.lastUsedStatus,
         revokedAt: apiKeys.revokedAt,
       })
       .from(apiKeys)
@@ -74,6 +77,9 @@ router.post("/keys", async (req, res) => {
         isRevoked: apiKeys.isRevoked,
         createdAt: apiKeys.createdAt,
         lastUsedAt: apiKeys.lastUsedAt,
+        lastUsedMethod: apiKeys.lastUsedMethod,
+        lastUsedPath: apiKeys.lastUsedPath,
+        lastUsedStatus: apiKeys.lastUsedStatus,
         revokedAt: apiKeys.revokedAt,
       });
 

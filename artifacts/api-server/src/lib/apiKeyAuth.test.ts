@@ -71,6 +71,9 @@ describe("external read API-key authorization", () => {
     ["GET", "/external/sales-by-item"],
     ["GET", "/external/margin-by-item"],
     ["GET", "/api/external/sales-by-item"],
+    ["GET", "/sales-by-item"],
+    ["GET", "/margin-by-item"],
+    ["GET", "/remounted/elsewhere/sales-by-item"],
   ])("recognizes only the approved %s %s endpoint", (method, path) => {
     expect(isExternalReadEndpoint({ method, path } as any)).toBe(true);
   });
@@ -93,7 +96,7 @@ describe("external read API-key authorization", () => {
     const next = vi.fn();
     const allowedResponse = response();
     requireExternalReadEndpointAccess(
-      { method: "GET", path: "/external/sales-by-item", apiKey: { id: 1, name: "reader", scope: "external_read" } } as any,
+      { method: "GET", path: "/sales-by-item", apiKey: { id: 1, name: "reader", scope: "external_read" } } as any,
       allowedResponse as any,
       next,
     );

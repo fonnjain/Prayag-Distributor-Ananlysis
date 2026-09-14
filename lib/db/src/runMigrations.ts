@@ -5530,6 +5530,21 @@ const MIGRATIONS: Migration[] = [
       $do$;
     `,
   },
+  {
+    id: "114_api_key_last_response",
+    sql: `
+      ALTER TABLE api_keys
+        ADD COLUMN IF NOT EXISTS last_used_method TEXT,
+        ADD COLUMN IF NOT EXISTS last_used_path TEXT,
+        ADD COLUMN IF NOT EXISTS last_used_status INTEGER;
+
+      ALTER TABLE api_keys
+        DROP CONSTRAINT IF EXISTS api_keys_last_used_status_check;
+      ALTER TABLE api_keys
+        ADD CONSTRAINT api_keys_last_used_status_check
+        CHECK (last_used_status IS NULL OR last_used_status BETWEEN 100 AND 599);
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

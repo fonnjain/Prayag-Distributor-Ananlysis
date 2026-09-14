@@ -15,12 +15,12 @@ const VERIFICATION_ENDPOINTS = new Set([
   "GET /audit/download",
 ]);
 const EXTERNAL_READ_ENDPOINTS = new Set([
-  "GET /external/sales-by-item",
-  "GET /external/margin-by-item",
+  "GET /sales-by-item",
+  "GET /margin-by-item",
 ]);
 const EXTERNAL_READ_PATHS = new Set([
-  "/external/sales-by-item",
-  "/external/margin-by-item",
+  "/sales-by-item",
+  "/margin-by-item",
 ]);
 
 // ── Key generation ─────────────────────────────────────────────────────────────
@@ -60,21 +60,20 @@ export function isVerificationEndpoint(req: Pick<Request, "method" | "path">): b
   return VERIFICATION_ENDPOINTS.has(`${req.method.toUpperCase()} ${req.path}`);
 }
 
-function normalizedPath(path: string): string {
-  // resolveApiKey is mounted at /api (so Express normally gives us the
-  // shorter path), while direct middleware tests and future mounts may pass
-  // the complete request path.
-  return path.startsWith("/api/") ? path.slice(4) : path;
+function externalRoutePath(path: string): string {
+  const cleanPath = path.split("?")[0];
+  const routeName = cleanPath.match(/\/(sales-by-item|margin-by-item)$/)?.[0];
+  return routeName ?? cleanPath;
 }
 
 export function isExternalReadEndpoint(req: Pick<Request, "method" | "path">): boolean {
   return EXTERNAL_READ_ENDPOINTS.has(
-    `${req.method.toUpperCase()} ${normalizedPath(req.path)}`,
+    `${req.method.toUpperCase()} ${externalRoutePath(req.path)}`,
   );
 }
 
 export function isExternalReadPath(req: Pick<Request, "path">): boolean {
-  return EXTERNAL_READ_PATHS.has(normalizedPath(req.path));
+  return EXTERNAL_READ_PATHS.has(externalRoutePath(req.path));
 }
 
 export async function resolveApiKey(
@@ -142,12 +141,6 @@ export async function resolveApiKey(
       res.status(403).json({ error: "External read identity is not authorized for this endpoint" });
       return;
     }
-
-    // Fire-and-forget last_used_at update
-    db.update(apiKeys)
-      .set({ lastUsedAt: new Date() })
-      .where(eq(apiKeys.id, row.id))
-      .catch(() => undefined);
 
     req.apiKey = { id: row.id, name: row.name, scope };
     return next();

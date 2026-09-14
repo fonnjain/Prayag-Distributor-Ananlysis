@@ -1,5 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
-import { pool } from "@workspace/db";
+import { db, pool } from "@workspace/db";
+import { apiKeys } from "@workspace/db/schema";
+import { eq } from "drizzle-orm";
 import { isExternalReadEndpoint } from "./apiKeyAuth.js";
 import { logger } from "./logger.js";
 
@@ -22,13 +24,27 @@ export function logExternalReadResponse(
 
   const startedAt = Date.now();
   res.once("finish", () => {
+    const method = req.method.toUpperCase();
+    const path = req.originalUrl?.split("?")[0] ?? req.path;
+    const statusCode = res.statusCode;
     logger.info({
       apiKeyId: req.apiKey!.id,
-      method: req.method,
-      path: req.originalUrl?.split("?")[0] ?? req.path,
-      statusCode: res.statusCode,
+      method,
+      path,
+      statusCode,
       durationMs: Date.now() - startedAt,
     }, "external read request completed");
+    void db.update(apiKeys)
+      .set({
+        lastUsedAt: new Date(),
+        lastUsedMethod: method,
+        lastUsedPath: path,
+        lastUsedStatus: statusCode,
+      })
+      .where(eq(apiKeys.id, req.apiKey!.id))
+      .catch((err) => {
+        logger.error({ err, apiKeyId: req.apiKey!.id }, "external read usage update failed");
+      });
   });
   next();
 }

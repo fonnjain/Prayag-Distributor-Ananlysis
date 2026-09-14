@@ -28,6 +28,9 @@ export const apiKeys = pgTable(
     isRevoked: boolean("is_revoked").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    lastUsedMethod: text("last_used_method"),
+    lastUsedPath: text("last_used_path"),
+    lastUsedStatus: integer("last_used_status"),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
   (t) => [

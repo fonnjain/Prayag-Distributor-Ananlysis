@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
+  update: vi.fn(),
   error: vi.fn(),
   info: vi.fn(),
 }));
 
 vi.mock("@workspace/db", () => ({
+  db: { update: mocks.update },
   pool: { query: mocks.query },
 }));
 
@@ -32,8 +34,14 @@ function response() {
 describe("external read rate limiter", () => {
   beforeEach(() => {
     mocks.query.mockReset();
+    mocks.update.mockReset();
     mocks.error.mockReset();
     mocks.info.mockReset();
+    mocks.update.mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      }),
+    });
   });
 
   it("uses one atomic Postgres upsert and allows the first request", async () => {
@@ -142,5 +150,6 @@ describe("external read rate limiter", () => {
       }),
       "external read request completed",
     );
+    expect(mocks.update).toHaveBeenCalledOnce();
   });
 });
