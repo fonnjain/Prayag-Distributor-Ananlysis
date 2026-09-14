@@ -5447,6 +5447,89 @@ const MIGRATIONS: Migration[] = [
       $do$;
     `,
   },
+  {
+    id: "113_resolution_raised_dates_and_legacy_priorities",
+    sql: `
+      WITH corrections(code, raised_on, priority, date_note) AS (
+        VALUES
+          ('H1',  DATE '2026-09-09', 'urgent'::resolution_priority, 'Exact raised date: 9 September 2026, PTMT BOM analysis.'),
+          ('H2',  DATE '2026-09-07', 'high'::resolution_priority,   'Exact raised date: 7 September 2026, when August SKU froze empty.'),
+          ('H3',  DATE '2026-09-02', 'high'::resolution_priority,   'Exact raised date: 2 September 2026, FY2024-25 date finding.'),
+          ('P1',  DATE '2026-09-14', 'medium'::resolution_priority, 'Source-document date used: Prompt 88 extended, 14 September 2026; exact raised date unavailable.'),
+          ('P2',  DATE '2026-09-14', 'high'::resolution_priority,   'Source-document date used: Prompt 88 extended, 14 September 2026; exact raised date unavailable.'),
+          ('P3',  DATE '2026-09-14', 'high'::resolution_priority,   'Source-document date used: Prompt 88 extended, 14 September 2026; exact raised date unavailable.'),
+          ('P4',  DATE '2026-09-14', 'medium'::resolution_priority, 'Source-document date used: Prompt 88 extended, 14 September 2026; exact raised date unavailable.'),
+          ('P5',  DATE '2026-09-08', 'medium'::resolution_priority, 'Source-document date used: Prompt 64 September readiness, 8 September 2026; exact raised date unavailable.'),
+          ('P6',  DATE '2026-09-08', 'high'::resolution_priority,   'Source-document date used: Prompt 64 September readiness, 8 September 2026; exact raised date unavailable.'),
+          ('P7',  DATE '2026-09-14', 'medium'::resolution_priority, 'Source-document date used: Prompt 88 extended, 14 September 2026; exact raised date unavailable.'),
+          ('P8',  DATE '2026-09-14', 'high'::resolution_priority,   'Source-document date used: Prompt 88 extended, 14 September 2026; exact raised date unavailable.'),
+          ('P9',  DATE '2026-09-14', 'low'::resolution_priority,    'Source-document date used: Prompt 88 extended, 14 September 2026; exact raised date unavailable.'),
+          ('P10', DATE '2026-09-10', 'medium'::resolution_priority, 'Source-document date used: Prompt 68 category registry, 10 September 2026; exact raised date unavailable.'),
+          ('P11', DATE '2026-09-01', 'low'::resolution_priority,    'Source-document date used: The two outstanding FY2025-26 questions, 1 September 2026; exact raised date unavailable.'),
+          ('P12', DATE '2026-09-01', 'high'::resolution_priority,   'Source-document date used: The two outstanding FY2025-26 questions, 1 September 2026; exact raised date unavailable.'),
+          ('P13', DATE '2026-09-01', 'medium'::resolution_priority, 'Source-document date used: Prompt 34 split-state suffixes, 1 September 2026; exact raised date unavailable.'),
+          ('P14', DATE '2026-09-14', 'medium'::resolution_priority, 'Source-document date used: Prompt 88 extended, 14 September 2026; exact raised date unavailable.'),
+          ('P15', DATE '2026-09-03', 'high'::resolution_priority,   'Source-document date used: Prompt 57 Red Alerts verification, 3 September 2026; exact raised date unavailable.'),
+          ('P16', DATE '2026-09-03', 'medium'::resolution_priority, 'Source-document date used: Prompt 57 Red Alerts verification, 3 September 2026; exact raised date unavailable.'),
+          ('P17', DATE '2026-09-03', 'medium'::resolution_priority, 'Source-document date used: Prompt 58 Red Alerts display fixes, 3 September 2026; exact raised date unavailable.'),
+          ('P18', DATE '2026-09-14', 'low'::resolution_priority,    'Source-document date used: Prompt 88 extended, 14 September 2026; exact raised date unavailable.'),
+          ('P19', DATE '2026-09-14', 'medium'::resolution_priority, 'Source-document date used: Prompt 88 extended, 14 September 2026; exact raised date unavailable.')
+      )
+      UPDATE resolution_item AS item
+         SET raised_on = corrections.raised_on,
+             priority = corrections.priority,
+             evidence = CASE
+               WHEN item.evidence LIKE '%' || corrections.date_note || '%' THEN item.evidence
+               ELSE item.evidence || ' [Raised date: ' || corrections.date_note || ']'
+             END,
+             updated_at = now()
+        FROM corrections
+       WHERE item.code = corrections.code;
+
+      UPDATE resolution_item
+         SET raised_on = DATE '2026-08-31',
+             evidence = CASE
+               WHEN evidence LIKE '%Raised date inherited from Prayag_Data_Queries_31Aug2026%' THEN evidence
+               ELSE evidence || ' [Raised date inherited from Prayag_Data_Queries_31Aug2026, the parent query-pack date.]'
+             END,
+             updated_at = now()
+       WHERE code ~ '^P(2[1-9]|3[0-9]|4[0-2])$';
+
+      DO $do$
+      BEGIN
+        IF (SELECT COUNT(*) FROM resolution_item WHERE code ~ '^P(2[1-9]|3[0-9]|4[0-2])$' AND raised_on = DATE '2026-08-31') <> 22 THEN
+          RAISE EXCEPTION 'P21-P42 raised dates are incomplete';
+        END IF;
+        IF (SELECT COUNT(*) FROM resolution_item WHERE code ~ '^(H[1-3]|P([1-9]|1[0-9]))$' AND priority IS NOT NULL) <> 22 THEN
+          RAISE EXCEPTION 'H1-P19 priorities are incomplete';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'H1' AND raised_on = DATE '2026-09-09' AND priority = 'urgent'
+        ) OR NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'H2' AND raised_on = DATE '2026-09-07' AND priority = 'high'
+        ) OR NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'H3' AND raised_on = DATE '2026-09-02' AND priority = 'high'
+        ) OR NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P15' AND raised_on = DATE '2026-09-03' AND priority = 'high'
+        ) THEN
+          RAISE EXCEPTION 'Mandatory hold and delivery priorities are incomplete';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P42'
+             AND status = 'answered'
+             AND resolved_on = DATE '2026-09-14'
+        ) THEN
+          RAISE EXCEPTION 'P42 closed metadata changed while correcting raised dates';
+        END IF;
+      END
+      $do$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
