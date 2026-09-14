@@ -309,6 +309,8 @@ router.get("/mrp/stats", async (req, res) => {
       p_strip: 0,
       colour_suffix: 0,
       whitespace: 0,
+      hyphen: 0,
+      ambiguous: 0,
       unresolved: 0,
     };
     const unresolvedCodes: Record<string, number> = {};

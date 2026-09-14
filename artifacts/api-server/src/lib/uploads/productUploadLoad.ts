@@ -447,6 +447,8 @@ export async function runProductUploadLoad(opts: { write: boolean; endPool?: boo
     p_strip: 0,
     colour_suffix: 0,
     whitespace: 0,
+    hyphen: 0,
+    ambiguous: 0,
     unresolved: 0,
   };
   const unresolvedCodes: string[] = [];

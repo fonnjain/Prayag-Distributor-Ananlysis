@@ -9,6 +9,8 @@ const MASTER = [
   "7118", "4011", "4019", "4051", "4303",
   // whitespace target
   "Q724 MB",
+  // hyphen-normalisation targets
+  "324K", "323K", "AB 12",
   // exact-match codes that LOOK like colour suffixes but are legitimate
   "130-B", "141-E", "121-E", "129-C",
 ];
@@ -61,6 +63,51 @@ describe("resolveProductCode — step 4 whitespace", () => {
     const r = resolveProductCode("Q724MB", has, codes);
     expect(r.method).toBe("whitespace");
     expect(r.masterCode).toBe("Q724 MB");
+  });
+});
+
+describe("resolveProductCode — step 5 hyphen removal", () => {
+  it.each([
+    ["324-K", "324K"],
+    ["323-K", "323K"],
+  ])("%s resolves uniquely to %s and traces hyphen removal", (register, master) => {
+    const result = resolveProductCode(register, has, codes);
+    expect(result).toMatchObject({
+      method: "hyphen",
+      masterCode: master,
+      appliedRules: ["hyphen"],
+      ambiguousMasterCodes: [],
+    });
+  });
+
+  it("retains whitespace and hyphen transformations in the trace", () => {
+    const result = resolveProductCode("AB1-2", has, codes);
+    expect(result).toMatchObject({
+      method: "hyphen",
+      masterCode: "AB 12",
+      appliedRules: ["whitespace", "hyphen"],
+    });
+  });
+
+  it("does not match when de-hyphenation has multiple catalogue candidates", () => {
+    const ambiguous = buildResolverIndex(["AB-C", "A-BC"]);
+    const result = resolveProductCode("A-B-C", ambiguous.has, ambiguous.codes);
+    expect(result.method).toBe("ambiguous");
+    expect(result.masterCode).toBeNull();
+    expect(result.ambiguousMasterCodes).toEqual(["A-BC", "AB-C"]);
+    expect(result.appliedRules).toEqual(["hyphen"]);
+  });
+
+  it("leaves every previously resolved method unchanged", () => {
+    const existing = [
+      ["130-B", "exact"],
+      ["P6818", "p_strip"],
+      ["7118-B", "colour_suffix"],
+      ["Q724MB", "whitespace"],
+    ] as const;
+    for (const [register, method] of existing) {
+      expect(resolveProductCode(register, has, codes).method).toBe(method);
+    }
   });
 });
 
