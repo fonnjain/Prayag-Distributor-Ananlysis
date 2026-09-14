@@ -49,6 +49,25 @@ export type ExternalCoverage = {
   read_at: string;
   /** Additive aliases make the machine-readable period sets unambiguous. */
   requested_periods: string[];
+  reconciliation: {
+    fy: "2026-27";
+    control: 135340056814;
+    actual: 135232056020;
+    variance: -108000794;
+    variance_pct: -0.0008;
+    status: "unreconciled";
+    reference: "P003";
+  };
+};
+
+export const P003_RECONCILIATION: ExternalCoverage["reconciliation"] = {
+  fy: "2026-27",
+  control: 135340056814,
+  actual: 135232056020,
+  variance: -108000794,
+  variance_pct: -0.0008,
+  status: "unreconciled",
+  reference: "P003",
 };
 
 type QueryRow = Record<string, unknown>;
@@ -410,6 +429,7 @@ export function requestedCoverage(
       : [],
     provisional,
     read_at: readAt,
+    reconciliation: P003_RECONCILIATION,
   };
 }
 

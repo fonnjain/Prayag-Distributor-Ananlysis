@@ -12,6 +12,7 @@ import {
   monthUnavailableForMargin,
   monthlyAttributionPeriodLabels,
   parseExternalRequest,
+  P003_RECONCILIATION,
   queryHash,
   requestedCoverage,
   reconciliation,
@@ -114,6 +115,7 @@ describe("external item request helpers", () => {
       unavailable: [],
       provisional: [],
       read_at: "2026-09-14T09:00:00.000Z",
+      reconciliation: P003_RECONCILIATION,
     };
     expect(reconciliation(request, {
       row_count: 135340,
@@ -222,6 +224,16 @@ describe("external item request helpers", () => {
     ]);
     expect(coverage.returned).toEqual(["2026-04", "2026-05", "2026-06"]);
     expect(coverage.unavailable[0]?.months).toEqual(["2026-07", "2026-08"]);
+    expect(coverage.reconciliation).toEqual({
+      fy: "2026-27",
+      control: 135340056814,
+      actual: 135232056020,
+      variance: -108000794,
+      variance_pct: -0.0008,
+      status: "unreconciled",
+      reference: "P003",
+    });
+    expect(coverage.reconciliation).toBe(P003_RECONCILIATION);
   });
 
   it("uses one binary comparator across numeric and punctuation cursors", () => {
