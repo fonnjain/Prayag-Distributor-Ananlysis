@@ -5323,6 +5323,74 @@ const MIGRATIONS: Migration[] = [
        WHERE code = 'P20' AND status = 'open';
     `,
   },
+  {
+    id: "110_resolution_p008_product_code_findings",
+    sql: `
+      UPDATE resolution_item
+         SET title = '814 sold codes with no MRP master record',
+             reason = '814 sold codes remain without a unique MRP master record after P008 hyphen recovery.',
+             evidence = '[Source: P008 hyphen recovery, 14 September 2026] Hyphen normalisation uniquely recovered eight codes worth Rs 0.54 Cr. The remaining unresolved population is 814 codes worth Rs 9.36 Cr.',
+             value_at_stake = 93600000,
+             updated_at = now()
+       WHERE code = 'P3';
+
+      UPDATE resolution_item
+         SET title = 'Confirm three WCT one-edit product-code candidates',
+             reason = 'Confirm whether WCT-3LL-10 maps to WT-3LL-10, WCT-3LL-05 maps to WT-3LL-05, and WCT-3LL-07 maps to WT-3LL-07.',
+             evidence = '[Source: P008 hyphen recovery, 14 September 2026] These are unique edit-distance-one candidates only, not automatic resolver matches. Prayag confirmation is required. Value remains Rs 1.17 Cr.',
+             value_at_stake = 11700000,
+             updated_at = now()
+       WHERE code = 'P4';
+
+      INSERT INTO resolution_item
+        (code, type, title, category, reason, evidence, value_at_stake, raised_on,
+         raised_by, owner, priority, status, blocks_api)
+      VALUES
+        ('P43', 'PENDING', 'Six product codes have multiple one-edit catalogue candidates', 'master data',
+         'Resolve 824XD, 924XD, 824SD, HD140B, HD160B and HD200B against the authoritative catalogue.',
+         '[Source: P008 hyphen recovery, 14 September 2026] Each code has multiple edit-distance-one catalogue candidates. Combined value is Rs 1.50 Cr. The mappings are ambiguous and cannot be resolved without Prayag confirmation.',
+         15000000, '2026-09-14', 'P008 hyphen recovery', 'Prayag', NULL, 'open', FALSE)
+      ON CONFLICT (code) DO UPDATE
+        SET title = EXCLUDED.title,
+            category = EXCLUDED.category,
+            reason = EXCLUDED.reason,
+            evidence = EXCLUDED.evidence,
+            value_at_stake = EXCLUDED.value_at_stake,
+            owner = EXCLUDED.owner,
+            updated_at = now();
+
+      DO $do$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P3'
+             AND title = '814 sold codes with no MRP master record'
+             AND value_at_stake = 93600000
+        ) THEN
+          RAISE EXCEPTION 'P3 P008 update is incomplete';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P4'
+             AND value_at_stake = 11700000
+             AND evidence LIKE '%Prayag confirmation is required%'
+        ) THEN
+          RAISE EXCEPTION 'P4 candidate update is incomplete';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P43'
+             AND type = 'PENDING'
+             AND status = 'open'
+             AND blocks_api = FALSE
+             AND value_at_stake = 15000000
+        ) THEN
+          RAISE EXCEPTION 'P43 ambiguity item is incomplete';
+        END IF;
+      END
+      $do$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
