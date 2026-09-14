@@ -5,6 +5,7 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { resolveApiKey } from "./lib/apiKeyAuth";
+import { rateLimitExternalRead } from "./lib/externalReadRateLimiter";
 import { requireSameOriginForSession, resolveSession } from "./lib/auth";
 
 const app: Express = express();
@@ -54,6 +55,9 @@ app.use(cookieParser());
 
 // Validate Bearer token if present; attach req.apiKey; reject invalid tokens.
 app.use("/api", resolveApiKey);
+// External integrations are limited per authenticated key before any route
+// handler runs. The middleware is a no-op for every other request.
+app.use("/api", rateLimitExternalRead);
 app.use("/api", resolveSession);
 app.use("/api", requireSameOriginForSession);
 app.use("/api", router);

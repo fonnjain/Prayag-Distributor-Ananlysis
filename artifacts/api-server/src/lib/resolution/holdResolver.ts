@@ -14,6 +14,8 @@ export type ResolutionItemType = "HOLD" | "PENDING";
 
 export type ResolutionHold = {
   id: string | number;
+  /** Stable register code (for example H1/H3), when present. */
+  code?: string;
   type: ResolutionItemType;
   title: string;
   scope: string;
@@ -76,6 +78,8 @@ export type HoldResolutionInput = {
   product?: string | null;
   requestedPeriods?: string[];
   availablePeriods?: string[];
+  /** External item analytics opts into exact FY/month interpretation. */
+  strictFiscalYear?: boolean;
   /** Supplying rows makes this pure and is useful for route/unit tests. */
   holds?: Array<ResolutionHold | ResolutionItemRow>;
 };
@@ -172,12 +176,14 @@ function fiscalYearForMonthLabel(period: string): string | null {
   return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
 }
 
-function periodMatches(hold: ResolutionHold, requested: string): boolean {
+function periodMatches(hold: ResolutionHold, requested: string, strictFiscalYear = false): boolean {
   const holdMonth = hold.month;
   const holdFy = hold.fiscalYear;
   if (!holdMonth && !holdFy) return true;
   const requestedYears = years(requested);
   if (holdFy && requested.includes(holdFy)) return true;
+  const requestedFy = strictFiscalYear ? fiscalYearForMonthLabel(requested) : null;
+  if (holdFy && requestedFy && requestedFy !== holdFy) return false;
   if (!holdMonth) return !holdFy || requestedYears.size === 0;
   const heldMonths = monthNumbers(holdMonth);
   const requestedMonths = monthNumbers(requested);
@@ -207,6 +213,7 @@ function toHold(row: Record<string, unknown>): ResolutionHold | null {
   const scope = [scopeProduct, scopeMeasure, fiscalYear, month].filter(Boolean).join(" · ") || "specified register scope";
   return {
     id: typeof id === "number" ? id : String(id),
+    code: text(row.code) ?? undefined,
     type: "HOLD",
     title: text(row.title) ?? "Open resolution hold",
     scope,
@@ -242,12 +249,12 @@ export function resolveHoldExclusionsFromRows(
     if (hold.scopeProduct && !input.product) return false;
     // For an unbounded request, a period-scoped hold still applies to the
     // aggregate. For a bounded request only overlapping named months apply.
-    return requested.length === 0 || requested.some((period) => periodMatches(hold, period));
+    return requested.length === 0 || requested.some((period) => periodMatches(hold, period, input.strictFiscalYear));
   });
   return applicable.map((hold) => {
     const held = requested.length === 0
       ? (hold.month ? [hold.month] : [])
-      : requested.filter((period) => periodMatches(hold, period));
+      : requested.filter((period) => periodMatches(hold, period, input.strictFiscalYear));
     const available = baselineAvailable.filter((period) => !held.includes(period));
     const coverage = {
       requestedPeriods: requested,

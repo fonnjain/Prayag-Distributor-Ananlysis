@@ -66,6 +66,7 @@ import resolutionItemsRouter from "./resolutionItems";
 import authRouter from "./auth";
 import activityRouter from "./activity";
 import { requireAuthenticated, requirePasswordChangeComplete } from "../lib/auth";
+import externalRouter from "./external";
 
 const router: IRouter = Router();
 
@@ -74,6 +75,9 @@ router.use(healthRouter);
 // post-listen readiness phase. Every remaining data route requires either a
 // browser session, a valid Bearer API key, or the existing operator secret.
 router.use(authRouter);
+// Dedicated read-only external identity routes are mounted before the
+// session-only gate.  The route itself applies external_read authorization.
+router.use(externalRouter);
 router.use(requireAuthenticated);
 router.use(requirePasswordChangeComplete);
 // All routes below this line are gated: they return 503 until the post-listen

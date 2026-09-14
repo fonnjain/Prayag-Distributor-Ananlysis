@@ -4707,7 +4707,7 @@ const MIGRATIONS: Migration[] = [
         DROP CONSTRAINT IF EXISTS api_keys_scope_check;
       ALTER TABLE api_keys
         ADD CONSTRAINT api_keys_scope_check
-        CHECK (scope IN ('full_api', 'verification'));
+        CHECK (scope IN ('full_api', 'verification', 'external_read'));
 
       CREATE INDEX IF NOT EXISTS api_keys_scope_idx ON api_keys (scope);
       CREATE UNIQUE INDEX IF NOT EXISTS api_keys_single_verification_identity_idx
@@ -4952,6 +4952,232 @@ const MIGRATIONS: Migration[] = [
       WHERE code = 'H2'
         AND type = 'HOLD'
         AND scope_measure = 'retailer-level secondary analysis, item-level secondary analysis';
+    `,
+  },
+  {
+    id: "107_external_read_api_rate_limit",
+    sql: `
+      -- Keep this migration safe when deployment provisioning materialises the
+      -- current Drizzle schema before replaying schema_migrations.  The
+      -- constraint is recreated here as well as in migration 103 so a fresh
+      -- schema cannot accidentally retain the pre-external-read constraint.
+      ALTER TABLE api_keys
+        ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'full_api';
+      ALTER TABLE api_keys
+        DROP CONSTRAINT IF EXISTS api_keys_scope_check;
+      ALTER TABLE api_keys
+        ADD CONSTRAINT api_keys_scope_check
+          CHECK (scope IN ('full_api', 'verification', 'external_read'));
+      CREATE INDEX IF NOT EXISTS api_keys_scope_idx ON api_keys (scope);
+      CREATE UNIQUE INDEX IF NOT EXISTS api_keys_single_verification_identity_idx
+        ON api_keys (scope)
+        WHERE scope = 'verification';
+
+      -- A single row per API key makes the upsert below atomic under
+      -- concurrent requests.  No key data is changed or removed here, and
+      -- the FK cleanup follows key revocation/deletion safely.
+      CREATE TABLE IF NOT EXISTS api_key_rate_limit (
+        api_key_id       INTEGER PRIMARY KEY
+          REFERENCES api_keys(id) ON DELETE CASCADE,
+        window_started   TIMESTAMPTZ NOT NULL,
+        request_count    INTEGER NOT NULL DEFAULT 0,
+        CONSTRAINT api_key_rate_limit_request_count_check
+          CHECK (request_count >= 0)
+      );
+      CREATE INDEX IF NOT EXISTS api_key_rate_limit_window_idx
+        ON api_key_rate_limit (window_started);
+    `,
+  },
+  {
+    id: "108_external_source_revision",
+    sql: `
+      -- Durable, loader-maintained revisions let external pagination detect
+      -- changes without hashing or transferring source rows.  Existing rows
+      -- start at revision zero; their source contents are preserved.
+      CREATE TABLE IF NOT EXISTS external_source_revision (
+        source       TEXT        NOT NULL,
+        fy           TEXT        NOT NULL,
+        month_label  TEXT        NOT NULL,
+        revision     BIGINT      NOT NULL DEFAULT 0,
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (source, fy, month_label)
+      );
+
+      DO $do$
+      BEGIN
+        IF to_regclass('public.sale_line_all') IS NOT NULL THEN
+          INSERT INTO external_source_revision (source, fy, month_label, revision)
+          SELECT 'sales', fy, month_label, 0
+            FROM sale_line_all
+           WHERE fy IS NOT NULL AND month_label IS NOT NULL
+           GROUP BY fy, month_label
+          ON CONFLICT (source, fy, month_label) DO NOTHING;
+        END IF;
+        IF to_regclass('public.margin_fact') IS NOT NULL THEN
+          INSERT INTO external_source_revision (source, fy, month_label, revision)
+          SELECT 'margin', fy, month_label, 0
+            FROM margin_fact
+           WHERE fy IS NOT NULL AND month_label IS NOT NULL
+           GROUP BY fy, month_label
+          ON CONFLICT (source, fy, month_label) DO NOTHING;
+        END IF;
+      END
+      $do$;
+
+      CREATE OR REPLACE FUNCTION bump_external_sales_revision_insert()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $fn$
+      BEGIN
+        INSERT INTO external_source_revision (source, fy, month_label, revision)
+        SELECT 'sales', n.fy, n.month_label, 1
+          FROM new_rows n
+         WHERE n.fy IS NOT NULL AND n.month_label IS NOT NULL
+         GROUP BY n.fy, n.month_label
+        ON CONFLICT (source, fy, month_label) DO UPDATE
+          SET revision = external_source_revision.revision + 1,
+              updated_at = now();
+        RETURN NULL;
+      END
+      $fn$;
+
+      CREATE OR REPLACE FUNCTION bump_external_sales_revision_delete()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $fn$
+      BEGIN
+        INSERT INTO external_source_revision (source, fy, month_label, revision)
+        SELECT 'sales', o.fy, o.month_label, 1
+          FROM old_rows o
+         WHERE o.fy IS NOT NULL AND o.month_label IS NOT NULL
+         GROUP BY o.fy, o.month_label
+        ON CONFLICT (source, fy, month_label) DO UPDATE
+          SET revision = external_source_revision.revision + 1,
+              updated_at = now();
+        RETURN NULL;
+      END
+      $fn$;
+
+      CREATE OR REPLACE FUNCTION bump_external_sales_revision_update()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $fn$
+      BEGIN
+        INSERT INTO external_source_revision (source, fy, month_label, revision)
+        SELECT 'sales', affected.fy, affected.month_label, 1
+          FROM (
+            SELECT fy, month_label FROM old_rows
+            UNION
+            SELECT fy, month_label FROM new_rows
+          ) affected
+         WHERE affected.fy IS NOT NULL AND affected.month_label IS NOT NULL
+         GROUP BY affected.fy, affected.month_label
+        ON CONFLICT (source, fy, month_label) DO UPDATE
+          SET revision = external_source_revision.revision + 1,
+              updated_at = now();
+        RETURN NULL;
+      END
+      $fn$;
+
+      CREATE OR REPLACE FUNCTION bump_external_margin_revision_insert()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $fn$
+      BEGIN
+        INSERT INTO external_source_revision (source, fy, month_label, revision)
+        SELECT 'margin', n.fy, n.month_label, 1
+          FROM new_rows n
+         WHERE n.fy IS NOT NULL AND n.month_label IS NOT NULL
+         GROUP BY n.fy, n.month_label
+        ON CONFLICT (source, fy, month_label) DO UPDATE
+          SET revision = external_source_revision.revision + 1,
+              updated_at = now();
+        RETURN NULL;
+      END
+      $fn$;
+
+      CREATE OR REPLACE FUNCTION bump_external_margin_revision_delete()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $fn$
+      BEGIN
+        INSERT INTO external_source_revision (source, fy, month_label, revision)
+        SELECT 'margin', o.fy, o.month_label, 1
+          FROM old_rows o
+         WHERE o.fy IS NOT NULL AND o.month_label IS NOT NULL
+         GROUP BY o.fy, o.month_label
+        ON CONFLICT (source, fy, month_label) DO UPDATE
+          SET revision = external_source_revision.revision + 1,
+              updated_at = now();
+        RETURN NULL;
+      END
+      $fn$;
+
+      CREATE OR REPLACE FUNCTION bump_external_margin_revision_update()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $fn$
+      BEGIN
+        INSERT INTO external_source_revision (source, fy, month_label, revision)
+        SELECT 'margin', affected.fy, affected.month_label, 1
+          FROM (
+            SELECT fy, month_label FROM old_rows
+            UNION
+            SELECT fy, month_label FROM new_rows
+          ) affected
+         WHERE affected.fy IS NOT NULL AND affected.month_label IS NOT NULL
+         GROUP BY affected.fy, affected.month_label
+        ON CONFLICT (source, fy, month_label) DO UPDATE
+          SET revision = external_source_revision.revision + 1,
+              updated_at = now();
+        RETURN NULL;
+      END
+      $fn$;
+
+      DO $do$
+      BEGIN
+        IF to_regclass('public.sale_line_all') IS NOT NULL THEN
+          DROP TRIGGER IF EXISTS external_sales_revision_insert ON sale_line_all;
+          DROP TRIGGER IF EXISTS external_sales_revision_update ON sale_line_all;
+          DROP TRIGGER IF EXISTS external_sales_revision_delete ON sale_line_all;
+          CREATE TRIGGER external_sales_revision_insert
+            AFTER INSERT ON sale_line_all
+            REFERENCING NEW TABLE AS new_rows
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION bump_external_sales_revision_insert();
+          CREATE TRIGGER external_sales_revision_update
+            AFTER UPDATE ON sale_line_all
+            REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION bump_external_sales_revision_update();
+          CREATE TRIGGER external_sales_revision_delete
+            AFTER DELETE ON sale_line_all
+            REFERENCING OLD TABLE AS old_rows
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION bump_external_sales_revision_delete();
+        END IF;
+        IF to_regclass('public.margin_fact') IS NOT NULL THEN
+          DROP TRIGGER IF EXISTS external_margin_revision_insert ON margin_fact;
+          DROP TRIGGER IF EXISTS external_margin_revision_update ON margin_fact;
+          DROP TRIGGER IF EXISTS external_margin_revision_delete ON margin_fact;
+          CREATE TRIGGER external_margin_revision_insert
+            AFTER INSERT ON margin_fact
+            REFERENCING NEW TABLE AS new_rows
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION bump_external_margin_revision_insert();
+          CREATE TRIGGER external_margin_revision_update
+            AFTER UPDATE ON margin_fact
+            REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION bump_external_margin_revision_update();
+          CREATE TRIGGER external_margin_revision_delete
+            AFTER DELETE ON margin_fact
+            REFERENCING OLD TABLE AS old_rows
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION bump_external_margin_revision_delete();
+        END IF;
+      END
+      $do$;
     `,
   },
 ];

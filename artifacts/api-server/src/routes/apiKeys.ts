@@ -2,9 +2,11 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { apiKeys } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
-import { generateRawKey, hashKey, keyPrefix } from "../lib/apiKeyAuth";
+import { generateRawKey, hashKey, keyPrefix, type ApiKeyScope } from "../lib/apiKeyAuth";
+import { requireAdmin } from "../lib/auth";
 
 const router = Router();
+router.use(requireAdmin);
 
 // List all keys (hashes never returned)
 router.get("/keys", async (req, res) => {
@@ -35,6 +37,7 @@ router.get("/keys", async (req, res) => {
 router.post("/keys", async (req, res) => {
   const name: unknown = req.body?.name;
   const description: unknown = req.body?.description;
+  const requestedScope: unknown = req.body?.scope ?? "full_api";
 
   if (typeof name !== "string" || name.trim().length === 0) {
     res.status(400).json({ error: "name is required" });
@@ -48,6 +51,11 @@ router.post("/keys", async (req, res) => {
     res.status(400).json({ error: "description must be a string of 500 characters or fewer" });
     return;
   }
+  if (requestedScope !== "full_api" && requestedScope !== "external_read") {
+    res.status(400).json({ error: "scope must be full_api or external_read" });
+    return;
+  }
+  const scope = requestedScope as Exclude<ApiKeyScope, "verification">;
 
   try {
     const raw = generateRawKey();
@@ -56,7 +64,7 @@ router.post("/keys", async (req, res) => {
 
     const [row] = await db
       .insert(apiKeys)
-      .values({ name, description, keyHash: hash, prefix })
+      .values({ name, description, scope, keyHash: hash, prefix })
       .returning({
         id: apiKeys.id,
         name: apiKeys.name,

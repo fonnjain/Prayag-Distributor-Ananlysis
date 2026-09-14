@@ -175,6 +175,26 @@ describe("application authentication", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it("bypasses browser-origin enforcement for API-key requests", () => {
+    const response = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+    requireSameOriginForSession({
+      authUser: adminIdentity,
+      authSessionId: 70,
+      apiKey: { id: 8, name: "external reader", scope: "external_read" },
+      method: "POST",
+      headers: { host: "prayag.example.com", origin: "https://attacker.example.com" },
+      get(name: string) {
+        return (this.headers as Record<string, string>)[name.toLowerCase()];
+      },
+    } as any, response as any, next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(response.status).not.toHaveBeenCalled();
+  });
+
   it("rejects cross-origin attempts to establish a login session", async () => {
     const response = await request(authApp())
       .post("/auth/login")

@@ -153,3 +153,4 @@
 - [Sales Deep Dive export contract](sales-deep-dive-export-contract.md) — ten-sheet export preserves availability, audit operands, one sales-based cost ratio, and genuine Excel dates.
 - [Isolated API guard builds](isolated-api-guard-builds.md) — parallel guards need unique build outputs under the API package tree so external ESM dependencies still resolve.
 - [Resolution register semantics](resolution-register-semantics.md) — HOLD blocks only named measures with explicit exclusions; PENDING never blocks; closed evidence is immutable.
+- [External pricing feed contract](external-pricing-feed-contract.md) — never let omitted periods become zero; expose coverage and use gross-margin language, not profit.

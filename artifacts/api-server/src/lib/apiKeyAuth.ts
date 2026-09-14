@@ -5,7 +5,7 @@ import { apiKeys } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger.js";
 
-export type ApiKeyScope = "full_api" | "verification";
+export type ApiKeyScope = "full_api" | "verification" | "external_read";
 
 const VERIFICATION_IDENTITY_NAME = "verification";
 const VERIFICATION_ENDPOINTS = new Set([
@@ -13,6 +13,14 @@ const VERIFICATION_ENDPOINTS = new Set([
   "GET /mgmt/verify",
   "GET /audit",
   "GET /audit/download",
+]);
+const EXTERNAL_READ_ENDPOINTS = new Set([
+  "GET /external/sales-by-item",
+  "GET /external/margin-by-item",
+]);
+const EXTERNAL_READ_PATHS = new Set([
+  "/external/sales-by-item",
+  "/external/margin-by-item",
 ]);
 
 // ── Key generation ─────────────────────────────────────────────────────────────
@@ -34,7 +42,8 @@ export function verificationKeyFingerprint(keyHash: string): string {
 }
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
-// Attaches req.apiKey when a valid Bearer token is present.
+// Attaches req.apiKey when a valid Bearer or (on the two external read
+// endpoints only) X-API-Key token is present.
 // Routes that require an API key should call requireApiKey() after this.
 // Routes that allow unauthenticated (same-origin browser) calls need nothing extra.
 
@@ -51,17 +60,53 @@ export function isVerificationEndpoint(req: Pick<Request, "method" | "path">): b
   return VERIFICATION_ENDPOINTS.has(`${req.method.toUpperCase()} ${req.path}`);
 }
 
+function normalizedPath(path: string): string {
+  // resolveApiKey is mounted at /api (so Express normally gives us the
+  // shorter path), while direct middleware tests and future mounts may pass
+  // the complete request path.
+  return path.startsWith("/api/") ? path.slice(4) : path;
+}
+
+export function isExternalReadEndpoint(req: Pick<Request, "method" | "path">): boolean {
+  return EXTERNAL_READ_ENDPOINTS.has(
+    `${req.method.toUpperCase()} ${normalizedPath(req.path)}`,
+  );
+}
+
+export function isExternalReadPath(req: Pick<Request, "path">): boolean {
+  return EXTERNAL_READ_PATHS.has(normalizedPath(req.path));
+}
+
 export async function resolveApiKey(
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> {
   const auth = req.headers["authorization"];
-  if (!auth?.startsWith("Bearer ")) {
+  const xApiKey = req.headers["x-api-key"];
+  const bearerHeader = typeof auth === "string" ? auth : "";
+  const bearerRaw = bearerHeader.startsWith("Bearer ")
+    ? bearerHeader.slice(7).trim()
+    : "";
+  const xApiRaw = typeof xApiKey === "string" ? xApiKey.trim() : "";
+
+  if (xApiRaw && !isExternalReadEndpoint(req)) {
+    res.status(403).json({ error: "X-API-Key is only accepted for external read endpoints" });
+    return;
+  }
+  if (bearerRaw && xApiRaw && bearerRaw !== xApiRaw) {
+    res.status(400).json({ error: "Conflicting Bearer and X-API-Key credentials" });
+    return;
+  }
+
+  const raw = bearerRaw || xApiRaw;
+  if (!raw) {
+    if (isExternalReadPath(req)) {
+      res.status(401).json({ error: "A valid external_read API key is required" });
+      return;
+    }
     return next();
   }
-  const raw = auth.slice(7).trim();
-  if (!raw) return next();
 
   const hash = hashKey(raw);
   try {
@@ -89,6 +134,14 @@ export async function resolveApiKey(
       res.status(403).json({ error: "Verification identity is not authorized for this endpoint" });
       return;
     }
+    if (isExternalReadPath(req) && scope !== "external_read") {
+      res.status(403).json({ error: "An external_read API key is required for this endpoint" });
+      return;
+    }
+    if (scope === "external_read" && !isExternalReadEndpoint(req)) {
+      res.status(403).json({ error: "External read identity is not authorized for this endpoint" });
+      return;
+    }
 
     // Fire-and-forget last_used_at update
     db.update(apiKeys)
@@ -114,6 +167,29 @@ export function requireVerificationEndpointAccess(
     return;
   }
   res.status(401).json({ error: "A browser session or verification identity is required" });
+}
+
+/**
+ * External item APIs are intentionally narrower than a normal application
+ * session: only a key explicitly issued with external_read may call them.
+ * Keeping this as a route middleware prevents a full_api, verification key,
+ * admin secret, or browser session from being silently widened into an
+ * external integration credential.
+ */
+export function requireExternalReadEndpointAccess(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (req.apiKey?.scope === "external_read" && isExternalReadEndpoint(req)) {
+    next();
+    return;
+  }
+  if (!req.apiKey) {
+    res.status(401).json({ error: "A valid external_read API key is required" });
+    return;
+  }
+  res.status(403).json({ error: "An external_read API key is required for this endpoint" });
 }
 
 export async function bootstrapVerificationIdentity(): Promise<void> {

@@ -5,6 +5,7 @@ import {
   timestamp,
   serial,
   boolean,
+  integer,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -30,7 +31,7 @@ export const apiKeys = pgTable(
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
   (t) => [
-    check("api_keys_scope_check", sql`${t.scope} IN ('full_api', 'verification')`),
+    check("api_keys_scope_check", sql`${t.scope} IN ('full_api', 'verification', 'external_read')`),
     index("api_keys_hash_idx").on(t.keyHash),
     index("api_keys_scope_idx").on(t.scope),
     uniqueIndex("api_keys_single_verification_identity_idx")
@@ -41,3 +42,27 @@ export const apiKeys = pgTable(
 
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type InsertApiKey = typeof apiKeys.$inferInsert;
+
+/**
+ * The fixed-window counter used by the external read API.  There is one row
+ * per key and the counter is atomically advanced by the API middleware.
+ * Keeping this separate from api_keys means revocation and key metadata remain
+ * independently auditable.
+ */
+export const apiKeyRateLimit = pgTable(
+  "api_key_rate_limit",
+  {
+    apiKeyId: integer("api_key_id")
+      .primaryKey()
+      .references(() => apiKeys.id, { onDelete: "cascade" }),
+    windowStarted: timestamp("window_started", { withTimezone: true }).notNull(),
+    requestCount: integer("request_count").notNull().default(0),
+  },
+  (t) => [
+    check("api_key_rate_limit_request_count_check", sql`${t.requestCount} >= 0`),
+    index("api_key_rate_limit_window_idx").on(t.windowStarted),
+  ],
+);
+
+export type ApiKeyRateLimit = typeof apiKeyRateLimit.$inferSelect;
+export type InsertApiKeyRateLimit = typeof apiKeyRateLimit.$inferInsert;
