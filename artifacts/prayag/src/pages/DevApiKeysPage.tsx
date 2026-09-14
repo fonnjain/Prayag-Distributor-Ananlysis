@@ -9,6 +9,7 @@ interface ApiKeyRow {
   name: string;
   description: string | null;
   prefix: string;
+  scope: "full_api" | "external_read";
   isRevoked: boolean;
   createdAt: string;
   lastUsedAt: string | null;
@@ -109,6 +110,7 @@ function CreateKeyDialog({
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [scope, setScope] = useState<ApiKeyRow["scope"]>("external_read");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -121,7 +123,11 @@ function CreateKeyDialog({
       const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), description: description.trim() || undefined }),
+        body: JSON.stringify({
+          name: name.trim(),
+          description: description.trim() || undefined,
+          scope,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -163,6 +169,23 @@ function CreateKeyDialog({
             rows={2}
             maxLength={500}
           />
+        </div>
+        <div>
+          <label className="block text-xs font-medium mb-1" htmlFor="api-key-scope">
+            Access scope <span className="text-red-500">*</span>
+          </label>
+          <select
+            id="api-key-scope"
+            className="w-full rounded border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            value={scope}
+            onChange={(e) => setScope(e.target.value as ApiKeyRow["scope"])}
+          >
+            <option value="external_read">External read — two item endpoints only</option>
+            <option value="full_api">Full API — broad application access</option>
+          </select>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Use External read for consumer applications. Full API grants much broader access.
+          </p>
         </div>
         {error && <p className="text-xs text-red-500">{error}</p>}
         <div className="flex gap-2">
@@ -217,6 +240,14 @@ function KeyRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-sm">{apiKey.name}</span>
+            <span className={cn(
+              "rounded-full text-[10px] font-semibold px-2 py-0.5",
+              apiKey.scope === "external_read"
+                ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+            )}>
+              {apiKey.scope === "external_read" ? "External read" : "Full API"}
+            </span>
             {apiKey.isRevoked && (
               <span className="rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 text-[10px] font-semibold px-2 py-0.5">
                 Revoked
@@ -608,7 +639,7 @@ const API_CATALOGUE: EndpointGroup[] = [
     group: "API Keys",
     endpoints: [
       { method: "GET",    path: "/keys",      description: "List all API keys (hashes never returned).", params: "—" },
-      { method: "POST",   path: "/keys",      description: "Create a new API key. Raw key returned once only.", params: "body: { name, description? }" },
+      { method: "POST",   path: "/keys",      description: "Create a new API key. Raw key returned once only.", params: "body: { name, description?, scope: \"full_api\" | \"external_read\" }" },
       { method: "DELETE", path: "/keys/:id",  description: "Revoke a key by its numeric ID.", params: "—" },
     ],
   },
