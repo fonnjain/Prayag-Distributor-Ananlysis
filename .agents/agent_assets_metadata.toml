@@ -912,3 +912,17 @@ mtime_ms = 1789383727734
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/d0289f41-4da8-4f58-9dc7-d071cbd3dd66/3c4dc400-8dc0-4339-9161-811dd2aee6c2"
 storage_version_token = "1789383828004199"
 content_type = "text/plain"
+
+[[outputs]]
+id = "SUsgwDqhThVq9p9ukW8X6"
+uri = "file://deliverables/Prompt_92_AI_Schemes_Section_A_Feasibility_Report.docx"
+type = "word_document"
+title = "Prompt 92 — AI Schemes Feasibility Report"
+description = "Formatted Word document containing the complete Section A read-only feasibility analysis, evidence tables, source notes, findings, and phased build decision."
+logical_id = "359080f3-cac0-4662-9d52-80fdb57dac6b"
+content_hash = "sha256:75a6899932816c26c04506e61c00e3dfad3bc6724f7b01c5791a35bd7d1cb58b"
+size = 44522
+mtime_ms = 1789389378212
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/359080f3-cac0-4662-9d52-80fdb57dac6b/4c2dfdad-f78f-406b-b4af-d5b89b09fa0c"
+storage_version_token = "1789389385378614"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
