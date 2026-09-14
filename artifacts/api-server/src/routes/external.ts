@@ -9,7 +9,7 @@ import {
 } from "../lib/externalItemAnalytics.js";
 
 const router = Router();
-router.use(requireExternalReadEndpointAccess);
+router.use("/external", requireExternalReadEndpointAccess);
 
 function handleError(req: Request, res: Response, error: unknown): void {
   const message = error instanceof Error ? error.message : "External read failed";
