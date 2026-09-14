@@ -1,0 +1,54 @@
+# Prompt Index
+
+Numbering starts at P001, 14 September 2026. Earlier prompts were unnumbered.
+
+**Convention**
+
+```
+P<nnn>_<APP>_<Short_name>.md
+```
+
+`APP` is the application the prompt is for, so it cannot be pasted into the wrong agent:
+
+| Tag | Application | Repository |
+|---|---|---|
+| `COMPETITION` | prayag-price.com | `fonnjain/Prayag-Competition-Analysis` |
+| `SALES` | prayag-sales.com | `fonnjain/Prayag-Distributor-Ananlysis` |
+
+Each prompt carries its number in a banner under the title, and asks the agent to quote it when reporting back. That way a report can be matched to the prompt that produced it without guessing.
+
+---
+
+## Issued
+
+| # | App | Prompt | Status |
+|---|---|---|---|
+| **P001** | COMPETITION | AI MRP Generator page | **stage 1 delivered 14 Sep** — competitive rules live, margin rules disabled |
+| **P002** | SALES | Item-code sales and margin API | **delivered 14 Sep** — endpoints built; production credential withheld |
+| **P003** | SALES | FY2026-27 reconciliation failure | issued 14 Sep — **blocks P001 margin rules** |
+
+P001 stage 1 is usable now: competitive rules, change limits, holds and rounding all run on prices this application already holds.
+
+Margin and volume rules stay disabled until P003 resolves. Production sales are **Rs 10.8 lakh** out against the control for FY2026-27 Apr-Aug, and no consumer credential has been issued.
+
+---
+
+## Still open, not yet written as numbered prompts
+
+| Item | App | Note |
+|---|---|---|
+| Upcoming-gap display | COMPETITION | 31 products crossed from cheaper to dearer on 01 Sep; still not shown |
+| Hash contract for authoritative loads | COMPETITION | Each new master needs a code change before it will load |
+| Single product price editor | COMPETITION | Prompt written, not yet numbered or run |
+| Drill-down and export cleanup | SALES | Prompt written; the drill-down half needs rework |
+
+---
+
+## Waiting on Prayag, not on either agent
+
+- Prices and start dates for the 15 Vitro (Black) products
+- Decision on codes `20`, `25`, `32` — priced but unnamed
+- Which price list the 31 Cockroach Trap codes are on
+- UH82 size confirmation — two entries say ½ inch, two say 1 inch
+- Whether Prayag makes an equivalent of the 101 unmapped Sparsh products
+- Whether Ashirvad's 01 Mar 2025 list is current, or a newer one exists
