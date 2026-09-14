@@ -1,0 +1,110 @@
+# P003 — SALES — FY2026-27 reconciliation failure
+
+> **P003** · app: **SALES** (`prayag-sales.com` / `fonnjain/Prayag-Distributor-Ananlysis`)
+> Quote `P003` when reporting back on this prompt.
+
+Production does not reconcile to the control total. Until it does, no consumer credential should be issued and nothing should be built on this feed.
+
+**This is an investigation. Change no data.** If something is wrong, it will still be wrong after it is explained, and explaining it accurately is worth more than correcting it quickly.
+
+---
+
+## The discrepancy
+
+```
+Control                  Rs 1,35,34,00,568.14
+Production  neondb       Rs 1,35,23,20,560.20     −Rs 10,80,007.94
+Development heliumdb     Rs 1,35,33,65,223.14     −Rs 35,345.00
+```
+
+FY2026-27, April to August.
+
+Two things stand out. **Production is thirty times further out than development**, against the same control. And the Company Reports page displays **₹135.23 Cr**, which matches production exactly — so the application and the control have disagreed for some time, and the API only made it visible.
+
+FY2025-26 reconciles to the paisa: 145,613 rows, ₹3,60,99,53,808.51. So the method is sound; something specific to the open year is not.
+
+---
+
+## 1. Identify the rows, not the amount
+
+A difference of ₹10,80,007.94 is a set of invoice lines. Find them.
+
+Report:
+
+- **Row counts** — control versus production versus development, for FY2026-27 Apr–Aug, overall and by month.
+- **The difference by month.** If it sits in one month, that narrows it immediately.
+- **The specific lines.** Present in one source and not the other, or present in both with different amounts. List them with invoice number, date, code, customer, amount.
+- **Whether the difference is one-directional** — production missing rows the control has, production holding rows it should not, or both.
+
+Do not stop at a total. The question is which lines, and a reconciliation that only confirms the gap has not advanced anything.
+
+---
+
+## 2. Why do development and production differ by ₹10.4 lakh?
+
+They were loaded from the same registers. Development lags by weeks and suppresses schedulers, so it should hold **fewer** rows than production — yet it is **closer** to the control.
+
+That is the wrong way round, and it is the most informative fact in this report.
+
+- Are there rows in development that never reached production?
+- Are there rows in production that development does not have, which should not be there?
+- Did the two diverge at a particular date or load?
+
+---
+
+## 3. Where does the control figure come from?
+
+Report its provenance: which register, which query, when it was frozen, and by whom.
+
+FY2026-27 is an **open year** — months stay writable for four months. So:
+
+- Was the control taken at a moment when the data legitimately differed?
+- Has any Apr–Aug month been written to since the control was captured?
+- If so, the control is a snapshot of a moving figure, and **the control may be what is stale** rather than production.
+
+State plainly which of the two you believe is correct, and on what evidence.
+
+---
+
+## 4. Rule out the known traps first
+
+Three known issues could produce a difference of this shape. Check each and say which, if any, contributes:
+
+**Water tanks.** 133 current production rows have `qty_ltr` NULL; development has 129. That is a four-row difference in the same area. It affects quantity rather than `amount`, but confirm it does not touch value.
+
+**The FY2024-25 day/month reversal** — 28,613 rows. Confirm no reversed row has leaked into an FY2026-27 month label.
+
+**`version_status`.** Confirm both figures come from `sale_line_current`, and report how many rows in each environment are non-current for these months.
+
+---
+
+## 5. The 1,127 absent codes
+
+Separate from the reconciliation, and worth answering while you are in the data.
+
+**1,127 FY2026-27 sold codes are absent from the pricing catalogue, worth ₹24.76 Cr.** The earlier specification said 780 codes and ₹9.64 Cr, so that figure has moved substantially too.
+
+Zero are catalogue-present-but-unpriced, which means every one is genuinely unknown to the pricing system rather than merely unpriced.
+
+Report a breakdown by value, and what they are — discontinued products still selling from stock, trading goods, project or institutional items, or codes that never entered the catalogue. The largest twenty by value would be enough to characterise them.
+
+---
+
+## 6. What must not happen
+
+**Do not adjust production to match the control.** Do not adjust the control to match production. Do not add a reconciling entry.
+
+One of the two is wrong, and which one is the finding. A correction applied before the cause is understood destroys the evidence and leaves the same defect in place.
+
+---
+
+## Report
+
+- The differing rows, by month and individually.
+- Why development is closer to the control than production.
+- The control's provenance and whether it is still valid for an open year.
+- Which of the three known traps contribute, if any.
+- Your conclusion: **is production wrong, or is the control wrong?**
+- The 1,127 absent codes, characterised.
+
+**No commits. No data changes.**
