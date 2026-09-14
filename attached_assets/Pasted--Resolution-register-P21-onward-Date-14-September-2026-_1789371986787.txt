@@ -1,0 +1,197 @@
+# Resolution register — P21 onward
+
+**Date:** 14 September 2026
+**Source:** `Prayag_Data_Queries_31Aug2026.xlsx`, the 22-query pack prepared
+31 August and not yet sent.
+**For:** Replit task #451 — the entries held pending the source document.
+
+All are **PENDING**. None blocks a figure; each owes an answer.
+
+**Note P20 in the existing register** — "Unsent 22-query pack" — becomes the
+parent of these. Once P21–P42 are loaded, P20 can be resolved as superseded.
+
+---
+
+## MRP and pricing — owner: Prayag price team
+
+```
+P21  Item codes 20, 25 and 32 - on the website or not?
+     category   master data          priority High
+     reason     Prayag's own list marks all three Invalid Input, no name, no
+                price, do not load. The website shows them as live.
+     evidence   Three codes, live on prayag-price.com, absent from the
+                authoritative master.
+
+P22  When do the September prices actually go live?
+     category   master data          priority High
+     reason     Every product on the website carries the label
+                authoritative_master_2026_09_01, but the prices shown are
+                still the old ones.
+     evidence   2,409 products carry a 1 September effective date.
+
+P23  The 64 PEA brass fittings - 1 February or 10 August 2026?
+     category   master data          priority URGENT
+     reason     The note says "Revised on 10th August 2026" while the
+                effective date says 1 February 2026. Price changes on these
+                codes are large.
+     evidence   64 codes. PEA-44B rises Rs 479 to Rs 1,528, +219%.
+                PEA-734B Rs 358 to Rs 722, +102%. Full list in the query
+                pack, tab "A3 - 64 PEA codes".
+     value      backdating affects any discount computed since 1 February
+
+P24  What does "Unchanged - carried forward" mean?
+     category   master data          priority Medium
+     reason     61 items dated 10 August carry that note, but 58 of them
+                have a different old and new price.
+     evidence   U70 rises 39% while labelled unchanged.
+
+P25  Is 1 September correct for TTS-01, TTS-02 and TTS-03?
+     category   master data          priority Medium
+     reason     Dated 1 September, but the note says "Revised on 01 Aug
+                2026", and the website already shows those prices.
+
+P26  Should colour-wise prices be added to the website?
+     category   master data          priority Medium
+     reason     Prayag's list gives ivory, white-with-jet and
+                pink/green/blue prices on 123 products. The website carries
+                one price per code.
+     evidence   123 products with multiple colour prices.
+
+P27  The 1 September change is described as Hardware, but it is mostly PTMT
+     category   master data          priority Low
+     reason     Flagging only, no action needed. The notes page describes
+                the change as Hardware; 2,071 of the 2,409 changing items
+                are PTMT.
+
+P28  Eight new WT water tank prices - real or placeholder, and why backdated?
+     category   master data          priority High
+     reason     Eight WT codes appeared at round figures - Rs 10,000,
+                15,000, 20,000, 30,000, 40,000, 60,000 and 1 lakh - and are
+                backdated.
+     evidence   Round-number prices on new codes with retrospective dates.
+
+P29  Are these eight PS codes discontinued?
+     category   master data          priority Low
+     reason     PS1106, PS1606, PS5157, PS5163, PS5171, PS5657, PS5763 and
+                PS7506 were removed from the website but do not appear in
+                the discontinued list.
+```
+
+## Distributor master data — owner: Prayag sales / master data
+
+```
+P30  Confirm 34 existing distributor codes and create codes for the rest
+     category   master data          priority High
+     reason     The Retailer-Distributor sheet has 399 names; 130 have a
+                blank code and cannot be counted.
+     value      Rs 6.52 Cr of distributor sales cannot be attributed
+     NOTE       This overlaps existing P1 and P2. Merge rather than
+                duplicate - P1 is the 34 codes, P2 is the Rs 6.52 Cr.
+
+P31  Is VIKRAM TRADERS (JAMMU) an active distributor?
+     category   master data          priority Medium
+     reason     Nasir Hussain Khan has 152 dealers in Jammu and Kashmir and
+                zero distributors. The only Jammu row has no distributor
+                code.
+
+P32  Do Chandigarh, Delhi NCR, Himachal Pradesh and J&K have distributors?
+     category   master data          priority Medium
+     reason     All four have a state head assigned and not one distributor
+                recorded. They may be recorded under another state.
+```
+
+## Organisation and ownership — owner: Prayag HR / sales management
+
+```
+P33  Who heads West U.P and Rajasthan, and is Sunil Mohanty a new joiner?
+     category   master data          priority High
+     reason     Listed in the dashboard for both states, absent from every
+                employee, coverage and registry record.
+     NOTE       Overlaps existing P11. Merge - P11 is the master-data gap,
+                this is the question that resolves it.
+
+P34  Who owns Rajasthan, and who takes the 354 unassigned customers?
+     category   master data          priority High
+     reason     Pawan Kumar Sharma and Narendra Kumar Sharma both hold open
+                Rajasthan assignments from 15 August 2026.
+     evidence   354 customers unassigned.
+
+P35  Who owns distributors in Karnataka and Maharashtra? Is Prashant a head
+     or a member?
+     category   master data          priority High
+     reason     A state's distributors go entirely to whichever head has
+                most rows in the Data tab. Karnataka is decided by six rows.
+     evidence   Winner-take-all attribution on a six-row margin.
+
+P36  How many Maharashtra territories - two, three, or none?
+     category   master data          priority Medium
+     reason     Three versions exist in our system and disagree. Order-book
+                spellings show MAHARASTRA L / R / S.
+
+P37  Are these six State Head folders former heads or a different structure?
+     category   master data          priority Medium
+     reason     The State Heads folder contains AMIT MONGA, Jahangir Ashraf,
+                O.P Kalra, S.BABU, Suresh Nair and Rajasthan (Plumbing).
+```
+
+## Targets and roster — owner: Prayag sales management
+
+```
+P38  Are monthly PLAN cells typed in, or linked to each PLAN 26-27 file?
+     category   data quality         priority High
+     reason     We read every member's monthly plan from the SECONDARY ORDER
+                BOOKING REPORT 2026-27 tab. Whether those are typed or
+                linked determines whether they update.
+
+P39  Should Ravi Upadhyay and Shiv Kumar have monthly rows at all?
+     category   data quality         priority Medium
+     reason     No monthly plan, no order booking and no sales for any month
+                of 2026-27 - the only two members in that state.
+
+P40  Which of the 58 names are former employees, and how is off-roll staff
+     handled?
+     category   master data          priority High
+     reason     25,575 order booking rows sit against 58 names not in the
+                current roster.
+     value      Rs 13.51 Cr in FY2025-26
+     NOTE       Related to existing P14, seven roster members with no HR
+                record. Different population - keep separate.
+
+P41  Which is authoritative for visits - the Dashboard Data tab or the Visit
+     Report columns?
+     category   data quality         priority Medium
+     reason     Both are connected since July and both carry visit and
+                working-day figures.
+```
+
+## Order booking — owner: Prayag data / IT
+
+```
+P42  What source holds order-booking lines for 1 April to 31 July 2026?
+     category   data quality         priority URGENT
+     status     ANSWERED - PSCode 3 archives located and loaded
+     reason     Raised 31 August when the source was unknown.
+     resolution 123,326 rows Rs 81.36 Cr loaded from PSCode 3 archives,
+                verified against secondary_sku_line at Rs 0 per month.
+     Load as answered, for the record.
+```
+
+---
+
+## Loading notes
+
+**Three entries overlap existing records.** Merge rather than duplicate:
+
+| New | Existing | Action |
+|---|---|---|
+| P30 | P1, P2 | P30 is the ask; P1 and P2 are the findings. Link, do not duplicate |
+| P33 | P11 | P11 is the gap; P33 is the question that resolves it |
+| P40 | P14 | Different populations — 58 historic names versus 7 current members. Keep both |
+
+**P42 loads as `answered`**, not open. It was resolved by the PSCode 3 load and belongs in the record so nobody re-raises it.
+
+**P20 becomes resolvable** once these are loaded — "unsent 22-query pack" is superseded by its contents being in the register.
+
+**Three carry a rupee value** and should populate `value_at_stake`: P30 at ₹6.52 Cr, P40 at ₹13.51 Cr, and P23 which has no single figure but affects every discount computed since 1 February.
+
+**Priorities as marked in the source.** Two are URGENT — P23, the 64 backdated PEA codes, and P42 which is already answered. P23 is the one to raise first: a +219% price change with a disputed effective date affects every discount calculation since February.

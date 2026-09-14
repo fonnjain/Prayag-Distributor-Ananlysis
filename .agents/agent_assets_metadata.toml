@@ -862,3 +862,10 @@ mtime_ms = 1789309919576
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/1398ca41-cbda-448b-9642-be6e51ce13b8/4b081d2f-03ee-4b38-9fcd-e93ffd0472db"
 storage_version_token = "1789309928319385"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "aoX8HqvPfsRc1FUbeXdl7"
+uri = "file://reports/P007_SALES_MRP_Generator_Design_Inputs.docx"
+type = "word_document"
+title = "P007 — SALES: MRP Generator Design Inputs"
+description = "Read-only production report covering catalogue sales coverage, FY2025-26 concentration, June 2026 category gross margins, HOLD exclusions, and current absent-code analysis."
