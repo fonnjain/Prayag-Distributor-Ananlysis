@@ -67,6 +67,7 @@ import authRouter from "./auth";
 import activityRouter from "./activity";
 import { requireAuthenticated, requirePasswordChangeComplete } from "../lib/auth";
 import externalRouter from "./external";
+import aiSchemesRouter from "./aiSchemes";
 
 const router: IRouter = Router();
 
@@ -84,6 +85,7 @@ router.use(requirePasswordChangeComplete);
 // background initialisation (person registry, roster CSV restore) completes.
 router.use(requireServerReady);
 router.use(activityRouter);
+router.use(aiSchemesRouter);
 router.use(analyzeRouter);
 router.use(driveRouter);
 router.use(dashboardRouter);

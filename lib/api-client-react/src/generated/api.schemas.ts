@@ -2478,6 +2478,148 @@ export interface AiPayload {
   reason?: string;
 }
 
+export type AiSchemesCoverageSourceMonths = {
+  primary: string[];
+  secondary: string[];
+  margin: string[];
+};
+
+export type AiSchemesCoverageHeldMetadataItem = { [key: string]: unknown };
+
+export type AiSchemesCoverageSources = {[key: string]: string};
+
+export type AiSchemesCoverageGeography = {
+  available: boolean;
+  statement: string;
+};
+
+export interface AiSchemesCoverage {
+  fy: string;
+  loadedMonths: string[];
+  sourceMonths: AiSchemesCoverageSourceMonths;
+  heldPeriods: string[];
+  heldMetadata: AiSchemesCoverageHeldMetadataItem[];
+  sources: AiSchemesCoverageSources;
+  geography: AiSchemesCoverageGeography;
+}
+
+export type AiSchemesPairMatrixValueDistribution = {
+  p10: number;
+  p25: number;
+  median: number;
+  p75: number;
+  p90: number;
+  bottomDecileAverage: number;
+  topDecileAverage: number;
+};
+
+export interface AiSchemesPairMatrix {
+  positivePairs: number;
+  activeRetailers: number;
+  skus: number;
+  pairDensityPct: number;
+  valueDistribution: AiSchemesPairMatrixValueDistribution;
+  identityRule: string;
+}
+
+export type AiSchemesBreadthArithmeticIncrementsItem = {
+  additionalSkusPerRetailer: number;
+  lowValue: number;
+  medianValue: number;
+  highValue: number;
+};
+
+export interface AiSchemesBreadthArithmetic {
+  increments: AiSchemesBreadthArithmeticIncrementsItem[];
+  label: string;
+}
+
+export type AiSchemesSkuBandBand = typeof AiSchemesSkuBandBand[keyof typeof AiSchemesSkuBandBand];
+
+
+export const AiSchemesSkuBandBand = {
+  VERY_HIGH: 'VERY HIGH',
+  HIGH: 'HIGH',
+  MEDIUM: 'MEDIUM',
+  LOW: 'LOW',
+  SCARCE: 'SCARCE',
+  DORMANT: 'DORMANT',
+} as const;
+
+export interface AiSchemesSkuBand {
+  band: AiSchemesSkuBandBand;
+  codes: number;
+  primaryValue: number;
+  primarySharePct: number;
+  salesPerCode: number;
+  retailersPerSkuMean: number;
+  retailersPerSkuMedian: number;
+  /** @nullable */
+  dormantBasis?: string | null;
+}
+
+/**
+ * @nullable
+ */
+export type AiSchemesMarginCategoryMarginTier = typeof AiSchemesMarginCategoryMarginTier[keyof typeof AiSchemesMarginCategoryMarginTier] | null;
+
+
+export const AiSchemesMarginCategoryMarginTier = {
+  RICH: 'RICH',
+  MID: 'MID',
+  THIN: 'THIN',
+  BARE: 'BARE',
+} as const;
+
+export interface AiSchemesMarginCategory {
+  category: string;
+  /** @nullable */
+  grossMarginPct: number | null;
+  /** @nullable */
+  marginTier: AiSchemesMarginCategoryMarginTier;
+  maximumSchemeDepthPct: number;
+  maximumSchemeShareOfGrossMarginPct: number;
+  skuCoveragePct: number;
+  valueCoveragePct: number;
+  heldCategories?: string[];
+}
+
+export type AiSchemesFyReportDormant = {
+  catalogueCodes: number;
+  neverSold: number;
+  zeroPrimarySales: number;
+  salesPeriod?: string;
+};
+
+export type AiSchemesFyReportMarginHeadroom = {
+  categories: AiSchemesMarginCategory[];
+  marginFactMonths: string[];
+  suppressedUnknownMargin: boolean;
+  secondarySkuCount: number;
+  usableSecondarySkuCount: number;
+  secondaryValue: number;
+  usableSecondaryValue: number;
+  valueRepresentedPct: number;
+  heldCategories: string[];
+};
+
+export interface AiSchemesFyReport {
+  fy: string;
+  coverage: AiSchemesCoverage;
+  pairMatrix: AiSchemesPairMatrix;
+  breadthArithmetic: AiSchemesBreadthArithmetic;
+  skuBands: AiSchemesSkuBand[];
+  dormant: AiSchemesFyReportDormant;
+  marginHeadroom: AiSchemesFyReportMarginHeadroom;
+}
+
+export interface AiSchemesAnalyticsResponse {
+  fys: string[];
+  reports: AiSchemesFyReport[];
+  readOnly: boolean;
+  source: string;
+}
+
 export interface ReportSection {
   title: string;
   body: string;
@@ -2626,6 +2768,14 @@ export const GetAiPayloadPeriod = {
   q4: 'q4',
   month: 'month',
 } as const;
+
+export type GetAiSchemesAnalyticsParams = {
+/**
+ * Fiscal year(s), comma-separated or repeated (for example fy=2025-26,2026-27). Defaults to the open fiscal year.
+ * @pattern ^\d{4}-\d{2}(,\d{4}-\d{2})*$
+ */
+fy?: string;
+};
 
 export type GetMgmtDeepDiveParams = {
 /**

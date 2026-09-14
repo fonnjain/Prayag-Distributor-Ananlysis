@@ -23,6 +23,7 @@ import type {
   AiPayload,
   AiReportRequest,
   AiReportResponse,
+  AiSchemesAnalyticsResponse,
   AnalyticsReport,
   AnalyzeRequest,
   AnalyzeResponse,
@@ -48,6 +49,7 @@ import type {
   ErrorResponse,
   ExportCustomerMasterParams,
   GetAiPayloadParams,
+  GetAiSchemesAnalyticsParams,
   GetAnalyticsParams,
   GetMgmtDeepDiveParams,
   GetMgmtDistributorDeepDiveParams,
@@ -997,6 +999,91 @@ export function useGetAiPayload<TData = Awaited<ReturnType<typeof getAiPayload>>
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAiPayloadQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAiSchemesAnalyticsUrl = (params?: GetAiSchemesAnalyticsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/ai-schemes/analytics?${stringifiedParams}` : `/api/ai-schemes/analytics`
+}
+
+/**
+ * Returns the arithmetic-only AI Schemes Sections B and C analytics for one or more fiscal years. E2 uses secondary order-booking SKU lines for positive retailer-item pairs and authoritative current catalogue codes for dormant counts. E3 uses gross contribution from margin_fact, with unknown margin and open resolution-held periods suppressed during calculation. This endpoint does not generate proposals, peer sets, scheme depth, or nudges.
+ * @summary Read-only AI Schemes E2/E3 analytics
+ */
+export const getAiSchemesAnalytics = async (params?: GetAiSchemesAnalyticsParams, options?: RequestInit): Promise<AiSchemesAnalyticsResponse> => {
+
+  return customFetch<AiSchemesAnalyticsResponse>(getGetAiSchemesAnalyticsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAiSchemesAnalyticsQueryKey = (params?: GetAiSchemesAnalyticsParams,) => {
+    return [
+    `/api/ai-schemes/analytics`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAiSchemesAnalyticsQueryOptions = <TData = Awaited<ReturnType<typeof getAiSchemesAnalytics>>, TError = ErrorType<ErrorResponse>>(params?: GetAiSchemesAnalyticsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiSchemesAnalytics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAiSchemesAnalyticsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAiSchemesAnalytics>>> = ({ signal }) => getAiSchemesAnalytics(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAiSchemesAnalytics>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAiSchemesAnalyticsQueryResult = NonNullable<Awaited<ReturnType<typeof getAiSchemesAnalytics>>>
+export type GetAiSchemesAnalyticsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Read-only AI Schemes E2/E3 analytics
+ */
+
+export function useGetAiSchemesAnalytics<TData = Awaited<ReturnType<typeof getAiSchemesAnalytics>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetAiSchemesAnalyticsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiSchemesAnalytics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAiSchemesAnalyticsQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

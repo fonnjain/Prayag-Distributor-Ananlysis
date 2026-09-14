@@ -5545,6 +5545,59 @@ const MIGRATIONS: Migration[] = [
         CHECK (last_used_status IS NULL OR last_used_status BETWEEN 100 AND 599);
     `,
   },
+  {
+    id: "115_prompt93_geography_resolution_items",
+    sql: `
+      -- Prompt 93 Section A: record the geography build hold and the related
+      -- RET# coverage finding.  The stable code is the seed key; DO NOTHING
+      -- deliberately preserves any later administrator edit or resolution.
+      INSERT INTO resolution_item
+        (code, type, title, category, fiscal_year, month, scope_product,
+         scope_measure, reason, evidence, value_at_stake, raised_on, raised_by,
+         owner, priority, status, blocks_api)
+      VALUES
+        ('H4', 'HOLD', 'CANONICAL RETAILER GEOGRAPHY INCOMPLETE', 'master data',
+         NULL, NULL, 'retailer state attribution', 'peer-set construction',
+         'Retailer canonical state is directly known for 33.28% of FY2025-26 active retailers and 26.12% of FY2026-27. An unambiguous distributor bridge lifts this to 58.17% and 46.27%.',
+         '[Source: Replit Prompt 93 Section A, 14 September 2026] 8,898 FY2025-26 active retailers, 2,961 with direct state, 5,176 after bridge. 6,194 FY2026-27 active, 1,618 direct, 2,866 after bridge. Among directly known FY2025-26 state x size-quintile cells, 32 of 45 hold at least 30 retailers - so peers are statistically credible WHERE geography is known.',
+         NULL, '2026-09-14', 'Prompt 93 Section A',
+         'internal, then Prayag for source attribution', 'high', 'open', TRUE),
+        ('P44', 'PENDING', 'RET# COVERAGE UNEVEN ACROSS YEARS', 'data quality',
+         NULL, NULL, NULL, NULL,
+         '52,515 of 379,439 FY2025-26 secondary rows carry RET#, against complete RET# on all 123,326 FY2026-27 rows. Retailer identity falls back to normalised name for the remainder, which is weaker.',
+         '[Source: Replit Prompt 93 Section A, 14 September 2026] 52,515 of 379,439 FY2025-26 secondary rows carry RET#, against complete RET# on all 123,326 FY2026-27 rows. Retailer identity falls back to normalised name for the remainder, which is weaker.',
+         NULL, '2026-09-14', 'Prompt 93 Section A',
+         'internal', 'medium', 'open', FALSE)
+      ON CONFLICT (code) DO NOTHING;
+
+      DO $do$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+            FROM resolution_item
+           WHERE code = 'H4'
+             AND type = 'HOLD'
+             AND status = 'open'
+             AND blocks_api = TRUE
+             AND priority = 'high'::resolution_priority
+        ) THEN
+          RAISE EXCEPTION 'H4 geography hold seed is incomplete';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1
+            FROM resolution_item
+           WHERE code = 'P44'
+             AND type = 'PENDING'
+             AND status = 'open'
+             AND blocks_api = FALSE
+             AND priority = 'medium'::resolution_priority
+        ) THEN
+          RAISE EXCEPTION 'P44 RET# coverage finding seed is incomplete';
+        END IF;
+      END
+      $do$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

@@ -30,6 +30,7 @@ import LoginPage from "@/pages/LoginPage";
 import ChangePasswordPage from "@/pages/ChangePasswordPage";
 import ResolutionPage from "@/pages/ResolutionPage";
 import NotFound from "@/pages/not-found";
+import AiSchemesPage from "@/pages/AiSchemesPage";
 import { DashboardProvider } from "@/data/dashboard-context";
 import { GlobalFilterProvider } from "@/data/global-filter-context";
 import { AuthProvider, useAuth } from "@/data/auth-context";
@@ -76,6 +77,8 @@ function ProtectedRoutes() {
         <Route path="/secondary-orders" component={SecondaryOrdersPage} />
         {/* SKU Deep Dive */}
         <Route path="/sku" component={SkuPage} />
+        {/* AI Schemes */}
+        <Route path="/ai-schemes" component={AiSchemesPage} />
         {/* MRP section */}
         <Route path="/mrp/competition" component={CompetitionPricePage} />
         <Route path="/mrp/margin" component={MarginPage} />

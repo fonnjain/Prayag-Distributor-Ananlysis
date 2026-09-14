@@ -83,6 +83,7 @@ const NAV: NavGroup[] = [
       { id: "company-reports", label: "Company Reports", path: "/company-reports", icon: BarChartIcon },
       { id: "comparison",      label: "Comparison",      path: "/comparison",      icon: LineChart },
       { id: "ai-targets",      label: "AI Targets",      path: "/ai-targets",      icon: Bot },
+      { id: "ai-schemes",      label: "AI Schemes",      path: "/ai-schemes",      icon: Database },
       { id: "targets",         label: "Targets",         path: "/targets",         icon: Target },
       { id: "pending",         label: "Pending Orders",  path: "/pending",         icon: ClipboardList },
       { id: "data-health",     label: "Data Health",     path: "/data-health",     icon: ShieldCheck },
@@ -234,6 +235,9 @@ function activeIds(location: string, nav: NavGroup[]): { groupId: string; itemId
     return { groupId: "settings", itemId: "resolution" };
   }
   // Dashboard
+  if (location.startsWith("/ai-schemes")) {
+    return { groupId: "dashboard", itemId: "ai-schemes" };
+  }
   const slug = location === "/" ? "overview" : location.replace(/^\//, "").split("?")[0];
   const item = nav[0].items.find((i) => i.id === slug) ?? nav[0].items[0];
   return { groupId: "dashboard", itemId: item.id };

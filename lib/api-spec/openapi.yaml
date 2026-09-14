@@ -385,6 +385,46 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /ai-schemes/analytics:
+    get:
+      operationId: getAiSchemesAnalytics
+      tags: [ai]
+      summary: Read-only AI Schemes E2/E3 analytics
+      description: >
+        Returns the arithmetic-only AI Schemes Sections B and C analytics for
+        one or more fiscal years. E2 uses secondary order-booking SKU lines for
+        positive retailer-item pairs and authoritative current catalogue codes
+        for dormant counts. E3 uses gross contribution from margin_fact, with
+        unknown margin and open resolution-held periods suppressed during
+        calculation. This endpoint does not generate proposals, peer sets,
+        scheme depth, or nudges.
+      parameters:
+        - name: fy
+          in: query
+          required: false
+          description: >
+            Fiscal year(s), comma-separated or repeated (for example
+            fy=2025-26,2026-27). Defaults to the open fiscal year.
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}(,\\d{4}-\\d{2})*$"
+      responses:
+        "200":
+          description: AI Schemes analytics by fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiSchemesAnalyticsResponse"
+        "400":
+          description: Invalid fiscal year
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Analytics could not be computed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /ai/report:
     post:
       operationId: generateAiReport
@@ -4875,6 +4915,149 @@ components:
           additionalProperties: true
           description: "Present only for state-head aggregate payloads."
         reason: { type: string }
+    AiSchemesCoverage:
+      type: object
+      required: [fy, loadedMonths, sourceMonths, heldPeriods, heldMetadata, sources, geography]
+      properties:
+        fy: { type: string }
+        loadedMonths:
+          type: array
+          items: { type: string }
+        sourceMonths:
+          type: object
+          required: [primary, secondary, margin]
+          properties:
+            primary: { type: array, items: { type: string } }
+            secondary: { type: array, items: { type: string } }
+            margin: { type: array, items: { type: string } }
+        heldPeriods:
+          type: array
+          items: { type: string }
+        heldMetadata:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        sources:
+          type: object
+          additionalProperties: { type: string }
+        geography:
+          type: object
+          required: [available, statement]
+          properties:
+            available: { type: boolean }
+            statement: { type: string }
+    AiSchemesPairMatrix:
+      type: object
+      required: [positivePairs, activeRetailers, skus, pairDensityPct, valueDistribution, identityRule]
+      properties:
+        positivePairs: { type: integer }
+        activeRetailers: { type: integer }
+        skus: { type: integer }
+        pairDensityPct: { type: number }
+        valueDistribution:
+          type: object
+          required: [p10, p25, median, p75, p90, bottomDecileAverage, topDecileAverage]
+          properties:
+            p10: { type: number }
+            p25: { type: number }
+            median: { type: number }
+            p75: { type: number }
+            p90: { type: number }
+            bottomDecileAverage: { type: number }
+            topDecileAverage: { type: number }
+        identityRule: { type: string }
+    AiSchemesBreadthArithmetic:
+      type: object
+      required: [increments, label]
+      properties:
+        increments:
+          type: array
+          items:
+            type: object
+            required: [additionalSkusPerRetailer, lowValue, medianValue, highValue]
+            properties:
+              additionalSkusPerRetailer: { type: integer }
+              lowValue: { type: number }
+              medianValue: { type: number }
+              highValue: { type: number }
+        label: { type: string }
+    AiSchemesSkuBand:
+      type: object
+      required: [band, codes, primaryValue, primarySharePct, salesPerCode, retailersPerSkuMean, retailersPerSkuMedian]
+      properties:
+        band: { type: string, enum: [VERY HIGH, HIGH, MEDIUM, LOW, SCARCE, DORMANT] }
+        codes: { type: integer }
+        primaryValue: { type: number }
+        primarySharePct: { type: number }
+        salesPerCode: { type: number }
+        retailersPerSkuMean: { type: number }
+        retailersPerSkuMedian: { type: number }
+        dormantBasis: { type: ["string", "null"] }
+    AiSchemesMarginCategory:
+      type: object
+      required: [category, grossMarginPct, marginTier, maximumSchemeDepthPct, maximumSchemeShareOfGrossMarginPct, skuCoveragePct, valueCoveragePct]
+      properties:
+        category: { type: string }
+        grossMarginPct: { type: ["number", "null"] }
+        marginTier: { type: ["string", "null"], enum: [RICH, MID, THIN, BARE, null] }
+        maximumSchemeDepthPct: { type: number }
+        maximumSchemeShareOfGrossMarginPct: { type: number }
+        skuCoveragePct: { type: number }
+        valueCoveragePct: { type: number }
+        heldCategories:
+          type: array
+          items: { type: string }
+    AiSchemesFyReport:
+      type: object
+      required: [fy, coverage, pairMatrix, breadthArithmetic, skuBands, dormant, marginHeadroom]
+      properties:
+        fy: { type: string }
+        coverage: { $ref: "#/components/schemas/AiSchemesCoverage" }
+        pairMatrix: { $ref: "#/components/schemas/AiSchemesPairMatrix" }
+        breadthArithmetic: { $ref: "#/components/schemas/AiSchemesBreadthArithmetic" }
+        skuBands:
+          type: array
+          items: { $ref: "#/components/schemas/AiSchemesSkuBand" }
+        dormant:
+          type: object
+          required: [catalogueCodes, neverSold, zeroPrimarySales]
+          properties:
+            catalogueCodes: { type: integer }
+            neverSold: { type: integer }
+            zeroPrimarySales: { type: integer }
+            salesPeriod: { type: string }
+        marginHeadroom:
+          type: object
+          required: [categories, marginFactMonths, suppressedUnknownMargin, secondarySkuCount, usableSecondarySkuCount, secondaryValue, usableSecondaryValue, valueRepresentedPct, heldCategories]
+          properties:
+            categories:
+              type: array
+              items: { $ref: "#/components/schemas/AiSchemesMarginCategory" }
+            marginFactMonths:
+              type: array
+              items: { type: string }
+            suppressedUnknownMargin: { type: boolean }
+            secondarySkuCount: { type: integer }
+            usableSecondarySkuCount: { type: integer }
+            secondaryValue: { type: number }
+            usableSecondaryValue: { type: number }
+            valueRepresentedPct: { type: number }
+            heldCategories:
+              type: array
+              items: { type: string }
+    AiSchemesAnalyticsResponse:
+      type: object
+      required: [fys, reports, readOnly, source]
+      properties:
+        fys:
+          type: array
+          items: { type: string }
+        reports:
+          type: array
+          items: { $ref: "#/components/schemas/AiSchemesFyReport" }
+        readOnly: { type: boolean }
+        source: { type: string }
     ReportSection:
       type: object
       required: [title, body]

@@ -439,6 +439,104 @@ export const GetAiPayloadResponse = zod.object({
 
 
 /**
+ * Returns the arithmetic-only AI Schemes Sections B and C analytics for one or more fiscal years. E2 uses secondary order-booking SKU lines for positive retailer-item pairs and authoritative current catalogue codes for dormant counts. E3 uses gross contribution from margin_fact, with unknown margin and open resolution-held periods suppressed during calculation. This endpoint does not generate proposals, peer sets, scheme depth, or nudges.
+ * @summary Read-only AI Schemes E2/E3 analytics
+ */
+export const getAiSchemesAnalyticsQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}(,\\d{4}-\\d{2})*$');
+
+
+export const GetAiSchemesAnalyticsQueryParams = zod.object({
+  "fy": zod.coerce.string().regex(getAiSchemesAnalyticsQueryFyRegExp).optional().describe('Fiscal year(s), comma-separated or repeated (for example fy=2025-26,2026-27). Defaults to the open fiscal year.\n')
+})
+
+export const GetAiSchemesAnalyticsResponse = zod.object({
+  "fys": zod.array(zod.string()),
+  "reports": zod.array(zod.object({
+  "fy": zod.string(),
+  "coverage": zod.object({
+  "fy": zod.string(),
+  "loadedMonths": zod.array(zod.string()),
+  "sourceMonths": zod.object({
+  "primary": zod.array(zod.string()),
+  "secondary": zod.array(zod.string()),
+  "margin": zod.array(zod.string())
+}),
+  "heldPeriods": zod.array(zod.string()),
+  "heldMetadata": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sources": zod.record(zod.string(), zod.string()),
+  "geography": zod.object({
+  "available": zod.boolean(),
+  "statement": zod.string()
+})
+}),
+  "pairMatrix": zod.object({
+  "positivePairs": zod.number(),
+  "activeRetailers": zod.number(),
+  "skus": zod.number(),
+  "pairDensityPct": zod.number(),
+  "valueDistribution": zod.object({
+  "p10": zod.number(),
+  "p25": zod.number(),
+  "median": zod.number(),
+  "p75": zod.number(),
+  "p90": zod.number(),
+  "bottomDecileAverage": zod.number(),
+  "topDecileAverage": zod.number()
+}),
+  "identityRule": zod.string()
+}),
+  "breadthArithmetic": zod.object({
+  "increments": zod.array(zod.object({
+  "additionalSkusPerRetailer": zod.number(),
+  "lowValue": zod.number(),
+  "medianValue": zod.number(),
+  "highValue": zod.number()
+})),
+  "label": zod.string()
+}),
+  "skuBands": zod.array(zod.object({
+  "band": zod.enum(['VERY HIGH', 'HIGH', 'MEDIUM', 'LOW', 'SCARCE', 'DORMANT']),
+  "codes": zod.number(),
+  "primaryValue": zod.number(),
+  "primarySharePct": zod.number(),
+  "salesPerCode": zod.number(),
+  "retailersPerSkuMean": zod.number(),
+  "retailersPerSkuMedian": zod.number(),
+  "dormantBasis": zod.string().nullish()
+})),
+  "dormant": zod.object({
+  "catalogueCodes": zod.number(),
+  "neverSold": zod.number(),
+  "zeroPrimarySales": zod.number(),
+  "salesPeriod": zod.string().optional()
+}),
+  "marginHeadroom": zod.object({
+  "categories": zod.array(zod.object({
+  "category": zod.string(),
+  "grossMarginPct": zod.number().nullable(),
+  "marginTier": zod.union([zod.literal('RICH'),zod.literal('MID'),zod.literal('THIN'),zod.literal('BARE'),zod.literal(null)]).nullable(),
+  "maximumSchemeDepthPct": zod.number(),
+  "maximumSchemeShareOfGrossMarginPct": zod.number(),
+  "skuCoveragePct": zod.number(),
+  "valueCoveragePct": zod.number(),
+  "heldCategories": zod.array(zod.string()).optional()
+})),
+  "marginFactMonths": zod.array(zod.string()),
+  "suppressedUnknownMargin": zod.boolean(),
+  "secondarySkuCount": zod.number(),
+  "usableSecondarySkuCount": zod.number(),
+  "secondaryValue": zod.number(),
+  "usableSecondaryValue": zod.number(),
+  "valueRepresentedPct": zod.number(),
+  "heldCategories": zod.array(zod.string())
+})
+})),
+  "readOnly": zod.boolean(),
+  "source": zod.string()
+})
+
+
+/**
  * Builds the Phase A1 payload internally, sends it to Claude with a strict system prompt, runs the numeric guard, and returns a structured JSON report. No PDF is generated server-side; the client renders and prints the returned JSON. Claude never does arithmetic — it receives only the pre-computed payload and writes narrative. The numeric guard checks every number in the generated text against the payload; any unmatched number sets guard.status to "requires_review".
  * @summary Phase A2 — generate salesperson narrative report via Claude
  */
