@@ -1,0 +1,215 @@
+# Replit Prompt 88 (extended) — Resolution: everything waiting on someone
+
+**Date:** 14 September 2026
+**Supersedes:** the earlier Prompt 88.
+**Scope:** A is the register. B is enforcement. C is the page. D loads the
+entries. E is the export.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## What changed in this version
+
+The register now covers **everything waiting on someone**, not only data that
+must be blocked.
+
+**Two types, one register, and they behave differently:**
+
+**HOLD** — blocks a figure. PTMT margin cannot be shown until answered. The
+system enforces it.
+
+**PENDING** — blocks nothing. The 34 DIST# codes need confirming; nothing on
+screen is wrong. Somebody owes an answer.
+
+Roughly twenty-five items currently live across a dozen documents. Nobody can see
+them in one place, and the note to Prayag is reassembled by hand each time.
+
+---
+
+## Section A — the register
+
+```
+Code change. A general register of open items, with types.
+
+TABLE: resolution_item
+
+  id
+  type                HOLD or PENDING
+  title               short, human
+  category            data quality, master data, access, infrastructure,
+                      commercial
+  fiscal_year, month or month range     nullable - not every item has one
+  scope_product       nullable
+  scope_measure       WHICH measures are blocked. HOLD only. Never a whole
+                      month by default
+  reason              plain language
+  evidence            the figures, so nobody re-derives them
+  value_at_stake      rupees, where it exists. Nullable
+  raised_on, raised_by
+  owner               Prayag, Deepak J, IT, internal, or a named person
+  status              open, answered, resolved, accepted-as-is
+  resolved_on, resolved_by, resolution_note
+  blocks_api          HOLD only
+
+RULES
+
+1. Only HOLD enforces. PENDING is a record, never a block.
+2. MEASURE-SCOPED. A hold blocks named measures, never a whole month.
+3. Evidence goes in the record. The next reader must not repeat the
+   investigation.
+4. Resolved items are RETAINED, never deleted.
+5. accepted-as-is is a real outcome, not a failure.
+6. DAYS OPEN is derived and shown. Some of these predate this month.
+```
+
+---
+
+## Section B — enforcement, HOLD only
+
+```
+B1. CALCULATION. A blocked measure returns UNAVAILABLE - never zero, never
+    silently omitted.
+
+    A held month must not be quietly dropped from an average. Twelve-month
+    margin covering eight months says eight.
+
+B2. DISPLAY. Blank-grey with the hold title and a link to Resolution.
+    Aggregates containing a held period state their coverage.
+
+B3. API - THE IMPORTANT ONE. An external consumer requesting a held
+    measure receives an EXPLICIT STRUCTURED EXCLUSION naming the hold,
+    scope and reason.
+
+    Not silence. Not zero. Not an empty array. A consumer receiving nothing
+    may substitute zero, which is worse than an error.
+
+    Print the response shape before building.
+
+B4. WHAT IS NOT BLOCKED. For PTMT Jan-Apr 2026: sales value, quantity,
+    order booking, discount and realisation all work normally. Only margin,
+    gross contribution and cost are held.
+
+B5. Print every surface consuming margin and confirm each honours the
+    register - SKU contribution, volume decline, push list, K4,
+    recommendations, Red Alert C4.
+```
+
+---
+
+## Section C — the page
+
+```
+Under Settings.
+
+  - OPEN items first, sorted by days open descending
+  - a toggle to sort by value at stake instead
+  - HOLD and PENDING visually distinct - a hold is blocking something now
+  - filter by owner, category and type
+  - each row: title, type, owner, days open, value at stake, status
+  - expanding shows reason, evidence, scope and what unblocks it
+  - any blocked figure elsewhere links to its hold
+
+  Admin can add, edit and resolve. Everyone else reads.
+
+  NOT an alert feed. This is a register of known, accepted gaps - a
+  different thing from something going wrong now.
+```
+
+---
+
+## Section D — the entries
+
+```
+HOLDS - these block figures
+
+H1  PTMT MARGIN, JAN-APR 2026
+    scope     PTMT master category; margin, gross contribution, BOM cost
+    reason    Factory cost at ~40% of true level. Median BOM on 191 common
+              codes: Nov-25 Rs 32.16, Dec-25 Rs 30.98, Jan Rs 12.92,
+              Feb Rs 12.72, Mar Rs 13.49, Apr Rs 14.82, May Rs 34.85,
+              Jun Rs 39.66. 2.55x understated.
+    evidence  FY2026-27 April PTMT margin 86.47% vs corrected ~65.5%.
+              FY2025-26 April 76.17%. May-26 68.50%, Jun-26 69.19%.
+    owner     Prayag - Deepak J          blocks_api true
+
+H2  AUGUST 2026 SECONDARY SKU
+    scope     retailer-level and item-level secondary analysis, Aug-26
+    reason    Export not received. Production zero rows. Month open until
+              1 December 2026.
+    owner     Prayag
+
+H3  FY2024-25 MONTHLY ATTRIBUTION
+    scope     monthly and quarterly figures, FY2024-25 only
+    reason    28,613 rows retain reversed day and month after Prayag's
+              partial correction. Annual total correct at Rs 216.00 Cr.
+    evidence  Q4 overstated 13.2%, Q1 understated 12.6%, April out 30.7%.
+    owner     Prayag
+
+PENDING - nothing is blocked, an answer is owed
+
+P1   34 existing DIST# codes need confirmation
+P2   Rs 6.52 Cr of distributor sales with no DIST# code        value 6.52 Cr
+P3   780 sold codes with no MRP master record                  value 9.64 Cr
+P4   3 WCT codes with no MRP - WCT-3LL-05, -07, -10            value 1.17 Cr
+P5   15 -VB codes in excluded_do_not_load, no price or date
+P6   Large v2 price moves - P20A05 -67.4%, P20A06 -64.7%,
+     P10G12 +46.0% - confirm intended
+P7   70 discontinued codes still selling                       value 0.20 Cr
+P8   September 2026 SAP - 604 invoices vs ~700 derived
+P9   4 rows and Rs 5,595 missing from FY2024-25 - variance
+     accepted, recorded for completeness                       status answered
+P10  Master_and_Sub_category.xlsx - merge CP into C P, remove
+     the leaked header row, fix CONECTION spelling
+P11  Sunil Mohanty - no HR record, no registry record, blank
+     alert number, zero people in scope
+P12  Pawan Sharma - HR marks Deactive, roster uses him as an
+     active head with 16 people. Two different mobile numbers
+P13  Prashant Onam Naik - active head, no alert route
+     configured
+P14  7 roster members with no HR record
+P15  SMTP or Resend credentials - 524 delivery attempts, zero
+     delivered                                    owner IT
+P16  WhatsApp provider decision - no provider configured
+                                                  owner internal
+P17  Alert state-head routing - entity keys do not resolve for
+     Aqil Rizvi and Narendra Kumar Sharma          owner internal
+P18  PSCode3 brand mirror never generated for FY2023-24 to
+     FY2025-26                       status accepted-as-is
+P19  Whether state heads should receive email as well as
+     WhatsApp - no email routes exist              owner internal
+P20  The 22-query pack, unsent since 31 August     owner internal
+
+Add the remaining items from Prayag_Data_Queries_31Aug2026 that are not
+already listed above. Print what you add.
+```
+
+---
+
+## Section E — the export
+
+```
+An "Export open items" button.
+
+  - filters by owner, so "everything waiting on Prayag" is one click
+  - Excel or PDF, with title, type, reason, evidence, value, days open
+  - grouped by category
+  - suitable to send as-is
+
+This replaces reassembling the Prayag note by hand each time. Right now
+those questions live across six documents.
+```
+
+---
+
+## Notes
+
+- **The type split is what makes this work.** A hold blocking a figure and a
+  question owing an answer are different things; one register, two behaviours.
+- **Days open creates pressure a document never will.** The PTMT question predates
+  this session by weeks, and nothing currently shows that.
+- **Value at stake changes the conversation.** ₹9.64 Cr unpriced, ₹6.52 Cr
+  uncoded, ₹1.17 Cr on WCT. Sorted by rupees waiting, the priority order looks
+  quite different from sorted by date.
+- **Section E is the practical payoff.** The Prayag note becomes an export rather
+  than a writing task, and nothing gets forgotten between rounds.

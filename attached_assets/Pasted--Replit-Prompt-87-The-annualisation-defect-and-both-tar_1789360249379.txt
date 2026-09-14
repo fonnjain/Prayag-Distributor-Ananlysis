@@ -1,0 +1,178 @@
+# Replit Prompt 87 — The annualisation defect, and both target engines
+
+**Date:** 14 September 2026
+**Scope:** Section A is a defect and comes first. Section B is read-only.
+Section C is the restructure, after B.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Section A — the page says the business is shrinking. It is not.
+
+The Engine Generated context line reads:
+
+> *"FY2024-25: −2.3% nominal / +0.9% real · FY2025-26: +5.8% nominal / +6.1%
+> real · **FY2026-27: −10.2% nominal / −15.3% real**"*
+
+**Two of three check out exactly.** FY2024-25 is ₹341.14 Cr against ₹349.02 Cr =
+−2.26%. FY2025-26 is ₹360.99 Cr against ₹341.14 Cr = +5.82%.
+
+**The third is computed by linear annualisation**, and it matches:
+
+| Method | Full year | vs FY2025-26 |
+|---|---:|---:|
+| Linear, YTD × 12/5 | ₹324.84 Cr | **−10.0%** |
+| **Seasonal curve, YTD ÷ 34.95%** | **₹387.27 Cr** | **+7.3%** |
+
+The business does **34.56% of its year in Q4** — and the same page states that,
+in the Seasonal Calibration block directly above.
+
+So the engine annualises linearly on a business it has already measured as
+heavily back-loaded. **The sign is wrong and the figure is out by roughly 17
+percentage points**, and it is the context a CEO reads while setting targets.
+
+```
+Read-only first, then fix.
+
+A1. Print the exact calculation behind the FY2026-27 context figure.
+    Confirm it is YTD x 12 / elapsed months.
+
+A2. Confirm the other two years are computed from complete actuals, not
+    annualised. They reconcile exactly, so they should be.
+
+A3. THE FIX. Annualise using the seasonal curve the page already holds -
+    Apr-Aug is 34.95% of a year - not linearly.
+
+    Print the corrected figure. Expect approximately Rs 387 Cr and +7.3%
+    nominal.
+
+A4. STATE THAT IT IS A PROJECTION. A completed year and a projected year
+    must not sit in the same list looking alike. Label it "projected" and
+    name the basis.
+
+A5. The real-terms conversion is arithmetically correct - (1-0.102)/1.059
+    gives -15.2%. It will follow the corrected nominal automatically.
+    Confirm.
+
+A6. Where else does this annualisation appear? Any run-rate, projection or
+    full-year estimate anywhere in the app computed as YTD x 12 / months
+    is wrong on this business. Print every occurrence.
+
+A6 matters most. If linear annualisation is used elsewhere, every one of
+those figures understates by a similar margin.
+```
+
+---
+
+## Section B — what each engine actually does
+
+```
+Read-only. Change nothing. These are two different kinds of model and
+should not be merged before that is understood.
+
+PRIMARY - Seasonal Calibration, State Head Targets
+
+B1. What does it do? It appears to hold one percentage curve - Apr 4.19%
+    through Mar 13.58% - and distribute a total across twelve months.
+
+    Print the calculation, the inputs, and what "Auto Calculate" does to a
+    row.
+
+B2. The curve is "calibrated from FY2025-26 retail actuals". Which measure -
+    sale_line, secondary, or the dashboard? Print the source and the
+    calibration.
+
+B3. The curve sums to 99.95%, and the page shows Q4 as 34.56% while the
+    monthly figures give 34.54%. Where does the rounding go, and does any
+    target lose or gain value because of it?
+
+B4. Three states are shown - plan figure, derived, user-entered. What is
+    the precedence when they conflict, and does a user edit survive a later
+    Auto Calculate?
+
+B5. "Single canonical source - edits propagate to all views." Which views?
+    If a target edit here changes Red Alert A1 denominators or achievement
+    percentages elsewhere, that must be known.
+
+SECONDARY - Engine Generated
+
+B6. What does it do? It appears to take a Rs 360.99 Cr baseline, apply a
+    25% target increase, and split the resulting Rs 90.24 Cr of GROWTH -
+    not the total - three ways across old SKU, new SKU and new customers.
+
+    Print the model: inputs, the split, and how a proposal is produced.
+
+B7. The populations are 54,232 old-SKU pairs across 572 customers,
+    25,57,520 new-SKU candidate pairs, and 0 new-customer baseline pairs.
+
+    What is a "pair"? Why is new customers zero, and what does the engine
+    do with a 30% allocation to a population of zero?
+
+B8. Five tabs exist - Combined, Existing Sales Old SKU, Existing Sales New
+    SKU, New Customers, People (Secondary). What does each produce and how
+    do they relate to Combined?
+
+B9. The baseline reconciles - Territory Rs 340.34 Cr + Project/Govt
+    Rs 20.65 Cr = Rs 360.99 Cr. Confirm, and say whether project and
+    government business is INCLUDED in the growth target or only in the
+    baseline.
+
+B10. THE KEY QUESTION. Do the two engines produce targets that are
+     comparable, additive, or entirely separate?
+
+     Primary divides a known total across months. Secondary builds a total
+     up from a baseline plus growth. Those are different operations.
+
+     If a state head has both a primary and a secondary target, how do they
+     relate - and does anything add them together?
+
+Report before any restructuring.
+```
+
+---
+
+## Section C — the restructure, after B
+
+```
+Not to be started until Section B is answered.
+
+Proposed, subject to what B reveals:
+
+  - Engine Generated becomes its own page: AI TARGETS
+  - inside it, a tab for SECONDARY - the current growth-allocation engine
+  - inside it, a tab for PRIMARY - the auto-compute currently on the
+    Targets page
+  - the existing Targets page keeps manual entry and the canonical state
+    head targets
+
+C1. Confirm that shape works given B10. If the two engines are not
+    comparable, tabs are still fine - but each tab must state what kind of
+    target it produces.
+
+C2. Where does the seasonal curve live? It is used by primary auto-compute.
+    If that moves to AI Targets, does the curve move with it, stay on
+    Targets, or need to be visible in both?
+
+C3. What writes the canonical target? If both engines can propose and the
+    Targets page holds the canonical value, the write path and precedence
+    must be explicit. A proposal is not a target until someone accepts it.
+
+C4. Does moving the page break any link, bookmark or drill-down URL?
+```
+
+---
+
+## Notes
+
+- **A6 is the question with the widest reach.** If linear annualisation is used for
+  run-rates or projections anywhere else, every one of those figures understates
+  by a similar margin on this business.
+- **A4 matters independently of the arithmetic.** Two completed years and one
+  projected year in the same list, formatted identically, invite a comparison that
+  is not valid even once the projection is right.
+- **B10 is the question the restructure depends on.** One engine divides a total,
+  the other builds one up. Tabs are fine; presenting them as the same kind of
+  number is not.
+- **B5 is worth pinning before anything moves.** If target edits propagate into
+  alert denominators, moving the engine that proposes them changes what fires.

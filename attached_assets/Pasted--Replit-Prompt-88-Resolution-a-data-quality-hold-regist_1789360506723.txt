@@ -1,0 +1,206 @@
+# Replit Prompt 88 — Resolution: a data-quality hold register
+
+**Date:** 14 September 2026
+**Scope:** Section A is the register. Section B is enforcement. Section C is the
+page. Section D loads the first entries.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## What this is for
+
+PTMT factory cost is recorded at roughly **40% of its true level for four
+months** — January, February, March and **April 2026**. The result overstates
+PTMT gross margin by about **21 percentage points**: FY2026-27 April reads
+**86.47%** against a corrected **~65.5%**.
+
+It is blocked on Prayag and may stay blocked for weeks.
+
+Rather than a rule people have to remember, this becomes a **register the system
+enforces**. And it is built as a general mechanism, because at least four other
+holds are currently tracked only across scattered reports.
+
+## Scope correction, and it matters
+
+**The window is January to April, not January to March.** April 2026 is inside
+it and carries the largest single overstatement, in the current fiscal year.
+Excluding Jan–Mar while using April would leave the worst month in play.
+
+## And it blocks margin only
+
+Sales, quantities, order booking and discounts for those months are **correct**.
+Only BOM cost is wrong. Blocking PTMT entirely would remove good data and make a
+quarter of revenue disappear.
+
+---
+
+## Section A — the register
+
+```
+Code change. A general data-quality hold register, not a PTMT special case.
+
+TABLE: data_quality_hold
+
+  id
+  title                     short, human
+  fiscal_year               and month or month range
+  scope_product             category, sub-category, item codes, or all
+  scope_measure             WHICH MEASURES ARE BLOCKED - margin, gross
+                            contribution, cost. Not the whole month
+  reason                    what is wrong, in plain language
+  evidence                  figures, so nobody re-derives them
+  raised_on                 date
+  raised_by
+  owner                     who can resolve it - Prayag, Deepak J, internal
+  status                    open, resolved, accepted-as-is
+  resolved_on, resolved_by, resolution_note
+  blocks_api                boolean - whether external consumers are refused
+
+DESIGN RULES
+
+1. MEASURE-SCOPED, NOT PERIOD-SCOPED. A hold blocks named measures for a
+   period and product scope. It never blocks a whole month by default.
+
+2. A HOLD IS EVIDENCE, NOT A FLAG. The figures go in the record, so the
+   next reader does not repeat the investigation.
+
+3. RESOLVED HOLDS ARE RETAINED, never deleted. A month that was once held
+   and then cleared is worth knowing about.
+
+4. accepted-as-is is a real outcome. Prayag may confirm the low costs are
+   correct - that resolves the hold without changing data, and the record
+   should say so.
+```
+
+---
+
+## Section B — enforcement, three layers
+
+```
+Code change. The register must be enforced, not advisory.
+
+B1. CALCULATION LAYER
+    Any blocked measure for a held scope returns UNAVAILABLE - never zero,
+    never a silent omission.
+
+    A held month must not be quietly dropped from an average either. If
+    PTMT margin is held for four months, a twelve-month average must say it
+    covers eight, not present itself as twelve.
+
+B2. DISPLAY LAYER
+    Blocked figures render blank-grey with the hold title and a link to the
+    Resolution page. Same three-state convention used everywhere else.
+
+    Any aggregate containing a held period states its coverage.
+
+B3. API LAYER - this is the one that matters most
+    If another application requests a held measure for a held period, it
+    receives an EXPLICIT EXCLUSION - a structured response naming the hold,
+    the scope and the reason.
+
+    NOT silence. NOT a zero. NOT an empty array.
+
+    A consumer that receives nothing may substitute zero, which is worse
+    than an error. Print the response shape before building it.
+
+B4. WHAT IS NOT BLOCKED
+    Confirm that for PTMT Jan-Apr 2026, sales value, quantity, order
+    booking, discount and realisation all continue to work normally. Only
+    margin, gross contribution and cost are held.
+
+B5. Print every surface and payload that consumes margin, and confirm each
+    honours the register. margin_fact feeds SKU contribution, volume
+    decline, the push list, K4, recommendations and Red Alert C4.
+```
+
+---
+
+## Section C — the Resolution page
+
+```
+Under Settings. Read-mostly.
+
+  - open holds first, by raised date
+  - each showing: title, period, scope, what is blocked, reason, evidence,
+    owner, days open
+  - resolved holds below, with their resolution and date
+  - a link from any blocked figure lands on the relevant hold
+
+  Admin can add, edit and resolve. Everyone else reads.
+
+  Do NOT make this an alert feed. It is a register of known, accepted gaps -
+  a different thing from something going wrong right now.
+```
+
+---
+
+## Section D — the first entries
+
+```
+Load these five. The first is the reason this exists; the others are
+currently tracked only across scattered reports and belong in one place.
+
+D1. PTMT MARGIN, JANUARY TO APRIL 2026
+    scope_product   PTMT master category
+    scope_measure   margin, gross contribution, BOM cost
+    reason          Factory cost recorded at ~40% of true level. Median BOM
+                    on 191 common codes: Nov-25 Rs 32.16, Dec-25 Rs 30.98,
+                    then Jan Rs 12.92, Feb Rs 12.72, Mar Rs 13.49,
+                    Apr Rs 14.82, then May Rs 34.85, Jun Rs 39.66.
+                    2.55x understated.
+    evidence        FY2026-27 April PTMT margin reads 86.47% against a
+                    corrected ~65.5%. FY2025-26 April was 76.17%.
+                    May-26 68.50%, Jun-26 69.19%.
+    owner           Prayag - Deepak J
+    blocks_api      true
+    status          open
+
+D2. AUGUST 2026 SECONDARY SKU
+    scope_measure   retailer-level and item-level secondary analysis
+    reason          Retailer/item-level export not received. Production has
+                    zero rows. Month open until 1 December 2026.
+    owner           Prayag
+    status          open
+
+D3. PSCODE3 BRAND MIRROR, FY2023-24 TO FY2025-26
+    reason          Mirror rows were never generated for these years. Only
+                    July 2026 has dual-write provenance. Audit 7.6 is
+                    scoped accordingly.
+    status          accepted-as-is
+    Record it so the next reader does not treat it as loss.
+
+D4. SEPTEMBER 2026 SAP
+    reason          604 invoices against approximately 700 derived.
+                    Awaiting the next SAP batch.
+    owner           Prayag
+    status          open
+
+D5. FY2024-25 SEGMENT WISE DATES
+    reason          28,613 rows retain reversed day and month after
+                    Prayag's partial correction. Annual total correct at
+                    Rs 216.00 Cr; monthly and quarterly attribution is not.
+    evidence        Q4 overstated 13.2%, Q1 understated 12.6%, April out by
+                    30.7%.
+    scope_measure   monthly and quarterly attribution, FY2024-25 only
+    owner           Prayag
+    status          open
+
+Print the register as loaded, and one example of each enforcement layer.
+```
+
+---
+
+## Notes
+
+- **B3 is the part you identified and it is the most important.** An external
+  consumer that receives silence may substitute zero. An explicit exclusion cannot
+  be mistaken for a measurement.
+- **B1's second half is easy to miss.** Dropping held months from an average
+  silently is the same failure as showing them as zero — the average simply lies
+  more quietly.
+- **D5 is the one most likely to surprise someone.** FY2024-25 monthly figures are
+  still wrong and have been since Prayag's partial fix. It has never been recorded
+  anywhere the app can see.
+- **Building this as a general register rather than a PTMT flag** is what makes it
+  worth the effort. Five holds exist today and they live in five different reports.
