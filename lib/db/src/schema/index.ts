@@ -38,6 +38,7 @@ export * from "./routePayloadSnapshot";
 export * from "./distributorIdentity";
 export * from "./personRegistry";
 export * from "./secondaryOrderLine";
+export * from "./resolutionItem";
 // NOTE: schemes.ts is intentionally NOT exported from this index.
 // All five scheme tables (scheme, scheme_reward_slab, territory_group,
 // scheme_item_group, special_pricing) are managed exclusively by

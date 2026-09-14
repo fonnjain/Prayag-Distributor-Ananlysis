@@ -77,6 +77,7 @@ import { provisionalMonthsExportInfo } from "../lib/exportInfo.js";
 import { currentOpenFy, deriveSaleLineCohortFy, deriveSaleLineClosedFys } from "../lib/fyAnchors.js";
 import { getVolumeDecline } from "../lib/sku/skuVolumeDecline.js";
 import { getPriceShrinkers } from "../lib/sku/skuPriceShrinkers.js";
+import { getOpenResolutionHolds, resolveHoldExclusionsFromRows } from "../lib/resolution/holdResolver.js";
 
 const router = Router();
 
@@ -450,6 +451,15 @@ router.post("/sku/taxonomy-review/:code", async (req: Request, res: Response): P
 // FY-specific labels from fiscalMonthsToLabels don't fit.
 const FISCAL_NAMES = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
 
+async function secondarySkuExclusions(requestedPeriods: string[]) {
+  const holds = await getOpenResolutionHolds();
+  return holds.flatMap((hold) => resolveHoldExclusionsFromRows({
+    measure: "secondary SKU",
+    product: "secondary SKU",
+    requestedPeriods,
+  }, [hold]));
+}
+
 /** Parse monthFrom/monthTo (1–12 fiscal) into month names, or null when absent/full-year. */
 function monthNamesParam(req: Request): string[] | null {
   const monthFrom = intParam(req, "monthFrom", 1, 12, 0);
@@ -490,6 +500,18 @@ router.get("/sku/trend", async (req: Request, res: Response): Promise<void> => {
   const monthNames = monthNamesParam(req);
 
   try {
+    const secondaryExclusions = level === "retailer"
+      ? await secondarySkuExclusions(
+          monthNames ? monthNames.flatMap((name) => fiscalMonthsToLabels(currentOpenFy(), FISCAL_NAMES.indexOf(name) + 1, FISCAL_NAMES.indexOf(name) + 1)) : fiscalMonthsToLabels(currentOpenFy(), 1, 12),
+        )
+      : [];
+    if (secondaryExclusions.length > 0) {
+      res.json({
+        level, availability: "unavailable", value: null,
+        exclusions: secondaryExclusions, data: [],
+      });
+      return;
+    }
     const build = (): Promise<Record<string, unknown>> =>
       getSkuTrend({
         level: level as SkuLevel,
@@ -568,6 +590,18 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
     });
     return;
   }
+  const secondaryExclusions = level === "retailer"
+    ? await secondarySkuExclusions(monthLabels)
+    : [];
+  if (secondaryExclusions.length > 0) {
+    res.json({
+      fy, monthFrom, monthTo, level, scope, scopeId: scopeId ?? null,
+      filtered: !!entityFilter,
+      availability: "unavailable", value: null,
+      exclusions: secondaryExclusions, facts: [],
+    });
+    return;
+  }
 
   try {
     // ── Retailer level: fail-closed coverage gate ─────────────────────────────
@@ -636,14 +670,29 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
         const { getCodeContributions } = await import("../lib/sku/skuContribution.js");
         const allCodes = result.recommendations.flatMap((s) => s.topGapCodes.map((c) => c.code));
         const contrib = await getCodeContributions(allCodes);
+        const holds = await getOpenResolutionHolds();
+        const contributionExclusions = result.recommendations.flatMap((seg) =>
+          resolveHoldExclusionsFromRows({
+            measure: "gross contribution",
+            product: seg.segment,
+            requestedPeriods: monthLabels,
+          }, holds),
+        );
         let noCost = 0, noCostNet = 0, totalNet = 0, totalContrib = 0, hasContrib = false;
         for (const seg of result.recommendations) {
+          const segmentExclusion = resolveHoldExclusionsFromRows({
+            measure: "gross contribution",
+            product: seg.segment,
+            requestedPeriods: monthLabels,
+          }, holds)[0];
           for (const c of seg.topGapCodes) {
             const cc = contrib.get(c.code);
-            (c as Record<string, unknown>).contributionPerUnit = cc?.contributionPerUnit ?? null;
-            (c as Record<string, unknown>).contributionPct    = cc?.contributionPct    ?? null;
+            const held = segmentExclusion ?? cc?.exclusion;
+            (c as Record<string, unknown>).contributionPerUnit = held ? null : cc?.contributionPerUnit ?? null;
+            (c as Record<string, unknown>).contributionPct    = held ? null : cc?.contributionPct ?? null;
+            if (held) (c as Record<string, unknown>).contributionExclusion = held;
             totalNet += c.priorNet;
-            if (cc) { hasContrib = true; totalContrib += c.priorNet * cc.contributionPct; }
+            if (cc?.contributionPct != null && !held) { hasContrib = true; totalContrib += c.priorNet * cc.contributionPct; }
             else { noCost++; noCostNet += c.priorNet; }
           }
           seg.topGapCodes.sort((a, b) => b.priorNet - a.priorNet);
@@ -654,6 +703,7 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
           sharePct:  totalNet > 0 ? Math.round(noCostNet / totalNet * 1000) / 10 : 0,
         };
         (result as Record<string, unknown>).totalGapContribution = hasContrib ? totalContrib : null;
+        (result as Record<string, unknown>).contributionExclusions = contributionExclusions;
       } catch (err) {
         req.log.warn({ err }, "sku retailer recommendations: contribution enrichment failed");
       }
@@ -682,14 +732,29 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
         const { getCodeContributions } = await import("../lib/sku/skuContribution.js");
         const allCodes = result.recommendations.flatMap((s) => s.topGapCodes.map((c) => c.code));
         const contrib = await getCodeContributions(allCodes);
+        const holds = await getOpenResolutionHolds();
+        const contributionExclusions = result.recommendations.flatMap((seg) =>
+          resolveHoldExclusionsFromRows({
+            measure: "gross contribution",
+            product: seg.segment,
+            requestedPeriods: monthLabels,
+          }, holds),
+        );
         let noCost = 0, noCostNet = 0, totalNet = 0, totalContrib = 0, hasContrib = false;
         for (const seg of result.recommendations) {
+          const segmentExclusion = resolveHoldExclusionsFromRows({
+            measure: "gross contribution",
+            product: seg.segment,
+            requestedPeriods: monthLabels,
+          }, holds)[0];
           for (const c of seg.topGapCodes) {
             const cc = contrib.get(c.code);
-            (c as Record<string, unknown>).contributionPerUnit = cc?.contributionPerUnit ?? null;
-            (c as Record<string, unknown>).contributionPct    = cc?.contributionPct    ?? null;
+            const held = segmentExclusion ?? cc?.exclusion;
+            (c as Record<string, unknown>).contributionPerUnit = held ? null : cc?.contributionPerUnit ?? null;
+            (c as Record<string, unknown>).contributionPct    = held ? null : cc?.contributionPct ?? null;
+            if (held) (c as Record<string, unknown>).contributionExclusion = held;
             totalNet += c.priorNet;
-            if (cc) { hasContrib = true; totalContrib += c.priorNet * cc.contributionPct; }
+            if (cc?.contributionPct != null && !held) { hasContrib = true; totalContrib += c.priorNet * cc.contributionPct; }
             else { noCost++; noCostNet += c.priorNet; }
           }
           // Codes: priorNet DESC (net value; contribution under review).
@@ -702,6 +767,7 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
           sharePct:  totalNet > 0 ? Math.round(noCostNet / totalNet * 1000) / 10 : 0,
         };
         (result as Record<string, unknown>).totalGapContribution = hasContrib ? totalContrib : null;
+        (result as Record<string, unknown>).contributionExclusions = contributionExclusions;
       } catch (err) {
         req.log.warn({ err }, "sku recommendations contribution enrichment failed");
       }
@@ -765,6 +831,18 @@ router.get("/sku/export", async (req: Request, res: Response): Promise<void> => 
     res.status(400).json({
       error:
         "State Head / State / Distributor filters are not available for the retailer level — the secondary register has no state or distributor columns.",
+    });
+    return;
+  }
+  const secondaryExclusions = level === "retailer"
+    ? await secondarySkuExclusions(monthLabels)
+    : [];
+  if (secondaryExclusions.length > 0) {
+    res.json({
+      fy, monthFrom, monthTo, level, scope, scopeId: scopeId ?? null,
+      availability: "unavailable", value: null,
+      exclusions: secondaryExclusions, recommendations: [],
+      fiscalMonths: monthLabels, totalGapNet: null,
     });
     return;
   }
@@ -939,6 +1017,17 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
   const monthTo   = intParam(req, "monthTo", monthFrom, 12, 12);
   const monthLabels = fiscalMonthsToLabels(fy, monthFrom, monthTo);
   try {
+    const secondaryExclusions = level === "retailer"
+      ? await secondarySkuExclusions(monthLabels)
+      : [];
+    if (secondaryExclusions.length > 0) {
+      res.json({
+        fy, monthFrom, monthTo, level, distributorKey,
+        availability: "unavailable", value: null,
+        exclusions: secondaryExclusions, segments: [],
+      });
+      return;
+    }
     const result = await getSkuPushList({
       fy,
       monthLabels,
@@ -976,14 +1065,14 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
       const THIN_HISTORY_NET = 3e7; // < ₹3 Cr over 3 closed years — curve is low-confidence
       for (const seg of result.segments ?? []) {
         const curve = curveBySeg.get(seg.segment);
-        const curShare = curve ? curve.quarterShare[currentQuarter - 1] : null;
+        const curShare = curve?.quarterShare ? curve.quarterShare[currentQuarter - 1] : null;
         const peakQ = curve?.peakQuarter ?? null;
         const peakLabel = curve?.peakQuarterLabel ?? null;
         const thin = curve != null && curve.totalNet < THIN_HISTORY_NET;
         (seg as Record<string, unknown>).peakQuarter = peakQ;
         (seg as Record<string, unknown>).peakQuarterLabel = peakLabel;
         (seg as Record<string, unknown>).peakQuarterShare =
-          curve && peakQ ? curve.quarterShare[peakQ - 1] : null;
+          curve?.quarterShare && peakQ ? curve.quarterShare[peakQ - 1] : null;
         (seg as Record<string, unknown>).currentQuarterShare = curShare;
         const rank =
           peakQ == null || curShare == null
@@ -1026,14 +1115,22 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
         for (const c of seg.topCodes ?? []) allCodesForContrib.add(c.code);
       }
       const contrib = await getCodeContributions([...allCodesForContrib]);
+      const holds = await getOpenResolutionHolds();
       let noCostCodes = 0, noCostNet = 0, totalContribNet = 0;
       for (const seg of result.segments ?? []) {
+        const segmentExclusion = resolveHoldExclusionsFromRows({
+          measure: "gross contribution",
+          product: seg.segment,
+          requestedPeriods: result.fiscalMonths,
+        }, holds)[0];
         for (const c of seg.topCodes ?? []) {
           const cc = contrib.get(c.code);
-          (c as Record<string, unknown>).contributionPerUnit = cc?.contributionPerUnit ?? null;
-          (c as Record<string, unknown>).contributionPct    = cc?.contributionPct    ?? null;
+          const held = segmentExclusion ?? cc?.exclusion;
+          (c as Record<string, unknown>).contributionPerUnit = held ? null : cc?.contributionPerUnit ?? null;
+          (c as Record<string, unknown>).contributionPct    = held ? null : cc?.contributionPct ?? null;
+          if (held) (c as Record<string, unknown>).contributionExclusion = held;
           totalContribNet += c.peerNet;
-          if (!cc) { noCostCodes++; noCostNet += c.peerNet; }
+          if (!cc || segmentExclusion) { noCostCodes++; noCostNet += c.peerNet; }
         }
         // Sort: tier ASC → peerCount DESC (net value; contribution under review).
         seg.topCodes.sort((a, b) => a.tier - b.tier || b.peerCount - a.peerCount);
@@ -1042,6 +1139,12 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
         codeCount: noCostCodes,
         sharePct:  totalContribNet > 0 ? Math.round(noCostNet / totalContribNet * 1000) / 10 : 0,
       };
+      (result as Record<string, unknown>).contributionExclusions =
+        (result.segments ?? []).flatMap((seg) => resolveHoldExclusionsFromRows({
+          measure: "gross contribution",
+          product: seg.segment,
+          requestedPeriods: result.fiscalMonths,
+        }, holds));
       // Stable re-rank: in-season first, then next-quarter, then groundwork;
       // the underlying gap-value order is preserved within each band.
       if (Array.isArray(result.segments)) {
@@ -1094,7 +1197,13 @@ router.get("/sku/discounts", async (req: Request, res: Response): Promise<void> 
       getSecondaryDiscountByCode(fy),
       getBlockedCapabilities(),
     ]);
-    res.json({ fy, channel, primary, secondary, blocked });
+    const holds = await getOpenResolutionHolds();
+    const contributionExclusions = holds.flatMap((hold) => resolveHoldExclusionsFromRows({
+      measure: "margin",
+      product: hold.scopeProduct,
+      requestedPeriods: monthLabels ?? fiscalMonthsToLabels(fy, 1, 12),
+    }, [hold]));
+    res.json({ fy, channel, primary, secondary, blocked, contributionExclusions });
   } catch (err) {
     req.log.error({ err, fy }, "sku discounts failed");
     res.status(500).json({ error: "Could not compute SKU discounts." });

@@ -32,6 +32,7 @@ interface MarginStats {
   distinctCodes: number;
   negativeContributionCodes: number;
   rowsByFySegment: Record<string, { rows: number; months: number }>;
+  marginExclusions?: Array<{ title: string; reason: string; resolutionUrl: string }>;
 }
 
 interface MarginRow {
@@ -49,6 +50,12 @@ interface MarginRow {
   sale_value: string | null;
   bom_value: string | null;
   source_file: string;
+  marginAvailability?: "unavailable";
+  marginExclusions?: Array<{
+    title: string;
+    reason: string;
+    resolutionUrl: string;
+  }>;
 }
 
 interface MarginListResponse {
@@ -228,6 +235,12 @@ function StatsHeader({ stats }: { stats: MarginStats }) {
               {stats.negativeContributionCodes} negative-contribution codes
             </span>
           )}
+          {stats.marginExclusions?.map((hold) => (
+            <a key={hold.resolutionUrl} href={hold.resolutionUrl} title={hold.reason}
+              className="rounded bg-slate-200 px-2 py-1 text-xs text-slate-500 underline decoration-dotted">
+              Gross contribution unavailable · {hold.title}
+            </a>
+          ))}
         </div>
       </div>
     </div>
@@ -483,10 +496,13 @@ curl -s \\
 
                   {!isLoading && listData?.rows.map((row, i) => {
                     const contrib = grossContribPct(row);
+                    const marginHold = row.marginAvailability === "unavailable"
+                      ? row.marginExclusions?.[0]
+                      : null;
                     return (
                       <TableRow
                         key={`${row.fy}|${row.month_label}|${row.segment}|${row.item_code}|${i}`}
-                        className="hover:bg-slate-50"
+                        className={marginHold ? "bg-slate-100/80 hover:bg-slate-100" : "hover:bg-slate-50"}
                       >
                         <TableCell className="text-xs text-slate-500">{row.fy}</TableCell>
                         <TableCell className="text-xs font-mono text-slate-600">{row.month_label}</TableCell>
@@ -514,14 +530,18 @@ curl -s \\
                           {fmtPct(row.discount_frac)}
                           <span className="text-[10px] text-slate-400 ml-0.5">(frac)</span>
                         </TableCell>
-                        <TableCell className="text-right text-xs text-slate-700 font-medium">
-                          {fmtRupee(row.avg_sale)}
+                        <TableCell className={`text-right text-xs font-medium ${marginHold ? "bg-slate-200/60 text-slate-400" : "text-slate-700"}`}>
+                          {marginHold ? (
+                            <a href={marginHold.resolutionUrl} className="underline decoration-dotted" title={marginHold.reason}>
+                              unavailable · {marginHold.title}
+                            </a>
+                          ) : fmtRupee(row.avg_sale)}
                         </TableCell>
-                        <TableCell className="text-right text-xs text-slate-700">
-                          {fmtRupee(row.bom_cost)}
+                        <TableCell className={`text-right text-xs ${marginHold ? "bg-slate-200/60 text-slate-400" : "text-slate-700"}`}>
+                          {marginHold ? "unavailable" : fmtRupee(row.bom_cost)}
                         </TableCell>
-                        <TableCell className={`text-right text-xs ${contribColor(contrib)}`}>
-                          {contrib != null ? contrib.toFixed(1) + "%" : "—"}
+                        <TableCell className={`text-right text-xs ${marginHold ? "bg-slate-200/60 text-slate-400" : contribColor(contrib)}`}>
+                          {marginHold ? "unavailable" : contrib != null ? contrib.toFixed(1) + "%" : "—"}
                         </TableCell>
                         <TableCell className="text-right text-xs text-slate-600">
                           {fmtRupee(row.sale_value)}

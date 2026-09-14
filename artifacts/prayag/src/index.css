@@ -343,7 +343,27 @@
   [data-radix-scroll-area-viewport] { overflow: visible !important; max-height: none !important; height: auto !important; }
   .overflow-auto, .overflow-y-auto, .overflow-scroll, .overflow-y-scroll { overflow: visible !important; max-height: none !important; }
   [style*="max-height"] { max-height: none !important; }
+  body.resolution-printing .resolution-page > * { display: none !important; }
+  body.resolution-printing .resolution-page > .resolution-print-export {
+    display: block !important;
+    color: #111827;
+  }
+  .resolution-print-export h1 { font-size: 22px; margin: 0 0 18px; }
+  .resolution-print-export h2 {
+    font-size: 15px; margin: 18px 0 7px; border-bottom: 1px solid #d1d5db;
+    padding-bottom: 4px; text-transform: uppercase;
+  }
+  .resolution-print-export h3 { font-size: 13px; margin: 0 0 4px; }
+  .resolution-print-export p { font-size: 11px; margin: 3px 0; }
+  .resolution-print-item { break-inside: avoid; border-bottom: 1px solid #e5e7eb; padding: 7px 0; }
+  .resolution-print-export table { width: 100%; border-collapse: collapse; font-size: 9px; }
+  .resolution-print-export th, .resolution-print-export td {
+    border: 1px solid #d1d5db; padding: 4px; text-align: left; vertical-align: top;
+  }
+  .resolution-print-export th { background: #e5e7eb; font-weight: 700; }
 }
+
+.resolution-print-export { display: none; }
 
 /**
  * Using the elevate system.

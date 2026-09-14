@@ -62,6 +62,7 @@ import secondarySkuJul26LoadRouter from "./secondarySkuJul26Load";
 import secondarySkuAug26LoadRouter from "./secondarySkuAug26Load";
 import secondaryHistoryRouter from "./secondaryHistory";
 import seasonalCurveRouter from "./seasonalCurve";
+import resolutionItemsRouter from "./resolutionItems";
 import authRouter from "./auth";
 import activityRouter from "./activity";
 import { requireAuthenticated, requirePasswordChangeComplete } from "../lib/auth";
@@ -140,5 +141,6 @@ router.use(secondarySkuJul26LoadRouter);
 router.use(secondarySkuAug26LoadRouter);
 router.use(secondaryHistoryRouter);
 router.use(seasonalCurveRouter);
+router.use(resolutionItemsRouter);
 
 export default router;

@@ -34,6 +34,7 @@ type VolumeDeclineRow = {
   customersPrior: number;
   stopped: boolean;
   contributionPerUnit: number | null;
+  contributionExclusion?: { title: string; resolutionUrl: string };
 };
 
 type VolumeDeclineSegment = {
@@ -337,7 +338,11 @@ export default function SkuVolumeDecline({
                               {row.customersPrior}
                             </TableCell>
                             <TableCell className="text-right tabular-nums text-muted-foreground">
-                              {row.contributionPerUnit != null
+                              {row.contributionExclusion ? (
+                                <a href={row.contributionExclusion.resolutionUrl} className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 underline decoration-dotted" title={row.contributionExclusion.title}>
+                                  unavailable
+                                </a>
+                              ) : row.contributionPerUnit != null
                                 ? `₹${row.contributionPerUnit.toFixed(2)}`
                                 : "—"}
                             </TableCell>

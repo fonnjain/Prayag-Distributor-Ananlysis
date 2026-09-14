@@ -14,6 +14,7 @@ import { runAlertDetection } from "../lib/redAlert/alertPersistence.js";
 import { getSkuAlertCoverage } from "../lib/redAlert/context.js";
 import { notifyAlert } from "../lib/alertRouting/notify.js";
 import { currentOpenFy } from "../lib/fyAnchors.js";
+import { getOpenResolutionHolds, resolveHoldExclusionsFromRows } from "../lib/resolution/holdResolver.js";
 import { logger } from "../lib/logger.js";
 import { runWeeklyDigestNow, getSchedulerStatus } from "../lib/alertRouting/scheduler.js";
 import { sendTestEmail } from "../lib/alertRouting/channels.js";
@@ -192,16 +193,29 @@ router.post("/alerts/detect", async (req, res) => {
 router.get("/alerts/count", async (_req, res) => {
   try {
     const fy = currentOpenFy();
+    // Keep the badge count consistent with GET /alerts: an open API-blocking
+    // margin hold makes existing C4 cards unavailable until resolution.
+    const c4Exclusions = (await getOpenResolutionHolds()).flatMap((hold) =>
+      resolveHoldExclusionsFromRows({
+        measure: "gross contribution",
+        product: hold.scopeProduct,
+      }, [hold]),
+    );
     const { rows } = await pool.query<{ status: string; cnt: string }>(
       `SELECT status, COUNT(*)::text AS cnt
          FROM alert
         WHERE fy = $1 AND status IN ('open','acknowledged')
+          AND NOT (code = 'C4' AND $2::boolean)
         GROUP BY status`,
-      [fy],
+      [fy, c4Exclusions.length > 0],
     );
     const m: Record<string, number> = {};
     for (const r of rows) m[r.status] = Number(r.cnt);
-    res.json({ open: m["open"] ?? 0, acknowledged: m["acknowledged"] ?? 0 });
+    res.json({
+      open: m["open"] ?? 0,
+      acknowledged: m["acknowledged"] ?? 0,
+      grossContributionExclusions: c4Exclusions,
+    });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -235,7 +249,18 @@ router.get("/alerts", async (_req, res) => {
       [fy],
     );
 
-    const allCards = rows.map(mapAlertRow);
+    const c4Exclusions = (await getOpenResolutionHolds()).flatMap((hold) =>
+      resolveHoldExclusionsFromRows({
+        measure: "gross contribution",
+        product: hold.scopeProduct,
+      }, [hold]),
+    );
+    // Existing cards can outlive a newly-opened resolution hold. Do not keep
+    // showing an open/acknowledged C4 computed from a held cost population;
+    // the hold metadata is returned below for the UI banner.
+    const allCards = rows
+      .map(mapAlertRow)
+      .filter((card) => card.code !== "C4" || c4Exclusions.length === 0);
 
     // C5 data-blackout alerts — shown as a banner at top
     const dataBlackouts = allCards.filter((c) => c.code === "C5");
@@ -299,6 +324,7 @@ router.get("/alerts", async (_req, res) => {
       totalAcknowledged,
       lastDetectionAt,
       coverage,
+      grossContributionExclusions: c4Exclusions,
     });
   } catch (err) {
     logger.error({ err }, "[alerts] GET failed");

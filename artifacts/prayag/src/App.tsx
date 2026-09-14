@@ -28,6 +28,7 @@ import WarningsPage from "@/pages/WarningsPage";
 import SecondaryOrdersPage from "@/pages/SecondaryOrdersPage";
 import LoginPage from "@/pages/LoginPage";
 import ChangePasswordPage from "@/pages/ChangePasswordPage";
+import ResolutionPage from "@/pages/ResolutionPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 import { GlobalFilterProvider } from "@/data/global-filter-context";
@@ -88,6 +89,8 @@ function ProtectedRoutes() {
         <Route path="/alerts" component={AlertsPage} />
         <Route path="/alert-recipients" component={AlertRecipientsPage} />
         <Route path="/warnings" component={WarningsPage} />
+        <Route path="/settings/resolution/:id" component={ResolutionPage} />
+        <Route path="/settings/resolution" component={ResolutionPage} />
         {/* Organisation */}
         <Route path="/org/people"    component={OrgPeoplePage}    />
         <Route path="/org/customers" component={OrgCustomersPage} />

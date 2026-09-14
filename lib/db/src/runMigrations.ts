@@ -4715,6 +4715,245 @@ const MIGRATIONS: Migration[] = [
         WHERE scope = 'verification';
     `,
   },
+  {
+    id: "104_prompt88_resolution_items",
+    sql: `
+      -- Prompt 88 Sections A and D: one retained register for everything
+      -- waiting on an answer.  The code is the stable seed key; admin-created
+      -- rows use their own code and are never overwritten by the seed below.
+      CREATE TABLE IF NOT EXISTS resolution_item (
+        id              SERIAL PRIMARY KEY,
+        code            TEXT NOT NULL,
+        type            TEXT NOT NULL,
+        title           TEXT NOT NULL,
+        category        TEXT NOT NULL,
+        fiscal_year     TEXT,
+        month           TEXT,
+        scope_product   TEXT,
+        scope_measure   TEXT,
+        reason          TEXT NOT NULL,
+        evidence        TEXT NOT NULL,
+        value_at_stake  NUMERIC,
+        raised_on       DATE NOT NULL,
+        raised_by       TEXT NOT NULL,
+        owner           TEXT NOT NULL,
+        status          TEXT NOT NULL DEFAULT 'open',
+        resolved_on     DATE,
+        resolved_by     TEXT,
+        resolution_note TEXT,
+        blocks_api      BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT resolution_item_code_uq UNIQUE (code),
+        CONSTRAINT resolution_item_type_check CHECK (type IN ('HOLD', 'PENDING')),
+        CONSTRAINT resolution_item_category_check CHECK (
+          category IN ('data quality', 'master data', 'access', 'infrastructure', 'commercial')
+        ),
+        CONSTRAINT resolution_item_status_check CHECK (
+          status IN ('open', 'answered', 'resolved', 'accepted-as-is')
+        ),
+        CONSTRAINT resolution_item_value_check CHECK (value_at_stake IS NULL OR value_at_stake >= 0),
+        CONSTRAINT resolution_item_blocks_api_check CHECK (type = 'HOLD' OR blocks_api = FALSE),
+        CONSTRAINT resolution_item_hold_scope_check CHECK (
+          (type = 'PENDING' AND scope_measure IS NULL)
+          OR (type = 'HOLD' AND scope_measure IS NOT NULL AND btrim(scope_measure) <> '')
+        )
+      );
+      CREATE INDEX IF NOT EXISTS resolution_item_status_idx ON resolution_item (status);
+      CREATE INDEX IF NOT EXISTS resolution_item_type_idx ON resolution_item (type);
+      CREATE INDEX IF NOT EXISTS resolution_item_owner_idx ON resolution_item (owner);
+      -- Drizzle may have created the table during provisioning without these
+      -- business checks. Recreate the named checks so both paths converge.
+      ALTER TABLE resolution_item
+        DROP CONSTRAINT IF EXISTS resolution_item_type_check,
+        DROP CONSTRAINT IF EXISTS resolution_item_category_check,
+        DROP CONSTRAINT IF EXISTS resolution_item_status_check,
+        DROP CONSTRAINT IF EXISTS resolution_item_value_check,
+        DROP CONSTRAINT IF EXISTS resolution_item_blocks_api_check,
+        DROP CONSTRAINT IF EXISTS resolution_item_hold_scope_check;
+      ALTER TABLE resolution_item
+        ADD CONSTRAINT resolution_item_type_check
+          CHECK (type IN ('HOLD', 'PENDING')),
+        ADD CONSTRAINT resolution_item_category_check
+          CHECK (category IN ('data quality', 'master data', 'access', 'infrastructure', 'commercial')),
+        ADD CONSTRAINT resolution_item_status_check
+          CHECK (status IN ('open', 'answered', 'resolved', 'accepted-as-is')),
+        ADD CONSTRAINT resolution_item_value_check
+          CHECK (value_at_stake IS NULL OR value_at_stake >= 0),
+        ADD CONSTRAINT resolution_item_blocks_api_check
+          CHECK (type = 'HOLD' OR blocks_api = FALSE),
+        ADD CONSTRAINT resolution_item_hold_scope_check
+          CHECK (
+            (type = 'PENDING' AND scope_measure IS NULL)
+            OR (type = 'HOLD' AND scope_measure IS NOT NULL AND btrim(scope_measure) <> '')
+          );
+
+      -- Publish can materialise the current schema before replaying this
+      -- migration ledger. Migration 105 recreates this constraint after the
+      -- intentionally closed seed rows have their resolution metadata.
+      ALTER TABLE resolution_item
+        DROP CONSTRAINT IF EXISTS resolution_item_closed_metadata_check;
+
+      -- Seed only the entries printed in Prompt 88 Section D.  ON CONFLICT
+      -- DO NOTHING makes restarts and migration replay safe, and deliberately
+      -- preserves any later admin edit or resolution.
+      INSERT INTO resolution_item
+        (code, type, title, category, fiscal_year, month, scope_product,
+         scope_measure, reason, evidence, value_at_stake, raised_on, raised_by,
+         owner, status, blocks_api)
+      VALUES
+        ('H1', 'HOLD', 'PTMT MARGIN, JAN-APR 2026', 'data quality', NULL, 'Jan-Apr 2026',
+         'PTMT master category', 'margin, gross contribution, BOM cost',
+         'Factory cost at ~40% of true level. Median BOM on 191 common codes: Nov-25 Rs 32.16, Dec-25 Rs 30.98, Jan Rs 12.92, Feb Rs 12.72, Mar Rs 13.49, Apr Rs 14.82, May Rs 34.85, Jun Rs 39.66. 2.55x understated.',
+         '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] FY2026-27 April PTMT margin 86.47% vs corrected ~65.5%. FY2025-26 April 76.17%. May-26 68.50%, Jun-26 69.19%.',
+         NULL, '2026-09-14', 'Prompt 88 extended', 'Prayag - Deepak J', 'open', TRUE),
+        ('H2', 'HOLD', 'AUGUST 2026 SECONDARY SKU', 'data quality', '2026-27', 'Aug-26',
+         'secondary SKU', 'secondary SKU, retailer-level secondary analysis, item-level secondary analysis',
+         'Export not received. Production zero rows. Month open until 1 December 2026.',
+         '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] Export not received. Production zero rows. Month open until 1 December 2026.',
+         NULL, '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', TRUE),
+        ('H3', 'HOLD', 'FY2024-25 MONTHLY ATTRIBUTION', 'data quality', '2024-25', 'FY2024-25',
+         NULL, 'monthly figures, quarterly figures',
+         '28,613 rows retain reversed day and month after Prayag''s partial correction. Annual total correct at Rs 216.00 Cr.',
+         '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] Q4 overstated 13.2%, Q1 understated 12.6%, April out 30.7%.',
+         NULL, '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', TRUE),
+        ('P1', 'PENDING', '34 existing DIST# codes need confirmation', 'master data', NULL, NULL, NULL, NULL,
+         '34 existing DIST# codes need confirmation.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] 34 existing DIST# codes need confirmation.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P2', 'PENDING', 'Rs 6.52 Cr of distributor sales with no DIST# code', 'data quality', NULL, NULL, NULL, NULL,
+         'Distributor sales have no DIST# code.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] Rs 6.52 Cr of distributor sales with no DIST# code.', 65200000,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P3', 'PENDING', '780 sold codes with no MRP master record', 'master data', NULL, NULL, NULL, NULL,
+         '780 sold codes have no MRP master record.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] 780 sold codes with no MRP master record; value Rs 9.64 Cr.', 96400000,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P4', 'PENDING', '3 WCT codes with no MRP - WCT-3LL-05, -07, -10', 'master data', NULL, NULL, NULL, NULL,
+         'Three WCT codes have no MRP.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] 3 WCT codes with no MRP - WCT-3LL-05, -07, -10; value Rs 1.17 Cr.', 11700000,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P5', 'PENDING', '15 -VB codes in excluded_do_not_load, no price or date', 'master data', NULL, NULL, NULL, NULL,
+         '15 -VB codes are in excluded_do_not_load with no price or date.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] 15 -VB codes in excluded_do_not_load, no price or date.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P6', 'PENDING', 'Large v2 price moves need confirmation', 'commercial', NULL, NULL, NULL, NULL,
+         'Confirm whether the listed v2 price moves are intended.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] P20A05 -67.4%, P20A06 -64.7%, P10G12 +46.0% - confirm intended.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P7', 'PENDING', '70 discontinued codes still selling', 'master data', NULL, NULL, NULL, NULL,
+         'Discontinued codes are still selling.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] 70 discontinued codes still selling; value Rs 0.20 Cr.', 2000000,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P8', 'PENDING', 'September 2026 SAP - 604 invoices vs ~700 derived', 'data quality', '2026-27', 'Sep-26', NULL, NULL,
+         'SAP invoice count differs from the derived count.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] September 2026 SAP - 604 invoices vs ~700 derived.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P9', 'PENDING', '4 rows and Rs 5,595 missing from FY2024-25 - variance accepted', 'data quality', '2024-25', NULL, NULL, NULL,
+         'Variance accepted and recorded for completeness.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] 4 rows and Rs 5,595 missing from FY2024-25 - variance accepted, recorded for completeness.', 5595,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'answered', FALSE),
+        ('P10', 'PENDING', 'Master_and_Sub_category.xlsx cleanup', 'master data', NULL, NULL, NULL, NULL,
+         'Merge CP into C P, remove the leaked header row, and fix CONECTION spelling.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] Master_and_Sub_category.xlsx - merge CP into C P, remove the leaked header row, fix CONECTION spelling.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P11', 'PENDING', 'Sunil Mohanty has no HR or registry record', 'master data', NULL, NULL, NULL, NULL,
+         'No HR record, no registry record, blank alert number, and zero people in scope.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] Sunil Mohanty - no HR record, no registry record, blank alert number, zero people in scope.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P12', 'PENDING', 'Pawan Sharma roster and HR status disagree', 'master data', NULL, NULL, NULL, NULL,
+         'HR marks Pawan Sharma Deactive while the roster uses him as an active head with 16 people; two different mobile numbers exist.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] Pawan Sharma - HR marks Deactive, roster uses him as an active head with 16 people. Two different mobile numbers.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P13', 'PENDING', 'Prashant Onam Naik has no alert route', 'access', NULL, NULL, NULL, NULL,
+         'Active head has no alert route configured.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] Prashant Onam Naik - active head, no alert route configured.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P14', 'PENDING', '7 roster members with no HR record', 'master data', NULL, NULL, NULL, NULL,
+         'Roster members are missing corresponding HR records.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] 7 roster members with no HR record.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'Prayag', 'open', FALSE),
+        ('P15', 'PENDING', 'SMTP or Resend credentials', 'infrastructure', NULL, NULL, NULL, NULL,
+         'Delivery credentials are not configured.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] SMTP or Resend credentials - 524 delivery attempts, zero delivered.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'IT', 'open', FALSE),
+        ('P16', 'PENDING', 'WhatsApp provider decision', 'infrastructure', NULL, NULL, NULL, NULL,
+         'No WhatsApp provider is configured.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] WhatsApp provider decision - no provider configured.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'internal', 'open', FALSE),
+        ('P17', 'PENDING', 'Alert state-head routing entity keys', 'access', NULL, NULL, NULL, NULL,
+         'Entity keys do not resolve for Aqil Rizvi and Narendra Kumar Sharma.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] Alert state-head routing - entity keys do not resolve for Aqil Rizvi and Narendra Kumar Sharma.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'internal', 'open', FALSE),
+        ('P18', 'PENDING', 'PSCode3 brand mirror never generated', 'data quality', NULL, NULL, NULL, NULL,
+         'The brand mirror was never generated for the listed fiscal years.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] PSCode3 brand mirror never generated for FY2023-24 to FY2025-26.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'internal', 'accepted-as-is', FALSE),
+        ('P19', 'PENDING', 'Whether state heads should receive email as well as WhatsApp', 'access', NULL, NULL, NULL, NULL,
+         'No email routes exist.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] Whether state heads should receive email as well as WhatsApp - no email routes exist.', NULL,
+         '2026-09-14', 'Prompt 88 extended', 'internal', 'open', FALSE),
+        ('P20', 'PENDING', 'The 22-query pack, unsent since 31 August', 'data quality', NULL, '31-Aug-2026', NULL, NULL,
+         'The query pack has not been sent.', '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] The 22-query pack, unsent since 31 August.', NULL,
+         '2026-08-31', 'Prompt 88 extended', 'internal', 'open', FALSE)
+      ON CONFLICT (code) DO NOTHING;
+
+      -- P9 and P18 are intentionally closed in the source prompt. Retain the
+      -- rows and their explicit outcome so days-open can stop at raised_on.
+      UPDATE resolution_item
+      SET resolved_on = raised_on,
+          resolved_by = 'Prompt 88 extended',
+          resolution_note = CASE code
+            WHEN 'P9' THEN 'Answered: variance accepted and recorded for completeness.'
+            WHEN 'P18' THEN 'Accepted as-is: the PSCode3 brand mirror was not generated.'
+          END,
+          updated_at = now()
+      WHERE code IN ('P9', 'P18')
+        AND status IN ('answered', 'accepted-as-is')
+        AND (
+          resolved_on IS NULL
+          OR btrim(COALESCE(resolved_by, '')) = ''
+          OR btrim(COALESCE(resolution_note, '')) = ''
+        );
+    `,
+  },
+  {
+    id: "105_prompt88_resolution_integrity",
+    sql: `
+      -- The original seed had two integrity gaps: H1 used a comma-separated
+      -- fiscal-year value that no period matcher can interpret, and the two
+      -- intentionally closed rows did not carry their resolution metadata.
+      -- H1's explicit month range is authoritative, so fiscal_year is left
+      -- NULL rather than duplicating or inventing a fiscal-year range.
+      UPDATE resolution_item
+      SET fiscal_year = NULL, updated_at = now()
+      WHERE code = 'H1' AND type = 'HOLD';
+
+      UPDATE resolution_item
+      SET resolved_on = raised_on,
+          resolved_by = 'Prompt 88 extended',
+          resolution_note = CASE code
+            WHEN 'P9' THEN 'Answered: variance accepted and recorded for completeness.'
+            WHEN 'P18' THEN 'Accepted as-is: the PSCode3 brand mirror was not generated.'
+          END,
+          updated_at = now()
+      WHERE code IN ('P9', 'P18')
+        AND status IN ('answered', 'accepted-as-is')
+        AND (
+          resolved_on IS NULL
+          OR btrim(COALESCE(resolved_by, '')) = ''
+          OR btrim(COALESCE(resolution_note, '')) = ''
+        );
+
+      ALTER TABLE resolution_item
+        DROP CONSTRAINT IF EXISTS resolution_item_closed_metadata_check;
+      ALTER TABLE resolution_item
+        ADD CONSTRAINT resolution_item_closed_metadata_check
+          CHECK (
+            status = 'open'
+            OR (
+              resolved_on IS NOT NULL
+              AND btrim(COALESCE(resolved_by, '')) <> ''
+              AND btrim(COALESCE(resolution_note, '')) <> ''
+            )
+          );
+    `,
+  },
+  {
+    id: "106_prompt88_h2_secondary_measure",
+    sql: `
+      -- Migration 104 seeded H2 before the canonical secondary-SKU measure
+      -- was added. Preserve the prompt's human scope labels while making the
+      -- machine-facing measure explicit for already-migrated databases.
+      UPDATE resolution_item
+      SET scope_measure = 'secondary SKU, retailer-level secondary analysis, item-level secondary analysis',
+          updated_at = now()
+      WHERE code = 'H2'
+        AND type = 'HOLD'
+        AND scope_measure = 'retailer-level secondary analysis, item-level secondary analysis';
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

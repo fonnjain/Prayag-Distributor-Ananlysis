@@ -20,6 +20,11 @@ import type { RetailerRow } from "../mgmt/memberSheet.js";
 import { fyForDate, priorFy } from "../mgmt/targetEngine.js";
 import { logger } from "../logger.js";
 import { MASTER_CATEGORY_DISPLAY_NOTE } from "../categoryDisplay.js";
+import {
+  getOpenResolutionHolds,
+  resolveHoldExclusionsFromRows,
+  type StructuredExclusion,
+} from "../resolution/holdResolver.js";
 
 // ── Selection schema ─────────────────────────────────────────────────────────
 
@@ -411,6 +416,7 @@ export type CellValue = {
   realIndexName?: string | null;
   note?: string | null;
   suppressed?: boolean;
+  exclusions?: StructuredExclusion[];
 };
 
 export type MatrixRow = {
@@ -518,6 +524,8 @@ export type ComparisonResponse = {
     likeForLikeAchievement: number | null;
     untargetedMembers: string[];
   }[];
+  /** Values withheld by an open API-blocking resolution hold. */
+  exclusions?: StructuredExclusion[];
   notes: string[];
 };
 
@@ -619,6 +627,19 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
 
   // ── Period resolution + completeness (from data, not config) ──
   const periods = await resolvePeriods(req.periods, basis, today);
+  const openHolds = await getOpenResolutionHolds();
+  const attributionExclusionsByPeriod = new Map<number, StructuredExclusion[]>();
+  for (let i = 0; i < periods.length; i++) {
+    const period = periods[i]!;
+    if (period.fy !== "2024-25" || (period.spec.kind !== "month" && period.spec.kind !== "quarter")) continue;
+    const measure = period.spec.kind === "month" ? "monthly figures" : "quarterly figures";
+    const exclusions = resolveHoldExclusionsFromRows({
+      measure,
+      requestedPeriods: [period.label],
+    }, openHolds);
+    if (exclusions.length > 0) attributionExclusionsByPeriod.set(i, exclusions);
+  }
+  const comparisonExclusions = [...attributionExclusionsByPeriod.values()].flat();
 
   // ── C2b: baseline for period-pair measures ──
   // Mode A (>1 period): each period's baseline is the one before it in the
@@ -747,7 +768,9 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
         segment: s.segment,
         byPeriod: periods.map((p) => {
           let share = 0;
-          for (let m = p.monthFrom; m <= p.monthTo; m++) share += s.monthShare[m - 1] ?? 0;
+          if (s.monthShare) {
+            for (let m = p.monthFrom; m <= p.monthTo; m++) share += s.monthShare[m - 1] ?? 0;
+          }
           const flat = (p.monthTo - p.monthFrom + 1) / 12;
           return flat > 0 ? round2(share / flat) : 1; // seasonal index: 1 = flat
         }),
@@ -946,20 +969,29 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
 
       for (let pIdx = 0; pIdx < periods.length; pIdx++) {
         const p = periods[pIdx];
+        const attributionExclusions = attributionExclusionsByPeriod.get(pIdx) ?? [];
         let cell: CellValue = { value: null };
         try {
-          const baselineP = def.periodPair ? baselineFor(pIdx) : null;
-          if (def.periodPair && !baselineP) {
+          if (attributionExclusions.length > 0) {
             cell = {
               value: null,
-              note: periods.length > 1
-                ? `'${def.id}' is a period-pair measure — ${p.label} is the first period in the trajectory, so it has no earlier baseline in this request (pass 'baseline' to supply one)`
-                : `'${def.id}' is a period-pair measure — "new" only means anything against a baseline. Pass 'baseline' (a period spec) to enable it; without one the measure is disabled, not zero.`,
+              exclusions: attributionExclusions,
+              note: `unavailable — FY2024-25 ${p.spec.kind} attribution is held pending resolution`,
             };
-          } else if (def.fyToDateOnly && !(p.spec.kind === "fy" || p.spec.kind === "ytd") && p.fy === currentFy) {
-            cell = { value: null, note: `'${def.id}' is a Data-tab FY-to-date figure; it cannot be filtered to ${p.label}. Use kind:'ytd' or the period-exact 'registerOb'.` };
           } else {
-            cell = await computeCell(req.entityType, e, def, m, p, basis, channel, currentFy, baselineP);
+            const baselineP = def.periodPair ? baselineFor(pIdx) : null;
+            if (def.periodPair && !baselineP) {
+            cell = {
+                value: null,
+                note: periods.length > 1
+                  ? `'${def.id}' is a period-pair measure — ${p.label} is the first period in the trajectory, so it has no earlier baseline in this request (pass 'baseline' to supply one)`
+                  : `'${def.id}' is a period-pair measure — "new" only means anything against a baseline. Pass 'baseline' (a period spec) to enable it; without one the measure is disabled, not zero.`,
+              };
+            } else if (def.fyToDateOnly && !(p.spec.kind === "fy" || p.spec.kind === "ytd") && p.fy === currentFy) {
+              cell = { value: null, note: `'${def.id}' is a Data-tab FY-to-date figure; it cannot be filtered to ${p.label}. Use kind:'ytd' or the period-exact 'registerOb'.` };
+            } else {
+              cell = await computeCell(req.entityType, e, def, m, p, basis, channel, currentFy, baselineP);
+            }
           }
           // Guard 8/9 overlays
           if ((def.id === "target" || def.id === "achievement") && (zeroTargetNames.includes(e.name) || noBiz)) {
@@ -991,6 +1023,15 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
                 ? `Laspeyres ${e.name} (${realIndex.pair[0]}→${realIndex.pair[1]})`
                 : `Laspeyres company (${realIndex.pair[0]}→${realIndex.pair[1]})`;
             }
+          }
+          // Resolution holds are authoritative and must survive all of the
+          // display/ranking overlays above.
+          if (attributionExclusions.length > 0) {
+            cell = {
+              value: null,
+              exclusions: attributionExclusions,
+              note: `unavailable — FY2024-25 ${p.spec.kind} attribution is held pending resolution`,
+            };
           }
         } catch (err) {
           logger.warn({ err, entity: e.name, measure: def.id }, "comparison cell failed");
@@ -1207,6 +1248,7 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
     ...(rosterChanges ? { rosterChanges } : {}),
     ...(suggestions ? { suggestions } : {}),
     ...(likeForLike.length > 0 ? { likeForLike } : {}),
+    ...(comparisonExclusions.length > 0 ? { exclusions: comparisonExclusions } : {}),
     notes,
   };
 }

@@ -340,6 +340,7 @@ export type FlowGapCode = {
   opportunityContribution: number | null;
   /** Volume-weighted contributionPerUnit from margin_fact. null = no cost data. */
   contributionPerUnit: number | null;
+  contributionExclusion?: import("../resolution/holdResolver.js").StructuredExclusion;
 };
 
 export type SecondaryTabResult = {
@@ -519,7 +520,8 @@ export async function buildSecondaryTab(
       const cc = contrib.get(c.code);
       const gapQty = c.primaryInQty - c.secondaryOutQty;
       c.contributionPerUnit     = cc?.contributionPerUnit ?? null;
-      c.opportunityContribution = cc ? gapQty * cc.contributionPerUnit : null;
+      c.opportunityContribution = cc?.contributionPerUnit != null ? gapQty * cc.contributionPerUnit : null;
+      if (cc?.exclusion) c.contributionExclusion = cc.exclusion;
     }
   } catch {
     // margin_fact unavailable — keep nulls from type defaults.

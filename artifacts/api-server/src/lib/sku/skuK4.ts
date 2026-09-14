@@ -37,6 +37,7 @@ import { authoritativeCurrentMrpRows } from "./catalogueAuthority.js";
 import { SKU_SHEET_IDS, secondarySkuFyHasData, getSecondarySkuFyPeriodLabel } from "../secondary/skuLoader.js";
 import { logger } from "../logger.js";
 import { deriveSaleLineClosedFys, currentOpenFy } from "../fyAnchors.js";
+import { getOpenResolutionHolds, resolveHoldExclusionsFromRows, type StructuredExclusion } from "../resolution/holdResolver.js";
 
 // Closed-FY list is derived at runtime from sale_line_current ingest stats
 // (all fully-ingested calendar-closed FYs, ascending), with a grace window
@@ -355,6 +356,7 @@ export type SecondaryDiscountResult = {
   reason?: string;
   codes: DiscountCodeRow[];
   widestGaps: DiscountCodeRow[];
+  exclusions?: StructuredExclusion[];
   verification: {
     sampled: boolean;
     lineUid?: string;
@@ -371,6 +373,29 @@ export async function getSecondaryDiscountByCode(
 ): Promise<SecondaryDiscountResult> {
   const label =
     "Register Discount column (retailer-level, beside Sub Total). A DIFFERENT measure from the primary MRP discount.";
+  const secondaryPeriods = FY_MONTHS.map((month) => {
+    const suffix = ["Jan", "Feb", "Mar"].includes(month) ? fy.slice(-2) : fy.slice(2, 4);
+    return `${month}-${suffix}`;
+  });
+  const secondaryExclusions = (await getOpenResolutionHolds()).flatMap((hold) =>
+    resolveHoldExclusionsFromRows({
+      measure: "secondary SKU",
+      product: "secondary SKU",
+      requestedPeriods: secondaryPeriods,
+    }, [hold]),
+  );
+  if (secondaryExclusions.length > 0) {
+    return {
+      measureLabel: label,
+      fy,
+      available: false,
+      reason: "Secondary SKU analysis is unavailable for a held register period.",
+      codes: [],
+      widestGaps: [],
+      exclusions: secondaryExclusions,
+      verification: { sampled: false, note: "held by resolution register" },
+    };
+  }
   // Gate on data presence, not on the sheet registry: FY2026-27 was loaded
   // from the PSCode_3 xlsx drop (no Google Sheet exists for it).
   if (!(fy in SKU_SHEET_IDS) && !(await secondarySkuFyHasData(fy))) {
@@ -510,14 +535,17 @@ export async function getSecondaryDiscountByCode(
 export type SegmentSeasonality = {
   segment: string;
   totalNet: number;
+  /** Annual totals remain usable even when month/quarter attribution is held. */
+  annualTotals: Record<string, number>;
   /** Share of pooled 3-yr net per fiscal month, Apr..Mar (0–1 each, sums ≈ 1). */
-  monthShare: number[];
-  quarterShare: [number, number, number, number];
-  peakQuarter: number;
-  peakQuarterLabel: string;
-  peakMonth: string;
+  monthShare: number[] | null;
+  quarterShare: [number, number, number, number] | null;
+  peakQuarter: number | null;
+  peakQuarterLabel: string | null;
+  peakMonth: string | null;
   /** In how many of the 3 closed years the pooled peak quarter was also that year's peak. */
-  yearsConsistent: number;
+  yearsConsistent: number | null;
+  attributionExclusion?: StructuredExclusion;
 };
 
 export type SeasonalityResult = {
@@ -544,19 +572,29 @@ export async function getSeasonality(
         AND month_label IS NOT NULL AND ${chanFilter} ${headFilter}
       GROUP BY 1, 2, 3
     `);
+    const holds = await getOpenResolutionHolds();
+    const attributionHolds = holds.filter((hold) =>
+      resolveHoldExclusionsFromRows({
+        // H3 explicitly holds monthly and quarterly attribution, not annual
+        // totals. Keep the two measures distinct.
+        measure: "monthly figures",
+        requestedPeriods: ["FY2024-25"],
+      }, [hold]).length > 0,
+    );
 
-    type Agg = { pooled: number[]; byFy: Map<string, number[]>; total: number };
+     type Agg = { pooled: number[]; byFy: Map<string, number[]>; annual: Map<string, number>; total: number };
     const bySeg = new Map<string, Agg>();
     for (const r of rows.rows as { segment: string; fy: string; m: string; net: number }[]) {
       const mi = FY_MONTHS.indexOf(r.m as (typeof FY_MONTHS)[number]);
       if (mi < 0) continue;
       let a = bySeg.get(r.segment);
       if (!a) {
-        a = { pooled: new Array(12).fill(0), byFy: new Map(), total: 0 };
+         a = { pooled: new Array(12).fill(0), byFy: new Map(), annual: new Map(), total: 0 };
         bySeg.set(r.segment, a);
       }
       a.pooled[mi] += num(r.net);
       a.total += num(r.net);
+       a.annual.set(r.fy, (a.annual.get(r.fy) ?? 0) + num(r.net));
       let fyArr = a.byFy.get(r.fy);
       if (!fyArr) {
         fyArr = new Array(12).fill(0);
@@ -584,15 +622,23 @@ export async function getSeasonality(
           const fq = quarterOf(fyArr);
           if (fq.indexOf(Math.max(...fq)) + 1 === peakQuarter) yearsConsistent++;
         }
+        const attributionExclusion = attributionHolds[0]
+          ? resolveHoldExclusionsFromRows({
+              measure: "monthly figures",
+              requestedPeriods: ["FY2024-25"],
+            }, [attributionHolds[0]])[0]
+          : undefined;
         return {
           segment,
           totalNet: a.total,
-          monthShare,
-          quarterShare,
-          peakQuarter,
-          peakQuarterLabel: QUARTER_LABEL[peakQuarter],
-          peakMonth,
-          yearsConsistent,
+          annualTotals: Object.fromEntries(a.annual.entries()),
+          monthShare: attributionExclusion ? null : monthShare,
+          quarterShare: attributionExclusion ? null : quarterShare,
+          peakQuarter: attributionExclusion ? null : peakQuarter,
+          peakQuarterLabel: attributionExclusion ? null : QUARTER_LABEL[peakQuarter],
+          peakMonth: attributionExclusion ? null : peakMonth,
+          yearsConsistent: attributionExclusion ? null : yearsConsistent,
+          ...(attributionExclusion ? { attributionExclusion } : {}),
         };
       })
       .sort((x, y) => y.totalNet - x.totalNet);
@@ -621,6 +667,7 @@ export async function getPeakQuarterMap(): Promise<
   const s = await getSeasonality();
   const m = new Map<string, { peakQuarter: number; peakQuarterLabel: string; quarterShare: number }>();
   for (const seg of s.segments) {
+    if (seg.peakQuarter == null || !seg.peakQuarterLabel || !seg.quarterShare) continue;
     m.set(seg.segment, {
       peakQuarter: seg.peakQuarter,
       peakQuarterLabel: seg.peakQuarterLabel,
@@ -958,6 +1005,7 @@ export type LostCodesResult = {
     contributionPct: number | null;
     /** priorQty × contributionPerUnit. null = no cost data. */
     opportunityContribution: number | null;
+    contributionExclusion?: StructuredExclusion;
   }[];
   /** Codes with no margin_fact data: count and share of total prior net. */
   noCostData: { codeCount: number; sharePct: number };
@@ -1003,19 +1051,33 @@ export async function getLostCodes(
       contributionPerUnit: null as number | null,
       contributionPct: null as number | null,
       opportunityContribution: null as number | null,
+      contributionExclusion: undefined as StructuredExclusion | undefined,
     }));
 
     // Enrich with gross contribution data (trailing 12 months from margin_fact).
+    let contributionExclusions: StructuredExclusion[] = [];
     try {
       const { getCodeContributions, sortByContrib } = await import("./skuContribution.js");
       const contrib = await getCodeContributions(baseLost.map((l) => l.code));
+      const holds = await getOpenResolutionHolds();
+      contributionExclusions = baseLost.flatMap((l) => resolveHoldExclusionsFromRows({
+        measure: "gross contribution",
+        product: l.segment,
+        requestedPeriods: monthNames ?? [...FY_MONTHS],
+      }, holds));
       for (const l of baseLost) {
         const c = contrib.get(l.code);
-        if (c) {
+        const held = resolveHoldExclusionsFromRows({
+          measure: "gross contribution",
+          product: l.segment,
+          requestedPeriods: monthNames ?? [...FY_MONTHS],
+        }, holds)[0] ?? c?.exclusion;
+        if (c?.contributionPerUnit != null && !held) {
           l.contributionPerUnit  = c.contributionPerUnit;
           l.contributionPct      = c.contributionPct;
           l.opportunityContribution = l.priorQty * c.contributionPerUnit;
         }
+        if (held) l.contributionExclusion = held;
       }
       // Sort: priorNet DESC (net value; contribution under review).
       baseLost.sort((a, b) => b.priorNet - a.priorNet);
@@ -1031,6 +1093,7 @@ export async function getLostCodes(
       priorFy,
       lost: baseLost,
       noCostData: { codeCount: noCost, sharePct: totalNet > 0 ? Math.round(noCostNet / totalNet * 1000) / 10 : 0 },
+      contributionExclusions: [...new Map(contributionExclusions.map((e) => [String(e.holdId), e])).values()],
       projectExclusion: projectExclusionMeta(projSet),
     };
   });

@@ -12,13 +12,14 @@ import type { ConflictDetailRow } from "../lib/gpMargin/loader.js";
 import { listDriveFiles, listDriveFolder, getDriveFileMeta } from "../lib/googleDrive.js";
 import { pool } from "@workspace/db";
 import { logger } from "../lib/logger.js";
+import { getOpenResolutionHolds, resolveHoldExclusionsFromRows, type StructuredExclusion } from "../lib/resolution/holdResolver.js";
 
 const router = Router();
 
 // ── GET /api/margin/stats ──────────────────────────────────────────────────
 router.get("/margin/stats", async (_req, res) => {
   try {
-    const [totals, byFySeg, codes, negCnt] = await Promise.all([
+    const [totals, byFySeg, codes, negRows] = await Promise.all([
       pool.query<{ total: string; fys: string }>(
         "SELECT COUNT(*) AS total, COUNT(DISTINCT fy) AS fys FROM margin_fact",
       ),
@@ -29,8 +30,10 @@ router.get("/margin/stats", async (_req, res) => {
            FROM margin_fact GROUP BY fy, segment ORDER BY fy, segment`,
       ),
       pool.query<{ n: string }>("SELECT COUNT(DISTINCT item_code) AS n FROM margin_fact"),
-      pool.query<{ n: string }>(
-        "SELECT COUNT(DISTINCT item_code) AS n FROM margin_fact WHERE bom_cost IS NOT NULL AND avg_sale IS NOT NULL AND bom_cost > avg_sale",
+      pool.query<{ item_code: string; segment: string; month_label: string }>(
+        `SELECT DISTINCT item_code, segment, month_label
+           FROM margin_fact
+          WHERE bom_cost IS NOT NULL AND avg_sale IS NOT NULL AND bom_cost > avg_sale`,
       ),
     ]);
 
@@ -42,12 +45,44 @@ router.get("/margin/stats", async (_req, res) => {
       };
     }
 
+    const openHolds = await getOpenResolutionHolds();
+    const periodRows = await pool.query<{ month_label: string; fy: string; segment: string }>(
+      "SELECT DISTINCT fy, month_label, segment FROM margin_fact",
+    );
+    const marginExclusions = openHolds.flatMap((hold) =>
+      resolveHoldExclusionsFromRows({
+        measure: "margin",
+        product: hold.scopeProduct,
+        requestedPeriods: periodRows.rows.map((r) => r.month_label),
+      }, [hold]),
+    );
+    const heldNegativeCodes = new Set(
+      negRows.rows
+        .filter((r) => resolveHoldExclusionsFromRows({
+          measure: "gross contribution",
+          product: r.segment,
+          requestedPeriods: [r.month_label],
+        }, openHolds).length === 0)
+        .map((r) => r.item_code),
+    );
     res.json({
       totalRows: parseInt(totals.rows[0]?.total ?? "0", 10),
       distinctFys: parseInt(totals.rows[0]?.fys ?? "0", 10),
       distinctCodes: parseInt(codes.rows[0]?.n ?? "0", 10),
-      negativeContributionCodes: parseInt(negCnt.rows[0]?.n ?? "0", 10),
+      negativeContributionCodes: heldNegativeCodes.size,
       rowsByFySegment,
+      marginExclusions,
+      contributionExclusions: marginExclusions,
+      coverage: {
+        requestedPeriods: [...new Set(periodRows.rows.map((r) => r.month_label))],
+        heldPeriods: [...new Set(marginExclusions
+          .filter((e) => e.scope.products.length === 0)
+          .flatMap((e) => e.coverage.heldPeriods))],
+        availablePeriods: [...new Set(periodRows.rows.map((r) => r.month_label))]
+          .filter((p) => !marginExclusions
+            .filter((e) => e.scope.products.length === 0)
+            .some((e) => e.coverage.heldPeriods.includes(p))),
+      },
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -93,11 +128,30 @@ router.get("/margin/list", async (req, res) => {
       ),
     ]);
 
+    const openHolds = await getOpenResolutionHolds();
+    const marginRows = rows.rows.map((row) => {
+      const exclusions = resolveHoldExclusionsFromRows({
+        measure: "margin",
+        product: row.segment,
+        requestedPeriods: [row.month_label],
+      }, openHolds);
+      if (exclusions.length === 0) return row;
+      // Keep sales/quantity/order-booking/discount facts intact. Only values
+      // derived from factory cost are unavailable while a HOLD is open.
+      return {
+        ...row,
+        bom_cost: null,
+        bom_value: null,
+        marginAvailability: "unavailable",
+        marginExclusions: exclusions,
+      };
+    });
+
     res.json({
       total: parseInt(cnt.rows[0]?.n ?? "0", 10),
       limit,
       offset,
-      rows: rows.rows,
+      rows: marginRows,
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -785,8 +839,11 @@ router.get("/margin/trend", async (req, res) => {
     const fy       = typeof req.query.fy === "string" ? req.query.fy : null;
     const fyClause = fy ? "AND fy = $1" : "";
     const fyParam  = fy ? [fy] : [];
-
-    const [monthly, segSummary, negCodes] = await Promise.all([
+    const holds = await getOpenResolutionHolds();
+    // Fetch month/segment grains first.  The resolver owns interval matching
+    // (including Jan–Apr and the year), so this route must not duplicate it
+    // with a regex or a partial month parser.
+    const [monthly, negCodes] = await Promise.all([
       // Monthly weighted-average GC% per segment
       pool.query<{
         fy: string; month_label: string; segment: string;
@@ -802,46 +859,38 @@ router.get("/margin/trend", async (req, res) => {
           ORDER BY TO_DATE(month_label, 'Mon-YY'), segment`,
         fyParam,
       ),
-      // Per-segment totals: avg GC%, total sale, month-count, negative codes
-      pool.query<{
-        segment: string;
-        total_sale: string; total_bom: string;
-        month_count: string; neg_codes: string;
-      }>(
-        `SELECT segment,
-                SUM(sale_value)::text  AS total_sale,
-                SUM(bom_value)::text   AS total_bom,
-                COUNT(DISTINCT month_label)::text AS month_count,
-                COUNT(DISTINCT CASE WHEN avg_sale IS NOT NULL AND bom_cost IS NOT NULL AND bom_cost > avg_sale THEN item_code END)::text AS neg_codes
-           FROM margin_fact
-          WHERE sale_value IS NOT NULL AND bom_value IS NOT NULL
-            ${fyClause}
-          GROUP BY segment
-          ORDER BY segment`,
-        fyParam,
-      ),
       // Top-50 negative-contribution codes
       pool.query<{
         item_code: string; segment: string;
+        month_label: string;
         total_sale: string; total_bom: string;
       }>(
-        `SELECT item_code, segment,
+        `SELECT item_code, segment, month_label,
                 SUM(sale_value)::text AS total_sale,
                 SUM(bom_value)::text  AS total_bom
            FROM margin_fact
           WHERE avg_sale IS NOT NULL AND bom_cost IS NOT NULL AND bom_cost > avg_sale
             AND sale_value IS NOT NULL AND bom_value IS NOT NULL
             ${fyClause}
-          GROUP BY item_code, segment
-          ORDER BY (SUM(sale_value) - SUM(bom_value)) ASC
-          LIMIT 50`,
+          GROUP BY item_code, segment, month_label
+          ORDER BY (SUM(sale_value) - SUM(bom_value)) ASC`,
         fyParam,
       ),
     ]);
 
     // Build monthly trend: { fy, month, [segment]: gcPct }
     const monthMap = new Map<string, Record<string, string | number | null>>();
-    for (const r of monthly.rows) {
+    const contributionExclusions = new Map<string, StructuredExclusion>();
+    const availableMonthly = monthly.rows.filter((r) => {
+      const exclusion = resolveHoldExclusionsFromRows({
+        measure: "gross contribution",
+        product: r.segment,
+        requestedPeriods: [r.month_label],
+      }, holds)[0];
+      if (exclusion) contributionExclusions.set(String(exclusion.resolutionItemId), exclusion);
+      return !exclusion;
+    });
+    for (const r of availableMonthly) {
       const key = `${r.fy}|${r.month_label}`;
       if (!monthMap.has(key)) {
         monthMap.set(key, { fy: r.fy, month: r.month_label });
@@ -856,37 +905,72 @@ router.get("/margin/trend", async (req, res) => {
     }
     const monthlyTrend = Array.from(monthMap.values());
 
-    const segmentSummary = segSummary.rows.map((r) => {
-      const sale  = parseFloat(r.total_sale);
-      const bom   = parseFloat(r.total_bom);
+    const summary = new Map<string, { sale: number; bom: number; months: Set<string>; negativeCodes: Set<string> }>();
+    for (const r of availableMonthly) {
+      const s = summary.get(r.segment) ?? { sale: 0, bom: 0, months: new Set<string>(), negativeCodes: new Set<string>() };
+      s.sale += parseFloat(r.total_sale) || 0;
+      s.bom += parseFloat(r.total_bom) || 0;
+      s.months.add(r.month_label);
+      summary.set(r.segment, s);
+    }
+    const availableNegativeRows = negCodes.rows.filter((r) => {
+      const exclusion = resolveHoldExclusionsFromRows({
+        measure: "gross contribution",
+        product: r.segment,
+        requestedPeriods: [r.month_label],
+      }, holds)[0];
+      if (exclusion) contributionExclusions.set(String(exclusion.resolutionItemId), exclusion);
+      return !exclusion;
+    });
+    for (const r of availableNegativeRows) {
+      const s = summary.get(r.segment) ?? { sale: 0, bom: 0, months: new Set<string>(), negativeCodes: new Set<string>() };
+      s.negativeCodes.add(r.item_code);
+      summary.set(r.segment, s);
+    }
+    const segmentSummary = [...summary.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([segment, s]) => {
+      const sale = s.sale;
+      const bom = s.bom;
       const gcPct = isFinite(sale) && isFinite(bom) && sale > 0
         ? ((sale - bom) / sale) * 100
         : null;
       return {
-        segment:        r.segment,
+        segment,
         totalSaleValue: isFinite(sale) ? sale : 0,
         totalBomValue:  isFinite(bom)  ? bom  : 0,
         gcPct,
-        monthCount:    parseInt(r.month_count, 10),
-        negativeCodes: parseInt(r.neg_codes,   10),
+        monthCount:    s.months.size,
+        negativeCodes: s.negativeCodes.size,
       };
     });
 
-    const negativeCodes = negCodes.rows.map((r) => {
-      const sale  = parseFloat(r.total_sale);
-      const bom   = parseFloat(r.total_bom);
+    const negativeByCode = new Map<string, { itemCode: string; segment: string; sale: number; bom: number }>();
+    for (const r of availableNegativeRows) {
+      const key = `${r.item_code}|${r.segment}`;
+      const e = negativeByCode.get(key) ?? { itemCode: r.item_code, segment: r.segment, sale: 0, bom: 0 };
+      e.sale += parseFloat(r.total_sale) || 0;
+      e.bom += parseFloat(r.total_bom) || 0;
+      negativeByCode.set(key, e);
+    }
+    const negativeCodes = [...negativeByCode.values()].sort((a, b) => (a.sale - a.bom) - (b.sale - b.bom)).slice(0, 50).map((r) => {
+      const sale  = r.sale;
+      const bom   = r.bom;
       const gcPct = isFinite(sale) && isFinite(bom) && sale > 0
         ? ((sale - bom) / sale) * 100
         : null;
       return {
-        itemCode:       r.item_code,
+        itemCode:       r.itemCode,
         segment:        r.segment,
         totalSaleValue: isFinite(sale) ? sale : 0,
         gcPct,
       };
     });
 
-    res.json({ monthlyTrend, segmentSummary, negativeCodes });
+    res.json({
+      monthlyTrend,
+      segmentSummary,
+      negativeCodes,
+      contributionExclusions: [...contributionExclusions.values()],
+    });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

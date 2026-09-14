@@ -18,6 +18,7 @@ import type {
 import { normSecKey } from "../mgmt/names.js";
 import { fyMonthLabels } from "../fyAnchors.js";
 import { isMonthFrozen, monthFreezeAt } from "../registers/monthlyReplace.js";
+import { getOpenResolutionHolds, resolveHoldExclusionsFromRows } from "../resolution/holdResolver.js";
 
 export type SkuAlertCoverage = {
   fy: string;
@@ -421,7 +422,7 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
 
   const ambiguousCodes = new Set(mrpMasterRes.rows.map((r) => r.item_code));
 
-  const marginFact: MarginFactRow[] = marginRes.rows.map((r) => ({
+  const marginFactRows: MarginFactRow[] = marginRes.rows.map((r) => ({
     fy: r.fy,
     monthLabel: r.month_label,
     itemCode: r.item_code,
@@ -430,6 +431,18 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     saleValue: Number(r.sale_value),
     bomCost: r.bom_cost != null ? Number(r.bom_cost) : null,
     avgSale: r.avg_sale != null ? Number(r.avg_sale) : null,
+  }));
+  // C4 is a gross-contribution alert.  Remove only held margin periods;
+  // sales/quantity facts used by the other alert families remain untouched.
+  const holds = await getOpenResolutionHolds();
+  const marginExclusions = new Map<string, ReturnType<typeof resolveHoldExclusionsFromRows>[number]>();
+  const marginFact = marginFactRows.filter((row) => resolveHoldExclusionsFromRows({
+    measure: "gross contribution",
+    product: row.segment,
+    requestedPeriods: [row.monthLabel],
+  }, holds).every((exclusion) => {
+    marginExclusions.set(String(exclusion.resolutionItemId), exclusion);
+    return false;
   }));
 
   const persons: PersonRow[] = personRes.rows.map((r) => ({
@@ -630,6 +643,7 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     mrpHistory,
     ambiguousCodes,
     marginFact,
+    marginExclusions: [...marginExclusions.values()],
     persons,
     customerMaster,
     retailerDistributors,

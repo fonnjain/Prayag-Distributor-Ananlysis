@@ -401,6 +401,7 @@ async function runCohortInner(req: CohortRequest): Promise<CohortResponse> {
       const shareBySeg = new Map<string, number>();
       for (const s of season.segments) {
         let share = 0;
+        if (!s.monthShare) continue;
         for (let m = qFrom; m <= qTo; m++) share += s.monthShare[m - 1] ?? 0;
         shareBySeg.set(s.segment, share);
         (share > 0.25 ? inSeason : outSeason).push(s.segment);

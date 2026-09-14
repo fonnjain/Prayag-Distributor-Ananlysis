@@ -15,20 +15,28 @@
  */
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import {
+  getOpenResolutionHolds,
+  resolveHoldExclusionsFromRows,
+  type StructuredExclusion,
+} from "../resolution/holdResolver.js";
 
 export type CodeContribution = {
   /** Volume-weighted (avg_sale − bom_cost), ₹ per unit. */
-  contributionPerUnit: number;
+  contributionPerUnit: number | null;
   /** (avg_sale − bom_cost) / avg_sale as a fraction 0–1. */
-  contributionPct: number;
+  contributionPct: number | null;
   /** Month count with usable data in the trailing 12-month window. */
   coverageMonths: number;
+  /** Present when a contribution period is partly unavailable under a HOLD. */
+  exclusion?: StructuredExclusion;
 };
 
 export type SegmentContribution = {
   /** Volume-weighted (sale_value − bom_value) / sale_value as a fraction 0–1. */
-  contributionPct: number;
+  contributionPct: number | null;
   coverageMonths: number;
+  exclusion?: StructuredExclusion;
 };
 
 // ── Trailing-month cache (15-min TTL) ─────────────────────────────────────────
@@ -67,41 +75,101 @@ export async function getCodeContributions(
 ): Promise<Map<string, CodeContribution>> {
   if (codes.length === 0) return new Map();
   const months = await getTrailing12Months();
-  if (months.length === 0) return new Map();
-
+  if (months.length === 0) {
+    return new Map(codes.map((code) => [code, {
+      contributionPerUnit: null, contributionPct: null, coverageMonths: 0,
+    }]));
+  }
+  const holds = await getOpenResolutionHolds();
   const res = await db.execute<{
     item_code: string;
+    segment: string;
     vw_avg_sale: string | null;
     vw_bom_cost: string | null;
     coverage_months: string;
+    total_qty: string;
   }>(sql`
     SELECT
       item_code,
       (SUM(qty * avg_sale)::numeric / NULLIF(SUM(qty), 0))  AS vw_avg_sale,
       (SUM(qty * bom_cost)::numeric / NULLIF(SUM(qty), 0))  AS vw_bom_cost,
-      COUNT(DISTINCT month_label)::text                      AS coverage_months
+      COUNT(DISTINCT month_label)::text                      AS coverage_months,
+      SUM(qty)::numeric::text                                AS total_qty
     FROM   margin_fact
     WHERE  item_code  = ANY(ARRAY[${sql.join(codes.map((c) => sql`${c}`), sql`, `)}])
       AND  bom_cost   IS NOT NULL
       AND  avg_sale   IS NOT NULL
       AND  qty        > 0
       AND  month_label = ANY(ARRAY[${sql.join(months.map((m) => sql`${m}`), sql`, `)}])
-    GROUP  BY item_code
+    GROUP  BY item_code, segment
   `);
 
-  const out = new Map<string, CodeContribution>();
+  const out = new Map<string, CodeContribution>(
+    codes.map((code) => [code, {
+      contributionPerUnit: null, contributionPct: null, coverageMonths: 0,
+    }]),
+  );
+  const grouped = new Map<string, Array<typeof res.rows[number]>>();
   for (const r of res.rows) {
-    const avgSale = parseFloat(r.vw_avg_sale ?? "0") || 0;
-    const bomCost = parseFloat(r.vw_bom_cost ?? "0") || 0;
-    if (avgSale <= 0) continue;
-    const cpUnit = avgSale - bomCost;
-    out.set(r.item_code, {
-      contributionPerUnit: cpUnit,
-      contributionPct:     cpUnit / avgSale,
-      coverageMonths:      parseInt(r.coverage_months, 10) || 0,
-    });
+    const rows = grouped.get(r.item_code) ?? [];
+    rows.push(r);
+    grouped.set(r.item_code, rows);
+  }
+  for (const code of codes) {
+    const codeRows = grouped.get(code) ?? [];
+    const exclusions = [
+      ...holds.flatMap((hold) => !hold.scopeProduct
+        ? resolveHoldExclusionsFromRows({
+            measure: "gross contribution",
+            requestedPeriods: months,
+          }, [hold])
+        : []),
+      ...codeRows.flatMap((r) => resolveHoldExclusionsFromRows({
+        measure: "gross contribution",
+        product: r.segment,
+        requestedPeriods: months,
+      }, holds)),
+    ];
+    if (exclusions.length === 0 && codeRows.length > 0) {
+      const totalQty = codeRows.reduce((sum, r) => sum + (parseFloat(r.total_qty ?? "0") || 0), 0);
+      const avgSale = totalQty > 0
+        ? codeRows.reduce((sum, r) => sum + (parseFloat(r.vw_avg_sale ?? "0") || 0) * (parseFloat(r.total_qty ?? "0") || 0), 0) / totalQty
+        : 0;
+      const bomCost = totalQty > 0
+        ? codeRows.reduce((sum, r) => sum + (parseFloat(r.vw_bom_cost ?? "0") || 0) * (parseFloat(r.total_qty ?? "0") || 0), 0) / totalQty
+        : 0;
+      if (avgSale > 0) {
+        const cpUnit = avgSale - bomCost;
+        out.set(code, {
+          contributionPerUnit: cpUnit,
+          contributionPct: cpUnit / avgSale,
+          coverageMonths: Math.max(...codeRows.map((r) => parseInt(r.coverage_months, 10) || 0)),
+        });
+      }
+    } else if (exclusions.length > 0) {
+      out.set(code, {
+        contributionPerUnit: null,
+        contributionPct: null,
+        coverageMonths: 0,
+        exclusion: exclusions[0],
+      });
+    }
   }
   return out;
+}
+
+/** Structured exclusions for a contribution consumer (never an empty/silent
+ * response when the requested measure is held). */
+export async function getContributionHoldExclusions(
+  requestedPeriods: string[],
+  product?: string | null,
+): Promise<StructuredExclusion[]> {
+  const holds = await getOpenResolutionHolds();
+  return holds.flatMap((hold) => resolveHoldExclusionsFromRows({
+    measure: "gross contribution",
+    product,
+    requestedPeriods,
+  }, [hold]));
 }
 
 // ── Segment-level lookup ──────────────────────────────────────────────────────
@@ -114,6 +182,7 @@ export async function getCodeContributions(
 export async function getSegmentContributions(): Promise<Map<string, SegmentContribution>> {
   const months = await getTrailing12Months();
   if (months.length === 0) return new Map();
+  const holds = await getOpenResolutionHolds();
 
   const res = await db.execute<{
     segment: string;
@@ -138,10 +207,18 @@ export async function getSegmentContributions(): Promise<Map<string, SegmentCont
   for (const r of res.rows) {
     const sale = parseFloat(r.vw_sale ?? "0") || 0;
     const bom  = parseFloat(r.vw_bom  ?? "0") || 0;
-    if (sale <= 0) continue;
-    out.set(r.segment, {
-      contributionPct:  (sale - bom) / sale,
-      coverageMonths:   parseInt(r.coverage_months, 10) || 0,
+    const exclusion = resolveHoldExclusionsFromRows({
+      measure: "gross contribution",
+      product: r.segment,
+      requestedPeriods: months,
+    }, holds)[0];
+    out.set(r.segment, sale > 0 && !exclusion ? {
+      contributionPct: (sale - bom) / sale,
+      coverageMonths: parseInt(r.coverage_months, 10) || 0,
+    } : {
+      contributionPct: null,
+      coverageMonths: 0,
+      ...(exclusion ? { exclusion } : {}),
     });
   }
   return out;

@@ -6,6 +6,8 @@
 
 // Minimal pool interface so the redAlert module does not depend on pg types directly.
 // The actual pool always comes from @workspace/db.
+import type { StructuredExclusion } from "../resolution/holdResolver.js";
+
 export type DbPool = {
   query<R = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: R[] }>;
 };
@@ -225,6 +227,8 @@ export type DetectionContext = {
 
   // Margin fact (for C4)
   marginFact: MarginFactRow[];
+  /** C4 must not calculate a partial-company alert while cost data is held. */
+  marginExclusions?: StructuredExclusion[];
 
   // Person registry
   persons: PersonRow[];

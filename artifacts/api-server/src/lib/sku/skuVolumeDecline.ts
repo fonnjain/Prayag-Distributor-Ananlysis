@@ -16,6 +16,7 @@ import { sql } from "drizzle-orm";
 import { PROJECT_HEAD_CANON } from "./catalogue.js";
 import { entityCondsAliased, type EntityFilter } from "../saleLineFilter.js";
 import { getCodeContributions } from "./skuContribution.js";
+import { getOpenResolutionHolds, resolveHoldExclusionsFromRows, type StructuredExclusion } from "../resolution/holdResolver.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ export type VolumeDeclineRow = {
    * null = no cost data in margin_fact; rows sort last.
    */
   contributionPerUnit: number | null;
+  contributionExclusion?: StructuredExclusion;
 };
 
 export type VolumeDeclineSegment = {
@@ -62,6 +64,7 @@ export type VolumeDeclineResult = {
   segments: VolumeDeclineSegment[];
   totalCodes: number;
   stoppedCodes: number;
+  contributionExclusions?: StructuredExclusion[];
 };
 
 // ── Params ────────────────────────────────────────────────────────────────────
@@ -170,6 +173,16 @@ export async function getVolumeDecline(params: VolumeDeclineParams): Promise<Vol
   // Gross contribution for all result codes
   const allCodes = [...new Set(rows.rows.map((r) => r.code))];
   const contributions = await getCodeContributions(allCodes);
+  const holds = await getOpenResolutionHolds();
+  const segmentExclusions = new Map<string, StructuredExclusion>();
+  for (const segment of new Set(rows.rows.map((r) => r.segment))) {
+    const exclusion = resolveHoldExclusionsFromRows({
+      measure: "gross contribution",
+      product: segment,
+      requestedPeriods: [...currMonths, ...priorMonths],
+    }, holds)[0];
+    if (exclusion) segmentExclusions.set(segment, exclusion);
+  }
 
   // Build typed rows
   const typedRows: VolumeDeclineRow[] = rows.rows.map((r) => {
@@ -192,7 +205,12 @@ export async function getVolumeDecline(params: VolumeDeclineParams): Promise<Vol
       customersNow:   parseInt(r.customers_now,   10) || 0,
       customersPrior: parseInt(r.customers_prior, 10) || 0,
       stopped:              qtyNow === 0,
-      contributionPerUnit:  contributions.get(r.code)?.contributionPerUnit ?? null,
+      contributionPerUnit:  segmentExclusions.has(r.segment)
+        ? null
+        : contributions.get(r.code)?.contributionPerUnit ?? null,
+      ...(segmentExclusions.has(r.segment)
+        ? { contributionExclusion: segmentExclusions.get(r.segment) }
+        : {}),
     };
   });
 
@@ -227,5 +245,6 @@ export async function getVolumeDecline(params: VolumeDeclineParams): Promise<Vol
     segments,
     totalCodes:   typedRows.length,
     stoppedCodes: typedRows.filter((r) => r.stopped).length,
+    contributionExclusions: [...segmentExclusions.values()],
   };
 }

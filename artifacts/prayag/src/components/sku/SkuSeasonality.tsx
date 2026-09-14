@@ -16,12 +16,23 @@ const BASE = (import.meta as { env: Record<string, string> }).env.BASE_URL?.repl
 export type SeasonalitySegment = {
   segment: string;
   totalNet: number;
-  monthShare: number[];   // length 12, Apr..Mar, 0-1
-  quarterShare: number[]; // [q1,q2,q3,q4], 0-1
-  peakQuarter: 1 | 2 | 3 | 4;
-  peakQuarterLabel: string;
-  peakMonth: string;
-  yearsConsistent: number; // 0-3
+  annualTotals: Record<string, number>;
+  monthShare: number[] | null;   // length 12, Apr..Mar, 0-1
+  quarterShare: number[] | null; // [q1,q2,q3,q4], 0-1
+  peakQuarter: 1 | 2 | 3 | 4 | null;
+  peakQuarterLabel: string | null;
+  peakMonth: string | null;
+  yearsConsistent: number | null; // 0-3
+  attributionExclusion?: {
+    value: null;
+    availability: "unavailable";
+    coverage: { requestedPeriods: string[]; availablePeriods: string[]; heldPeriods: string[] };
+    type: "HOLD";
+    resolutionItemId: string | number;
+    scope: Record<string, unknown>;
+    reason: string;
+    resolutionUrl: string;
+  };
 };
 
 export type SeasonalityResult = {
@@ -154,8 +165,10 @@ export default function SkuSeasonality({ head = null }: { head?: string | null }
 // ── Segment card ───────────────────────────────────────────────────────────────
 
 function SeasonalityCard({ seg }: { seg: SeasonalitySegment }) {
-  const maxShare = Math.max(...seg.monthShare, 0.0001);
-  const peakShare = seg.quarterShare[seg.peakQuarter - 1] ?? 0;
+  const maxShare = seg.monthShare ? Math.max(...seg.monthShare, 0.0001) : 0;
+  const peakShare = seg.quarterShare && seg.peakQuarter
+    ? seg.quarterShare[seg.peakQuarter - 1] ?? 0
+    : 0;
 
   return (
     <div className="rounded-lg border bg-card px-4 py-3">
@@ -164,18 +177,22 @@ function SeasonalityCard({ seg }: { seg: SeasonalitySegment }) {
         <div className="min-w-0 sm:w-64 flex-shrink-0">
           <div className="font-semibold text-sm truncate">{seg.segment}</div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground">
-            <span
+            {seg.attributionExclusion ? (
+              <span className="rounded border border-amber-400/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-800 dark:text-amber-300">
+                Monthly/quarterly attribution unavailable · <a className="underline" href={seg.attributionExclusion.resolutionUrl}>Resolution</a>
+              </span>
+            ) : <span
               className="inline-flex items-center px-1.5 py-0 rounded border text-[10px] font-medium leading-4 select-none
                          bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20"
               title={`share of annual revenue in peak quarter: ${pct(peakShare)}`}
             >
               Peak {seg.peakQuarterLabel} · {pct(peakShare)}
-            </span>
+            </span>}
             <span>
               Peak month <span className="font-medium text-foreground">{seg.peakMonth}</span>
             </span>
-            <span className={cn("font-medium", consistencyColour(seg.yearsConsistent))}>
-              {seg.yearsConsistent}/3 yrs
+            <span className={cn("font-medium", consistencyColour(seg.yearsConsistent ?? 0))}>
+              {seg.yearsConsistent == null ? "—" : `${seg.yearsConsistent}/3 yrs`}
             </span>
           </div>
           <div className="text-xs text-muted-foreground mt-0.5 tabular-nums">
@@ -186,7 +203,7 @@ function SeasonalityCard({ seg }: { seg: SeasonalitySegment }) {
         {/* Right: 12-bar month sparkline */}
         <div className="flex-1 min-w-0">
           <div className="flex items-end gap-[3px] h-12">
-            {seg.monthShare.map((share, i) => {
+            {(seg.monthShare ?? []).map((share, i) => {
               const isPeakQ = MONTH_QUARTER[i] === seg.peakQuarter;
               const h = Math.max(2, Math.round((share / maxShare) * 100));
               return (
@@ -207,6 +224,11 @@ function SeasonalityCard({ seg }: { seg: SeasonalitySegment }) {
               );
             })}
           </div>
+          {seg.attributionExclusion && (
+            <div className="mt-1 text-xs text-muted-foreground">
+              Annual total remains available: {fmtCr(seg.totalNet)}.
+            </div>
+          )}
           <div className="flex gap-[3px] mt-1">
             {MONTH_LABELS.map((m, i) => (
               <div

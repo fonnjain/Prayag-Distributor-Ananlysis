@@ -85,6 +85,11 @@ type AlertsPayload = {
       frozenAt: string | null;
     };
   };
+  grossContributionExclusions?: Array<{
+    title: string;
+    reason: string;
+    resolutionUrl: string;
+  }>;
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -753,6 +758,14 @@ export default function AlertsPage() {
         <p className="mt-1">{productWiseFreshnessText(data.coverage)}</p>
         <p className="mt-1">{coverageText(data.coverage)}</p>
       </div>
+      {data.grossContributionExclusions?.map((hold) => (
+        <div key={hold.resolutionUrl} className="rounded-md border bg-slate-100 px-4 py-3 text-sm text-slate-500">
+          <a href={hold.resolutionUrl} className="font-medium underline decoration-dotted">
+            C4 gross contribution unavailable · {hold.title}
+          </a>
+          <p className="mt-1 text-xs">{hold.reason}</p>
+        </div>
+      ))}
 
       <p className="text-xs text-amber-700 dark:text-amber-400">
         Prior-year channel history is unavailable for FY2024-25 and FY2025-26. Categories depending on it are not evaluated.

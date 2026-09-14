@@ -276,15 +276,18 @@ export function buildCategoryCAlerts(
   let c4CurQty = 0, c4CurGC = 0, c4PriQty = 0, c4PriGC = 0;
   const c4Segments = new Set<string>();
 
-  for (const r of ctx.marginFact) {
+  // A product/month cost HOLD makes the company-level comparison incomplete.
+  // Do not turn the remaining segments into a misleading partial-company C4.
+  if (!ctx.marginExclusions || ctx.marginExclusions.length === 0) {
+   for (const r of ctx.marginFact) {
     if (r.bomCost == null || r.bomCost <= 0) continue;
     const key = `${r.fy}|${r.monthLabel}`;
     const gc = r.saleValue - r.qty * r.bomCost;
     if (marginMonthsCur.has(key)) { c4CurQty += r.qty; c4CurGC += gc; c4Segments.add(r.segment); }
     if (marginMonthsPri.has(key)) { c4PriQty += r.qty; c4PriGC += gc; }
-  }
+   }
 
-  if (c4PriQty > 0 && c4CurQty > c4PriQty && c4PriGC > 0) {
+   if (c4PriQty > 0 && c4CurQty > c4PriQty && c4PriGC > 0) {
     const gcDeclinePct = ((c4CurGC - c4PriGC) / Math.abs(c4PriGC)) * 100;
     if (gcDeclinePct <= -cfg.C4_GROSS_CONTRIBUTION_DROP_PCT) {
       alerts.push({
@@ -307,6 +310,7 @@ export function buildCategoryCAlerts(
         extraForReport: { segments: [...c4Segments].join(", ") },
       });
     }
+   }
   }
 
   // ── C5: sheet not read for >= staleness days ──────────────────────────────

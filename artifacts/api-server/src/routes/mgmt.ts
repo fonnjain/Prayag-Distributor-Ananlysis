@@ -8,6 +8,7 @@ import { loadRoster, invalidateRosterCache, hrRosterCsvWritePath, saveRosterCsvT
 import { isAdminToken } from "../lib/adminAuth.js";
 import { requireVerificationEndpointAccess } from "../lib/apiKeyAuth.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
+import { getOpenResolutionHolds, resolveHoldExclusionsFromRows } from "../lib/resolution/holdResolver.js";
 import { resolveOrderFileId, getOrderLoadStatus, loadOrderFile } from "../lib/mgmt/orders.js";
 import {
   buildManagementWorkbook,
@@ -1770,7 +1771,6 @@ router.get("/mgmt/distributor-deep-dive", async (req: Request, res: Response): P
       }
       months = tokens;
     }
-
     req.log.info({ fy, stateHead, months }, "mgmt/distributor-deep-dive: request received");
 
     // Resilient loader: a transient Sheets failure serves the last saved
@@ -1816,6 +1816,22 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
         return;
       }
       months = tokens;
+    }
+    if (tab === "secondary" || tab === "sku") {
+      const secondaryExclusions = (await getOpenResolutionHolds()).flatMap((hold) =>
+        resolveHoldExclusionsFromRows({
+          measure: "secondary SKU",
+          product: "secondary SKU",
+          requestedPeriods: months ?? fyMonthLabels(fy),
+        }, [hold]),
+      );
+      if (secondaryExclusions.length > 0) {
+        res.json({
+          fy, tab, availability: "unavailable", value: null,
+          exclusions: secondaryExclusions, data: [],
+        });
+        return;
+      }
     }
     // Head-scoped aggregation: when no single distributor is picked, a state
     // head (optionally narrowed by geography states) can scope the Secondary

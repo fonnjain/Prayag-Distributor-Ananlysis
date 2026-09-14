@@ -1585,12 +1585,18 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     // Adds contributionHigh/Low using trailing-12-month segment contribution%
     // from margin_fact. Entities with no segment match get null (sort last).
     let segmentContribRates: { segment: string; contributionPct: number }[] = [];
+    const contributionExclusions: unknown[] = [];
     try {
       const { getSegmentContributions } = await import("../lib/sku/skuContribution.js");
       const { db } = await import("@workspace/db");
       const { sql } = await import("drizzle-orm");
       const segRates = await getSegmentContributions();
-      segmentContribRates = [...segRates.entries()].map(([segment, v]) => ({ segment, contributionPct: v.contributionPct }));
+      segmentContribRates = [...segRates.entries()]
+        .filter(([, v]) => v.contributionPct != null)
+        .map(([segment, v]) => ({ segment, contributionPct: v.contributionPct! }));
+      for (const [, v] of segRates) {
+        if (v.exclusion) contributionExclusions.push(v.exclusion);
+      }
 
       // Batch-look up each entity's primary segment from sale_line_current.
       const entityNames = [...new Set(rawLedger.map((r) => r.entityName.toUpperCase().trim()))];
@@ -1612,8 +1618,12 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         for (const row of rawLedger) {
           const seg = entitySegment.get(row.entityName.toUpperCase().trim());
           const rate = seg ? segRates.get(seg) : null;
-          (row as Record<string, unknown>).contributionHigh = rate && row.valueHigh != null ? Math.round(row.valueHigh * rate.contributionPct * 100) / 100 : null;
-          (row as Record<string, unknown>).contributionLow  = rate && row.valueLow  != null ? Math.round(row.valueLow  * rate.contributionPct * 100) / 100 : null;
+           (row as Record<string, unknown>).contributionHigh = rate?.contributionPct != null && row.valueHigh != null ? Math.round(row.valueHigh * rate.contributionPct * 100) / 100 : null;
+           (row as Record<string, unknown>).contributionLow  = rate?.contributionPct != null && row.valueLow  != null ? Math.round(row.valueLow * rate.contributionPct * 100) / 100 : null;
+           if (rate?.contributionPct == null) {
+             const held = seg ? segRates.get(seg)?.exclusion : undefined;
+             if (held) (row as Record<string, unknown>).contributionExclusion = held;
+           }
         }
       }
     } catch {
@@ -1734,6 +1744,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         rangeUptake,
       },
       executiveSummary,
+      contributionExclusions,
       opportunityLedger: {
         rows:         ledger,
         totalRows:    rawLedger.length,

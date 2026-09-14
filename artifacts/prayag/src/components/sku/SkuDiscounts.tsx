@@ -71,6 +71,7 @@ export type DiscountsResult = {
     marginPerCode: { blocked: boolean; reason: string };
     liveYearRetailer: { blocked: boolean; reason: string };
   };
+  contributionExclusions?: Array<{ title: string; reason: string; resolutionUrl: string }>;
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -184,6 +185,14 @@ export default function SkuDiscounts({ fy, channel, monthFrom, monthTo, periodLa
           </div>
         </div>
       )}
+      {data.contributionExclusions?.map((hold) => (
+        <div key={hold.resolutionUrl} className="rounded-md border bg-slate-100 px-4 py-3 text-sm text-slate-500">
+          <a href={hold.resolutionUrl} className="font-medium underline decoration-dotted">
+            Gross contribution unavailable · {hold.title}
+          </a>
+          <p className="mt-0.5 text-xs">{hold.reason}</p>
+        </div>
+      ))}
 
       {/* ── PRIMARY: Discount off MRP (distributor) ────────────────────────── */}
       <section className="rounded-lg border bg-card">

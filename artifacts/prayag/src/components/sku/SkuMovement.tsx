@@ -66,6 +66,7 @@ export type LostCode = {
   contributionPct: number | null;
   /** priorQty × contributionPerUnit. null = no cost data. */
   opportunityContribution: number | null;
+  contributionExclusion?: { title: string; resolutionUrl: string };
 };
 
 export type LostCodesResult = {
@@ -454,7 +455,11 @@ function LostCodesView({ fy, monthFrom, monthTo }: ViewProps) {
                   {fmtCr(l.priorNet)}
                 </TableCell>
                 <TableCell className="py-1.5 text-right text-xs tabular-nums whitespace-nowrap hidden lg:table-cell">
-                  <span className="text-muted-foreground italic text-[10px]">under review</span>
+                  {l.contributionExclusion ? (
+                    <a href={l.contributionExclusion.resolutionUrl} className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 underline decoration-dotted" title={l.contributionExclusion.title}>
+                      unavailable
+                    </a>
+                  ) : <span className="text-muted-foreground italic text-[10px]">under review</span>}
                 </TableCell>
               </TableRow>
             ))}

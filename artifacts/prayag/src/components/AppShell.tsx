@@ -166,6 +166,14 @@ const NAV: NavGroup[] = [
       { id: "catalogue-review", label: "Catalogue Review", path: "/dev/catalogue-review", icon: Tags, adminOnly: true },
     ],
   },
+  {
+    id: "settings",
+    label: "Settings",
+    icon: Settings,
+    items: [
+      { id: "resolution", label: "Resolution", path: "/settings/resolution", icon: ClipboardList },
+    ],
+  },
 ];
 
 // Determine which group & item is active from the current URL.
@@ -222,6 +230,9 @@ function activeIds(location: string, nav: NavGroup[]): { groupId: string; itemId
     const item = grp.items.find((i) => i.id === slug) ?? grp.items[0];
     return { groupId: "developer", itemId: item!.id };
   }
+  if (location.startsWith("/settings")) {
+    return { groupId: "settings", itemId: "resolution" };
+  }
   // Dashboard
   const slug = location === "/" ? "overview" : location.replace(/^\//, "").split("?")[0];
   const item = nav[0].items.find((i) => i.id === slug) ?? nav[0].items[0];
@@ -266,6 +277,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     market:    activeGroupId === "market",
     customers: activeGroupId === "customers",
     developer: activeGroupId === "developer",
+    settings: activeGroupId === "settings",
   });
 
   function toggleGroup(id: string) {

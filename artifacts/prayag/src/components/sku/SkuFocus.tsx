@@ -29,6 +29,7 @@ export type GapCode = {
    */
   contributionPerUnit: number | null;
   contributionPct: number | null;
+  contributionExclusion?: { title: string; resolutionUrl: string };
 };
 
 export type SegmentRecommendation = {
@@ -325,7 +326,11 @@ function RecommendationCard({
                   {fmtNet(code.priorNet)}
                 </TableCell>
                 <TableCell className="py-1.5 text-right tabular-nums text-xs whitespace-nowrap hidden lg:table-cell">
-                  <span className="text-muted-foreground italic text-[10px]">under review</span>
+                  {code.contributionExclusion ? (
+                    <a href={code.contributionExclusion.resolutionUrl} className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 underline decoration-dotted" title={code.contributionExclusion.title}>
+                      unavailable
+                    </a>
+                  ) : <span className="text-muted-foreground italic text-[10px]">under review</span>}
                 </TableCell>
                 <TableCell className="py-1.5 text-right text-xs text-muted-foreground
                                      hidden md:table-cell whitespace-nowrap">
