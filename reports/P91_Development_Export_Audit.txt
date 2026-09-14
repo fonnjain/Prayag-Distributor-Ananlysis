@@ -1,0 +1,120 @@
+PROMPT 91 DEVELOPMENT EXPORT AUDIT
+Generated 14 September 2026
+
+=== Sales People ===
+Sheet list with data-row counts:
+- Summary: 11 data rows
+- Members: 227 data rows
+- Missing data: 225 data rows
+- Info: 13 data rows
+Info sheet as generated:
+Scope: Sales People page; rows exactly match the filtered table.
+FY: 2026-27
+Period: Apr–Aug 2026
+Filters applied: State head=All; Member=All; Search=(none)
+Member count: 227
+Show primary-role members: No
+Plan source: STATE HEAD DASHBOARD monthly Plan; Target Master fallback for non-SHDA members
+OB source: STATE HEAD DASHBOARD monthly Ordered Amount
+Sales source: STATE HEAD DASHBOARD monthly Sales Received
+Achievement source: Sales Received ÷ Plan, recomputed by the app
+Three-state convention: available = recorded non-zero; genuine zero = recorded 0; unavailable = blank with reason.
+Provisional months: None in selected period
+Data-read timestamp: 13/9/2026, 7:07:54 am
+
+=== State-head Sales Deep Dive ===
+Sheet list with data-row counts:
+- Team summary: 20 data rows
+- Members: 76 data rows
+- Cost and ROI: 78 data rows
+- Missing data: 23 data rows
+- Info: 23 data rows
+Info sheet as generated:
+Field: Value
+Scope: All members under state head Sandeep Dadheech
+State head: Sandeep Dadheech
+FY: 2026-27
+Period / filters: Full FY / current page selection
+Selected fiscal months: All resolved months
+Member count: 75
+Active members: 72
+LEFT members: 3
+Dashboard source: Resolved STATE HEAD DASHBOARD Data tab
+Cost source: Resolved STATE HEAD DASHBOARD Data tab cost fields
+Coverage source: Resolved STATE HEAD DASHBOARD Data tab coverage fields
+Target / OB / sales coverage: 61/72 active with target; 72/72 with OB; 60/72 with sales
+Reporting month count for CTC: 5
+Period resolution: Current page YTD values from the resolved Data tab.
+Company benchmark: All active company members with cost and sales; 138 peers; Resolved Data-tab member target snapshots
+Provisional months: Aug–Sep 2026 are provisional and may change until they close.
+Data-read timestamp: 2026-09-14T11:02:05.108Z
+Generated timestamp: 2026-09-14T11:02:05.134Z
+Snapshot basis: live resolved read
+Order booking vs sales: Order booking is committed order value; sales received is goods dispatched/received. They are separate measures and are not substituted.
+Like-for-like disclosure: 11 active members have no target recorded - carrying Rs 2.62 Cr of order booking. Headline includes their OB but contributes no target denominator. Like-for-like excludes them entirely.
+Three-state markers: value = resolved amount; zero = genuine resolved zero; unavailable = blank grey with a reason.
+
+=== Customers ===
+Sheet list with data-row counts:
+- Customers: 8802 data rows
+- Unassigned: 3387 data rows
+- Review queue: 2 data rows
+- Info: 17 data rows
+Info sheet as generated:
+Scope: Organisation → Customers master-data mapping export
+Filters applied: tab=customers
+Customers rows: 8802
+Unassigned rows: 3387
+Review queue rows: 2
+Data read timestamp: 2026-09-14T10:57:47.608Z
+ID / code: ID is the imported customer identifier. DIST# is shown when the customer row has one; CP code is the exact secondary-order source code, and is blank when absent.
+Linked state head / member / state: Current open customer_assignment joined to person; state is the imported territory/state label. Blank means no current value, not zero.
+Link indicator: Linked means at least one current customer_link retailer↔distributor relationship exists; Not linked means no such relationship.
+Status dot: The status dot is the current assignment confidence: confirmed, assign_user_chain, state_lookup, guessed. Blank means no current assignment.
+Record source: customer.source identifies import versus app_created (or another stored source value).
+Three-state figures: Every monetary figure has a state and reason: value (numeric amount), zero (numeric 0 and 'Genuine zero in source'), or unavailable (blank grey cell with an explicit reason). Unknown is never rendered as zero.
+Available value: Primary sales value comes from sale_line_current.amount matched to the customer name. Order booking value comes from secondary_order_line.basic_order_value matched to CP code. Available value uses primary sales when present, otherwise booking; blank means unavailable; numeric 0 is a genuine zero.
+Unassigned order: Unassigned rows are sorted by available value descending; unavailable values are last.
+Missing reason: A row can have several reasons: no head, no state, and/or no code. Blank is not converted to zero.
+Provisional months: Not applicable: this master-data export is not period-filtered; values are labelled by source and read as available source totals.
+Source note: This export reads the complete population matching the supplied page filters; it is not limited to the visible pagination page.
+
+=== Organisation People ===
+Sheet list with data-row counts:
+- People: 360 data rows
+- Conflict flags: 4 data rows
+- Info: 9 data rows
+Info sheet as generated:
+Filters applied: search: All · active: All · designation: All
+People exported: 360
+Sources: person master + designation master + hr_roster_csv
+Column sources: Identity/status/hierarchy: person master; role: designation master; HQ/state/working state/DOJ/mobile: HR roster/dashboard roster; email: no connected source held (blank where unavailable).
+Coverage: One row per person returned by the active People filters; no page cap is applied to the export.
+Conflict flags: P14 = 7 current roster members without HR records; P40 = 58 historic names not in roster; P11 = Sunil Mohanty has no record anywhere; P12 = Pawan Sharma HR Deactive vs active head.
+Date coverage: Date of Joining is written as a true Excel date. Blank means the source did not hold a joining date.
+Provisional months: Not applicable — People is a current identity/employment snapshot.
+Data-read timestamp: 2026-09-14T10:57:50.035Z
+
+=== Coverage Review ===
+Sheet list with data-row counts:
+- By Head: 1 data rows
+- By Member: 75 data rows
+- Info: 11 data rows
+Info sheet as generated:
+FY: 2026-27
+Period: Fiscal months 1–5
+Filters applied: stateHead: Sandeep Dadheech · member: All · search: All
+Head rows: 1
+Member rows: 75
+Sources: Member figures: STATE HEAD DASHBOARD — Data tab fields shown on Sales Deep Dive; parties-giving-business: HR/SFA Dashboard business received parties joined by normSecKey.
+Figure semantics: VALUE = source returned a positive figure; ZERO = source returned a genuine zero; UNKNOWN = source returned no figure; INCOMPLETE = head sum covers only a known subset of members. UNKNOWN visits are deliberately blank and never converted to zero.
+Coverage: Retailer/visit figures are the exact Sales Deep Dive Data-tab fields. Parties-giving-business is joined from HR/SFA Dashboard business received parties by normalized member identity; absent or ambiguous identities remain unavailable. Head rows disclose incomplete populations rather than presenting known-subset sums as complete.
+Period semantics: The selected FY/date filter is carried into this export. The coverage tiles themselves are FY-level Data-tab snapshot fields, so a date filter does not silently turn them into monthly figures.
+Provisional months: Operational visit data is source-reported and may change while the selected period remains open.
+Data-read timestamp: 2026-09-14T10:57:52.886Z
+
+Sales People live three-state count (Apr-Aug 2026, all current rows):
+- Available: 143
+- Unavailable: 75
+- Genuine zero: 9
+- Total: 227

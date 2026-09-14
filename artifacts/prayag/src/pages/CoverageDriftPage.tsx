@@ -15,7 +15,8 @@ import {
   ServerCrash,
   X,
   UserCheck,
-  Clock
+  Clock,
+  Download,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -400,6 +401,15 @@ export default function CoverageDriftPage() {
           <p className="text-sm text-muted-foreground mt-0.5">
             Inspect canonical evidence drift between register and persistence.
           </p>
+          <a
+            href="/api/mgmt/coverage-review/export"
+            download
+            data-testid="button-export-coverage-review"
+            className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-xs font-medium hover:bg-muted"
+          >
+            <Download className="size-3.5" />
+            Export operational coverage
+          </a>
         </div>
 
         {/* Action / Auth */}

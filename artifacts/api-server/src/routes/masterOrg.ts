@@ -16,6 +16,16 @@ import { unverifiedCoverageAliasReviewSql } from "../lib/coverageAliases.js";
 import { pool } from "@workspace/db";
 import type * as ExcelJSTypes from "exceljs";
 import { isAdminToken } from "../lib/adminAuth.js";
+import { loadRoster } from "../lib/mgmt/roster.js";
+import { normSecKey } from "../lib/mgmt/names.js";
+import {
+  buildPeopleWorkbook,
+  infoSheetEvidence,
+  normalisePeopleActiveFilter,
+  peopleActiveWhereClause,
+  workbookSheetEvidence,
+} from "../lib/organisationCoverageExport.js";
+import { buildCustomerExportWorkbook, customerExportEvidence } from "../lib/customerExport.js";
 
 const router = Router();
 const coverageAliasReviewSql = unverifiedCoverageAliasReviewSql("c", "coverage_person.name");
@@ -80,7 +90,7 @@ router.get("/master/designations", async (_req, res) => {
 router.get("/master/people", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
-    const activeFilter = String(req.query.active ?? "all");
+    const activeFilter = normalisePeopleActiveFilter(req.query.active);
     const desigId = req.query.designation_id ? Number(req.query.designation_id) : null;
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
@@ -98,8 +108,8 @@ router.get("/master/people", async (req, res) => {
     // System coverage sentinels are audit records, never people an operator can
     // select or manage.
     where.push("COALESCE(p.is_system_coverage, false) = false");
-    if (activeFilter === "true") where.push("p.is_active = true AND p.is_holding = false");
-    else if (activeFilter === "false") where.push("p.is_active = false");
+    const activePredicate = peopleActiveWhereClause(req.query.active);
+    if (activePredicate) where.push(activePredicate);
     if (desigId !== null) {
       params.push(desigId);
       where.push(`p.designation_id = $${params.length}`);
@@ -209,6 +219,335 @@ router.get("/master/customers", async (req, res) => {
     res.json({ total: Number(countRes.rows[0].count), customers: dataRes.rows });
   } catch (err) {
     res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── GET /api/master/customers/export ─────────────────────────────────────────
+// Four-sheet, master-data export.  It deliberately fetches the complete filtered
+// population rather than the current UI page: the Customers page is paginated,
+// while mapping work needs every matching identifier.  The query parameters are
+// the same filters used by the page (q/type/territory_id/tab).
+router.get("/master/customers/export", async (req, res) => {
+  try {
+    const tab = String(req.query.tab ?? "customers").trim().toLowerCase();
+    const q = String(req.query.q ?? "").trim();
+    const type = String(req.query.type ?? "").trim();
+    const territoryId = req.query.territory_id === undefined || req.query.territory_id === ""
+      ? null : Number(req.query.territory_id);
+
+    const customerConditions: string[] = [];
+    const customerParams: unknown[] = [];
+    if (q) {
+      customerParams.push(`%${q}%`);
+      customerConditions.push(`(c.name ILIKE $${customerParams.length} OR c.customer_id ILIKE $${customerParams.length})`);
+    }
+    if (type) {
+      customerParams.push(type);
+      customerConditions.push(`c.type = $${customerParams.length}`);
+    }
+    if (tab === "unassigned") {
+      customerConditions.push("ca.person_id IS NULL");
+    }
+    if (territoryId !== null && Number.isFinite(territoryId)) {
+      customerParams.push(territoryId);
+      customerConditions.push(`c.territory_id = $${customerParams.length}`);
+    }
+    const customerWhere = customerConditions.length ? `WHERE ${customerConditions.join(" AND ")}` : "";
+
+    // Values are kept as separate measures.  Primary sales and order booking
+    // are not interchangeable, and a numeric zero must remain distinct from
+    // a missing aggregate (NULL).
+    const customerResult = await pool.query(
+      `SELECT c.customer_id, c.name, c.type, c.status, c.source,
+              t.name AS state_name,
+              ca.person_id, p.name AS member_name,
+              ca.state_head_person_id, sh.name AS state_head_name,
+              ca.confidence,
+              EXISTS (
+                SELECT 1 FROM customer_link cl
+                WHERE cl.effective_to IS NULL
+                  AND (cl.retailer_id = c.customer_id OR cl.distributor_id = c.customer_id)
+              ) AS linked,
+              CASE WHEN c.customer_id ~ '^DIST#[0-9]+$' THEN c.customer_id ELSE NULL END AS dist_number,
+              ob.cp_code,
+              ps.primary_sales_value,
+              ob.order_booking_value,
+              CASE
+                WHEN ps.primary_sales_value IS NOT NULL THEN ps.primary_sales_value
+                WHEN ob.order_booking_value IS NOT NULL THEN ob.order_booking_value
+                ELSE NULL
+              END AS available_value,
+              CASE
+                WHEN ps.primary_sales_value IS NOT NULL THEN 'sale_line_current primary sales'
+                WHEN ob.order_booking_value IS NOT NULL THEN 'secondary_order_line booking'
+                ELSE NULL
+              END AS value_basis,
+              concat_ws('; ',
+                CASE WHEN ca.state_head_person_id IS NULL THEN 'no head' END,
+                CASE WHEN c.territory_id IS NULL THEN 'no state' END,
+                CASE WHEN c.customer_id !~ '^DIST#[0-9]+$' AND ob.cp_code IS NULL THEN 'no code' END
+              ) AS missing_reason
+       FROM customer c
+       LEFT JOIN territory t ON t.territory_id = c.territory_id
+       LEFT JOIN customer_assignment ca
+         ON ca.customer_id = c.customer_id
+        AND ca.effective_to IS NULL AND ca.voided_at IS NULL
+       LEFT JOIN person p ON p.person_id = ca.person_id
+       LEFT JOIN person sh ON sh.person_id = ca.state_head_person_id
+       LEFT JOIN (
+         SELECT upper(trim(customer)) AS customer_key,
+                SUM(amount::numeric) AS primary_sales_value
+         FROM sale_line_current
+         GROUP BY upper(trim(customer))
+       ) ps ON ps.customer_key = upper(trim(c.name))
+       LEFT JOIN (
+         SELECT cp_code, MAX(cp_code) AS cp_code_value,
+                SUM(basic_order_value::numeric) AS order_booking_value
+         FROM secondary_order_line
+         WHERE cp_code IS NOT NULL AND trim(cp_code) <> ''
+         GROUP BY cp_code
+       ) ob ON ob.cp_code = c.customer_id
+       ${customerWhere}
+       ORDER BY c.name`,
+      customerParams,
+    );
+
+    const unassignedResult = await pool.query(
+      `SELECT c.customer_id, c.name, c.type, c.status, c.source,
+              t.name AS state_name,
+              ca.person_id, p.name AS member_name,
+              ca.state_head_person_id, sh.name AS state_head_name,
+              ca.confidence,
+              EXISTS (
+                SELECT 1 FROM customer_link cl
+                WHERE cl.effective_to IS NULL
+                  AND (cl.retailer_id = c.customer_id OR cl.distributor_id = c.customer_id)
+              ) AS linked,
+              CASE WHEN c.customer_id ~ '^DIST#[0-9]+$' THEN c.customer_id ELSE NULL END AS dist_number,
+              ob.cp_code,
+              ps.primary_sales_value,
+              ob.order_booking_value,
+              CASE
+                WHEN ps.primary_sales_value IS NOT NULL THEN ps.primary_sales_value
+                WHEN ob.order_booking_value IS NOT NULL THEN ob.order_booking_value
+                ELSE NULL
+              END AS available_value,
+              CASE
+                WHEN ps.primary_sales_value IS NOT NULL THEN 'sale_line_current primary sales'
+                WHEN ob.order_booking_value IS NOT NULL THEN 'secondary_order_line booking'
+                ELSE NULL
+              END AS value_basis,
+              concat_ws('; ',
+                CASE WHEN ca.state_head_person_id IS NULL THEN 'no head' END,
+                CASE WHEN c.territory_id IS NULL THEN 'no state' END,
+                CASE WHEN c.customer_id !~ '^DIST#[0-9]+$' AND ob.cp_code IS NULL THEN 'no code' END
+              ) AS missing_reason
+       FROM customer c
+       LEFT JOIN territory t ON t.territory_id = c.territory_id
+       JOIN customer_assignment ca
+         ON ca.customer_id = c.customer_id
+        AND ca.effective_to IS NULL AND ca.voided_at IS NULL
+        AND ca.person_id IS NULL
+       LEFT JOIN person p ON p.person_id = ca.person_id
+       LEFT JOIN person sh ON sh.person_id = ca.state_head_person_id
+       LEFT JOIN (
+         SELECT upper(trim(customer)) AS customer_key,
+                SUM(amount::numeric) AS primary_sales_value
+         FROM sale_line_current
+         GROUP BY upper(trim(customer))
+       ) ps ON ps.customer_key = upper(trim(c.name))
+       LEFT JOIN (
+         SELECT cp_code, MAX(cp_code) AS cp_code_value,
+                SUM(basic_order_value::numeric) AS order_booking_value
+         FROM secondary_order_line
+         WHERE cp_code IS NOT NULL AND trim(cp_code) <> ''
+         GROUP BY cp_code
+       ) ob ON ob.cp_code = c.customer_id
+       ${customerConditions.filter((condition) => condition !== "ca.person_id IS NULL").length
+         ? `WHERE ${customerConditions.filter((condition) => condition !== "ca.person_id IS NULL").join(" AND ")}`
+         : ""}
+       ORDER BY
+         CASE
+           WHEN ps.primary_sales_value IS NOT NULL THEN ps.primary_sales_value
+           WHEN ob.order_booking_value IS NOT NULL THEN ob.order_booking_value
+           ELSE NULL
+         END DESC NULLS LAST,
+         c.name`,
+      // The unassigned predicate is constant and contributes no placeholder;
+      // q/type/territory retain the same positional parameters as above.
+      customerParams,
+    );
+
+    const reviewResult = await pool.query(
+      `SELECT q.id AS queue_id, q.name, q.type,
+              t.name AS state_name, p.name AS member_name,
+              q.review_status AS status,
+              COALESCE(q.notes,
+                CASE WHEN q.review_status = 'pending' THEN 'awaiting review'
+                     ELSE 'no reason recorded' END) AS reason,
+              q.submitted_by, q.submitted_at::text AS submitted_at,
+              q.reviewed_by, q.reviewed_at::text AS reviewed_at,
+              q.approved_customer_id
+       FROM customer_review_queue q
+       LEFT JOIN territory t ON t.territory_id = q.proposed_territory_id
+       LEFT JOIN person p ON p.person_id = q.proposed_person_id
+       ORDER BY q.submitted_at DESC`,
+    );
+
+    const mapRow = (row: Record<string, unknown>) => ({
+      customerId: String(row.customer_id ?? ""),
+      name: String(row.name ?? ""),
+      type: row.type as string | null,
+      distNumber: row.dist_number as string | null,
+      cpCode: row.cp_code as string | null,
+      stateHeadName: row.state_head_name as string | null,
+      memberName: row.member_name as string | null,
+      stateName: row.state_name as string | null,
+      linked: row.linked as boolean | null,
+      status: row.status as string | null,
+      confidence: row.confidence as string | null,
+      source: row.source as string | null,
+      primarySalesValue: row.primary_sales_value as string | null,
+      orderBookingValue: row.order_booking_value as string | null,
+      availableValue: row.available_value as string | null,
+      valueBasis: row.value_basis as string | null,
+      missingReason: row.missing_reason as string | null,
+    });
+    const workbook = buildCustomerExportWorkbook({
+      customers: customerResult.rows.map(mapRow),
+      unassigned: unassignedResult.rows.map(mapRow),
+      reviewQueue: reviewResult.rows.map((row: Record<string, unknown>) => ({
+        queueId: row.queue_id as string | number,
+        name: String(row.name ?? ""),
+        type: row.type as string | null,
+        stateName: row.state_name as string | null,
+        memberName: row.member_name as string | null,
+        status: row.status as string | null,
+        reason: row.reason as string | null,
+        submittedBy: row.submitted_by as string | null,
+        submittedAt: row.submitted_at as string | null,
+        reviewedBy: row.reviewed_by as string | null,
+        reviewedAt: row.reviewed_at as string | null,
+        approvedCustomerId: row.approved_customer_id as string | null,
+      })),
+      filters: { tab, q, type, territory_id: req.query.territory_id as string | undefined },
+      generatedAt: new Date().toISOString(),
+      sourceNotes: [
+        "This export reads the complete population matching the supplied page filters; it is not limited to the visible pagination page.",
+      ],
+    });
+    const evidence = customerExportEvidence(workbook);
+    req.log.info({ export: "master-customers", ...evidence }, "customer export generated");
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="organisation_customers_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── GET /api/master/people/export ─────────────────────────────────────────────
+// The export uses the same q/active/designation filters as the People list, but
+// deliberately has no page-size cap: a filtered download must contain every row
+// represented by the active page filters.
+router.get("/master/people/export", async (req, res) => {
+  try {
+    const q = String(req.query.q ?? "").trim();
+    const activeFilter = normalisePeopleActiveFilter(req.query.active);
+    const designationId = req.query.designation_id
+      ? Number(req.query.designation_id)
+      : null;
+    const where: string[] = ["COALESCE(p.is_system_coverage, false) = false"];
+    const params: unknown[] = [];
+    if (q) {
+      params.push(`%${q}%`);
+      where.push(`p.name ILIKE $${params.length}`);
+    }
+    const activePredicate = peopleActiveWhereClause(req.query.active);
+    if (activePredicate) where.push(activePredicate);
+    if (designationId !== null && Number.isFinite(designationId)) {
+      params.push(designationId);
+      where.push(`p.designation_id = $${params.length}`);
+    }
+    const { rows } = await pool.query(
+      `SELECT p.person_id, p.name, p.employee_code, p.is_active,
+              p.headquarter, p.source, p.left_date::text,
+              d.name AS designation_name,
+              sh.name AS state_head_name,
+              (SELECT pr.hr_status FROM person_registry pr
+                 WHERE pr.person_id = p.person_id
+                 ORDER BY pr.updated_at DESC NULLS LAST LIMIT 1) AS registry_hr_status
+       FROM person p
+       LEFT JOIN designation d ON d.designation_id = p.designation_id
+       LEFT JOIN person sh ON sh.person_id = p.state_head_person_id
+       WHERE ${where.join(" AND ")}
+       ORDER BY p.is_active DESC, p.name`,
+      params,
+    );
+    const roster = await loadRoster().catch(() => null);
+    const rosterByName = new Map((roster?.members ?? []).map((member) => [member.normKey, member]));
+    const unmatched = new Set((roster?.unmatchedFromCsv ?? []).map((member) => member.normKey));
+    const excelDate = (serial: number | null): Date | null => {
+      if (serial == null || !Number.isFinite(serial) || serial <= 0) return null;
+      return new Date(Date.UTC(1899, 11, 30) + serial * 86_400_000);
+    };
+    const exportRows = rows.map((row: any) => {
+      const key = normSecKey(row.name);
+      const member = rosterByName.get(key);
+      const flags: string[] = [];
+      if (unmatched.has(key)) flags.push("P14 — roster member has no HR record");
+      if (!member && !row.is_active) flags.push("P40 — historic name not in current roster");
+      if (key === normSecKey("Sunil Mohanty")) flags.push("P11 — no HR or registry record");
+      const hrStatus = member?.activeLeft || row.registry_hr_status || null;
+      if (key === normSecKey("Pawan Sharma") &&
+          row.is_active && String(hrStatus ?? "").toLowerCase().includes("deactive")) {
+        flags.push("P12 — HR Deactive vs active head");
+      }
+      return {
+        employeeCode: member?.empCode ?? row.employee_code ?? null,
+        name: row.name,
+        role: member?.designation ?? row.designation_name ?? null,
+        stateHead: member?.stateHead ?? row.state_head_name ?? null,
+        hq: member?.headquarter ?? row.headquarter ?? null,
+        state: member?.state ?? null,
+        workingState: member?.workingState ?? null,
+        hrStatus,
+        rosterStatus: row.is_active ? "Active" : "Inactive",
+        dateOfJoining: excelDate(member?.dojSerial ?? null),
+        email: null,
+        mobile: member?.contactNumber || null,
+        conflictFlags: flags.join("; "),
+      };
+    });
+    const workbook = buildPeopleWorkbook({
+      rows: exportRows,
+      filters: {
+        search: q || "All",
+        active: activeFilter === "active" ? "Active" : activeFilter === "inactive" ? "Inactive" : "All",
+        designation: designationId == null ? "All" : String(designationId),
+      },
+      source: roster
+        ? `person master + designation master + ${roster.source}`
+        : "person master + designation master (HR roster unavailable)",
+    });
+    req.log.info(
+      { export: "organisation-people", sheets: workbookSheetEvidence(workbook), info: infoSheetEvidence(workbook) },
+      "organisation people export generated",
+    );
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="OrganisationPeople_${new Date().toISOString().slice(0, 10)}.xlsx"`,
+    );
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    req.log.error({ err }, "organisation people export failed");
+    res.status(500).json({ error: "Could not build the Organisation People export." });
   }
 });
 

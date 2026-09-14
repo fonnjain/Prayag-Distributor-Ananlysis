@@ -42,7 +42,7 @@ import { cn } from "@/lib/utils";
 import {
   Search, Lock, Unlock, ChevronDown, ChevronRight,
   Link2, AlertTriangle, CheckCircle2, Store, Users,
-  RefreshCw, ClipboardList, UserCheck, Lightbulb, TrendingUp, X,
+  RefreshCw, ClipboardList, UserCheck, Lightbulb, TrendingUp, X, Download,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -198,6 +198,29 @@ function useAdminSecret() {
     setSecretState(s);
   };
   return { secret, setSecret };
+}
+
+function downloadCustomerExport(filters: Record<string, string | undefined>): void {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value);
+  }
+  window.location.assign(`${BASE}/api/master/customers/export?${params.toString()}`);
+}
+
+function ExportCustomersButton({ filters }: { filters: Record<string, string | undefined> }) {
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="h-8 text-xs"
+      onClick={() => downloadCustomerExport(filters)}
+      title="Download all rows matching the active page filters"
+    >
+      <Download size={13} className="mr-1.5" />
+      Export Excel
+    </Button>
+  );
 }
 
 function usePersonList() {
@@ -581,6 +604,7 @@ function CustomersTab({ adminSecret }: { adminSecret: string }) {
               ))}
             </SelectContent>
           </Select>
+          <ExportCustomersButton filters={{ tab: "customers", q: debouncedQ, type: typeParam }} />
         </div>
         <div className="flex-1 overflow-y-auto">
           {isLoading && <div className="p-4 text-sm text-muted-foreground text-center">Loading…</div>}
@@ -881,6 +905,13 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
 
       {/* ── Main content ───────────────────────────────────────────────────── */}
       <div className="flex-1 min-w-0 flex flex-col">
+        <div className="flex justify-end px-4 py-2 border-b">
+          <ExportCustomersButton filters={{
+            tab: "unassigned",
+            type: typeParam,
+            territory_id: territoryParam,
+          }} />
+        </div>
 
         {/* ── How-to panel ── */}
         {!howToDismissed && (
@@ -1231,6 +1262,9 @@ function ReviewQueueTab({ adminSecret }: { adminSecret: string }) {
 
       {/* Right — queue list */}
       <div className="flex-1 min-w-0 overflow-y-auto">
+        <div className="flex justify-end px-4 py-2 border-b">
+          <ExportCustomersButton filters={{ tab: "review-queue" }} />
+        </div>
         {isLoading && <div className="p-6 text-sm text-muted-foreground">Loading…</div>}
         {!isLoading && items.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">

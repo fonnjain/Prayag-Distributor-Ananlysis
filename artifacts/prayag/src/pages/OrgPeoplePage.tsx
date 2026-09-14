@@ -33,6 +33,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertTriangle,
   ChevronRight,
+  Download,
   Loader2,
   Lock,
   Pencil,
@@ -531,7 +532,18 @@ export default function OrgPeoplePage() {
       {/* Page header */}
       <div className="px-6 py-4 border-b flex items-center justify-between shrink-0">
         <div>
-          <h1 className="text-lg font-semibold">Organisation / People</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-semibold">Organisation / People</h1>
+            <a
+              href={`${BASE}/people/export?q=${encodeURIComponent(query)}&active=${activeFilter}${designationFilter !== "all" ? `&designation_id=${encodeURIComponent(designationFilter)}` : ""}`}
+              download
+              data-testid="button-export-organisation-people"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium hover:bg-accent hover:text-accent-foreground"
+            >
+              <Download className="size-3.5" />
+              Export Excel
+            </a>
+          </div>
           <p className="text-sm text-muted-foreground">
             {peopleData ? `${peopleData.total} people` : "Organisation"} · Phase 2 of the editable master
           </p>

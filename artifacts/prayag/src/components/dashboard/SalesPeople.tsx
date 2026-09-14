@@ -6,8 +6,8 @@ import { trunc2 } from "@/lib/trunc";
 //   Column header is "Sales/Plan%" to name the denominator explicitly.
 // Current open month shows "In Progress" — never a bare 0%.
 // Closed month with sales=0 but ob>0: stateDashboard.ts sets notYetRecorded=true
-//   (sales-lag guard) so the Ach% cell shows "Not recorded" here without any
-//   additional display logic.  achPct() does not need to know about ob.
+//   (sales-lag guard). salesForDisplay masks that synthetic zero so both Sales
+//   and Sales/Plan% remain unavailable; achPct() never needs to know about OB.
 // Primary-role members (19) have no SOBR row → monthly cells show "—" (FY data only).
 // FY + month selection driven by the global filter context (GlobalFilterBar).
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -15,6 +15,8 @@ import { achBandText } from "@/lib/achievementBands";
 import { sumRange as sumRangeOver, achPct } from "@/lib/periodRange";
 import { useGlobalFilter, type FiscalMonthIdx, FISCAL_MONTH_NAMES } from "@/data/global-filter-context";
 import { SnapshotBanner, useSnapshotRefresh, type SnapshotMeta } from "./snapshotRefresh";
+import { Download } from "lucide-react";
+import { downloadSalesPeopleWorkbook, type SalesPeopleExportRow } from "@/lib/salesPeopleExport";
 
 const FISCAL_MONTHS = FISCAL_MONTH_NAMES;
 
@@ -36,6 +38,11 @@ type Member = {
   monthlySalesReceived: number[] | null;
   monthlyAchievement: number[] | null;
   monthlyNotYetRecorded: boolean[] | null;
+};
+
+type SalesPeopleMeta = SnapshotMeta & {
+  secondarySource?: string | null;
+  secondaryReadAt?: number | null;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -77,6 +84,28 @@ function isFutureMonth(fiscalIdx: number, fy: string): boolean {
 // Shared band scale — single source of truth in lib/achievementBands.ts.
 function achClass(pct: number | null): string {
   return achBandText(pct);
+}
+
+/**
+ * A zero in a calendar-closed month with positive OB is the dashboard's
+ * sales-lag marker, not a genuine zero. Keep entered positive values visible,
+ * but mask that synthetic zero so Sales/Plan remains unavailable as well.
+ */
+function salesForDisplay(member: Member): (number | null)[] | null {
+  if (!member.monthlySalesReceived) return null;
+  return member.monthlySalesReceived.map((value, index) =>
+    value === 0 && member.monthlyNotYetRecorded?.[index] ? null : value,
+  );
+}
+
+function unavailableReason(member: Member, figure: "plan" | "ob" | "sales"): string {
+  if (figure === "sales") {
+    return member.isPrimaryRole
+      ? "Sales is unavailable: primary-role members have no monthly row in the STATE HEAD DASHBOARD."
+      : "Sales has not been recorded in the STATE HEAD DASHBOARD for the selected period.";
+  }
+  if (figure === "ob") return "Order booking is unavailable for the selected period.";
+  return "No plan is recorded for the selected period.";
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -126,10 +155,11 @@ export default function SalesPeople() {
   }
 
   // Cold-start snapshot freshness — see snapshotRefresh.tsx.
-  const [snapMeta, setSnapMeta] = useState<SnapshotMeta | null>(null);
+  const [snapMeta, setSnapMeta] = useState<SalesPeopleMeta | null>(null);
+  const [exporting, setExporting] = useState(false);
   const dataUrl = `/api/mgmt/data?fy=${encodeURIComponent(fy)}&monthFrom=1&monthTo=12`;
   useSnapshotRefresh(snapMeta, dataUrl, (fresh) => {
-    const d = fresh as { rows: Member[]; meta?: SnapshotMeta };
+    const d = fresh as { rows: Member[]; meta?: SalesPeopleMeta };
     setMembers(d.rows ?? []);
     setSnapMeta(d.meta ?? null);
   });
@@ -143,7 +173,7 @@ export default function SalesPeople() {
         if (!r.ok) return r.json().then((e: { error?: string }) => { throw new Error(e.error ?? r.statusText); });
         return r.json();
       })
-      .then((d: { rows: Member[]; meta?: SnapshotMeta }) => {
+      .then((d: { rows: Member[]; meta?: SalesPeopleMeta }) => {
         setMembers(d.rows ?? []);
         setSnapMeta(d.meta ?? null);
       })
@@ -204,11 +234,11 @@ export default function SalesPeople() {
         av = sumRange(a.monthlyOrderBooked);
         bv = sumRange(b.monthlyOrderBooked);
       } else if (sortKey === "sales") {
-        av = sumRange(a.monthlySalesReceived);
-        bv = sumRange(b.monthlySalesReceived);
+        av = sumRange(salesForDisplay(a));
+        bv = sumRange(salesForDisplay(b));
       } else if (sortKey === "ach") {
-        av = achPct(sumRange(a.monthlySalesReceived), sumRange(a.monthlyPlan));
-        bv = achPct(sumRange(b.monthlySalesReceived), sumRange(b.monthlyPlan));
+        av = achPct(sumRange(salesForDisplay(a)), sumRange(a.monthlyPlan));
+        bv = achPct(sumRange(salesForDisplay(b)), sumRange(b.monthlyPlan));
       }
       if (av === null && bv === null) return 0;
       if (av === null) return 1;
@@ -242,18 +272,110 @@ export default function SalesPeople() {
 
   // Summary totals
   const summary = useMemo(() => {
-    let plan = 0, ob = 0, sales = 0, count = 0;
+    let plan = 0, ob = 0, sales = 0, count = 0, obMembers = 0;
     for (const r of sortedRows) {
       const p = sumRange(r.monthlyPlan) ?? 0;
-      const o = sumRange(r.monthlyOrderBooked) ?? 0;
-      const s = sumRange(r.monthlySalesReceived) ?? 0;
+      const rawOb = sumRange(r.monthlyOrderBooked);
+      const o = rawOb ?? 0;
+      const s = sumRange(salesForDisplay(r)) ?? 0;
       plan += p; ob += o; sales += s;
       if (p > 0) count++;
+      if (rawOb != null) obMembers++;
     }
-    return { plan, ob, sales, count };
+    return { plan, ob, sales, count, obMembers };
   }, [sortedRows, sumRange]);
 
   const summaryAch = achPct(summary.sales, summary.plan);
+
+  const salesCoverage = useMemo(() => {
+    let available = 0;
+    let unavailable = 0;
+    let genuineZero = 0;
+    for (const row of sortedRows) {
+      const value = sumRange(salesForDisplay(row));
+      if (value == null) unavailable++;
+      else if (value === 0) genuineZero++;
+      else available++;
+    }
+    return { available, unavailable, genuineZero, total: sortedRows.length };
+  }, [sortedRows, sumRange]);
+
+  const exportRows = useMemo<SalesPeopleExportRow[]>(
+    () => sortedRows.map((row) => {
+      const plan = sumRange(row.monthlyPlan);
+      const ob = sumRange(row.monthlyOrderBooked);
+      const sales = sumRange(salesForDisplay(row));
+      return {
+        name: row.name,
+        stateHead: row.stateHead,
+        plan,
+        ob,
+        sales,
+        achievementPct: achPct(sales, plan),
+        isLeft: row.isLeft,
+        isPrimaryRole: row.isPrimaryRole,
+        reasons: {
+          plan: unavailableReason(row, "plan"),
+          ob: unavailableReason(row, "ob"),
+          sales: unavailableReason(row, "sales"),
+          achievementPct: sales == null
+            ? unavailableReason(row, "sales")
+            : plan == null || plan <= 0
+              ? "Achievement is unavailable because no positive plan is recorded."
+              : undefined,
+        },
+      };
+    }),
+    [sortedRows, sumRange],
+  );
+
+  async function exportExcel(): Promise<void> {
+    setExporting(true);
+    try {
+      const provisional = Array.from(
+        { length: idxTo - idxFrom + 1 },
+        (_, i) => idxFrom + i,
+      )
+        .filter((fi) => isCurrentCalMonth(fi, fy) || isFutureMonth(fi, fy))
+        .map((fi) => FISCAL_MONTHS[fi])
+        .join(", ");
+      await downloadSalesPeopleWorkbook({
+        fy,
+        period: effectivePeriodLabel,
+        filters: [
+          `State head=${selectedHead}`,
+          `Member=${selectedMember}`,
+          `Search=${search.trim() || "(none)"}`,
+        ].join("; "),
+        showPrimary,
+        rows: exportRows,
+        summary: {
+          membersWithPlan: summary.count,
+          obMembers: summary.obMembers,
+          plan: summary.plan,
+          ob: summary.ob,
+          sales: summary.sales,
+          salesAvailable: salesCoverage.available,
+          salesUnavailable: salesCoverage.unavailable,
+          salesGenuineZero: salesCoverage.genuineZero,
+        },
+        sources: {
+          plan: "STATE HEAD DASHBOARD monthly Plan; Target Master fallback for non-SHDA members",
+          ob: "STATE HEAD DASHBOARD monthly Ordered Amount",
+          sales: "STATE HEAD DASHBOARD monthly Sales Received",
+          achievement: "Sales Received ÷ Plan, recomputed by the app",
+        },
+        provisionalMonths: provisional || "None in selected period",
+        dataReadAt: snapMeta?.secondaryReadAt
+          ? new Date(snapMeta.secondaryReadAt).toLocaleString("en-IN")
+          : snapMeta?.snapshotSavedAt
+            ? new Date(snapMeta.snapshotSavedAt).toLocaleString("en-IN")
+            : "Not supplied by source",
+      });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -316,6 +438,16 @@ export default function SalesPeople() {
           />
           Show primary-role members
         </label>
+        <button
+          type="button"
+          onClick={() => void exportExcel()}
+          disabled={exporting}
+          className="inline-flex items-center gap-1.5 rounded border border-border px-3 py-1 text-xs font-medium hover:bg-muted/40 disabled:opacity-50"
+          data-testid="button-export-excel-sales-people"
+        >
+          <Download className="h-3.5 w-3.5" />
+          {exporting ? "Preparing..." : "Export Excel"}
+        </button>
         <span className="text-xs text-muted-foreground ml-auto whitespace-nowrap">
           {sortedRows.length} members
         </span>
@@ -340,19 +472,43 @@ export default function SalesPeople() {
 
       {/* Summary row */}
       {!futureMonth && (
+        <>
         <div className="grid grid-cols-4 gap-2">
           {[
-            { label: "Members with plan", value: summary.count.toString() },
-            { label: `Plan (${effectivePeriodLabel})`, value: fmt(summary.plan) },
-            { label: `OB (${effectivePeriodLabel})`, value: fmt(summary.ob) },
-            { label: `Sales (${effectivePeriodLabel})`, value: fmt(summary.sales) },
+            {
+              label: "Members with plan",
+              value: summary.count.toString(),
+              detail: `${summary.count} of ${sortedRows.length} filtered members; source: STATE HEAD DASHBOARD Plan (Target Master fallback)`,
+            },
+            {
+              label: `Plan (${effectivePeriodLabel})`,
+              value: fmt(summary.plan),
+              detail: `Across ${summary.count} members with a recorded positive plan; STATE HEAD DASHBOARD Plan; Target Master fallback`,
+            },
+            {
+              label: `OB (${effectivePeriodLabel})`,
+              value: fmt(summary.ob),
+              detail: `${summary.obMembers} of ${sortedRows.length} members; STATE HEAD DASHBOARD Ordered Amount`,
+            },
+            {
+              label: `Sales (${effectivePeriodLabel})`,
+              value: fmt(summary.sales),
+              detail: `Sales ${fmt(summary.sales)} across ${salesCoverage.available + salesCoverage.genuineZero} of ${salesCoverage.total} members; ${salesCoverage.available} available, ${salesCoverage.unavailable} unavailable, ${salesCoverage.genuineZero} genuine zero; STATE HEAD DASHBOARD Sales Received`,
+            },
           ].map((t) => (
             <div key={t.label} className="rounded border bg-card p-3">
               <p className="text-xs text-muted-foreground">{t.label}</p>
               <p className="text-base font-semibold tabular-nums mt-0.5">{t.value}</p>
+              <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{t.detail}</p>
             </div>
           ))}
         </div>
+        <p className="text-[11px] text-muted-foreground">
+          Sales query: <span className="font-mono">GET /api/mgmt/data?fy={fy}&amp;monthFrom={effectivePeriodFrom}&amp;monthTo={effectivePeriodTo}</span>.
+          Sales is the <strong>Sales Received</strong> field from the STATE HEAD DASHBOARD, not OB.
+          A blank-grey Sales value means no value was returned or recorded for this period; it is not zero.
+        </p>
+        </>
       )}
 
       {/* Table */}
@@ -392,7 +548,7 @@ export default function SalesPeople() {
               {sortedRows.map((r) => {
                 const plan = sumRange(r.monthlyPlan);
                 const ob = sumRange(r.monthlyOrderBooked);
-                const sales = sumRange(r.monthlySalesReceived);
+                const sales = sumRange(salesForDisplay(r));
                 // "Not recorded" is a single-month concept; a range simply
                 // sums the months that have been recorded.
                 const notRecorded = singleMonth ? (r.monthlyNotYetRecorded?.[monthIdx] ?? false) : false;
@@ -412,16 +568,24 @@ export default function SalesPeople() {
                       <span className="block text-xs text-muted-foreground md:hidden">{r.stateHead}</span>
                     </td>
                     <td className="px-3 py-2 text-muted-foreground text-xs hidden md:table-cell">{r.stateHead}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-sm">{plan != null && plan > 0 ? fmt(plan) : "—"}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-sm">{ob != null && ob > 0 ? fmt(ob) : "—"}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-sm">{sales != null && sales > 0 ? fmt(sales) : "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-sm">
+                      {plan != null ? fmt(plan) : <span className="text-muted-foreground" title={unavailableReason(r, "plan")}>—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-sm">
+                      {ob != null ? fmt(ob) : <span className="text-muted-foreground" title={unavailableReason(r, "ob")}>—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-sm">
+                      {sales != null ? fmt(sales) : <span className="text-muted-foreground" title={unavailableReason(r, "sales")}>—</span>}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums text-sm">
                       {currentMonth || notRecorded ? (
                         <span className="text-xs text-amber-600 dark:text-amber-400">
                           {notRecorded ? "Not recorded" : "In progress"}
                         </span>
+                      ) : sales == null ? (
+                        <span className="text-muted-foreground" title={unavailableReason(r, "sales")}>—</span>
                       ) : plan == null || plan <= 0 ? (
-                        <span className="text-muted-foreground">No plan</span>
+                        <span className="text-muted-foreground" title="Achievement is unavailable because no positive plan is recorded.">No plan</span>
                       ) : (
                         <span className={achClass(ach)}>
                           {ach != null ? `${trunc2(ach)}%` : "—"}

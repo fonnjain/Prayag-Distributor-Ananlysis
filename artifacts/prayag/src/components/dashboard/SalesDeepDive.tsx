@@ -2437,9 +2437,18 @@ export default function SalesDeepDive() {
     ? allMonths.filter((m) => covered.has(m.month as FyMonth))
     : allMonths;
   const dateFilterLabel    = activeDateRange?.label ?? null;
+  const coverageExportParams = new URLSearchParams({
+    fy,
+    stateHead: selectedHead,
+    member: selectedMemberKey,
+    periodMonths: covered
+      ? ([...covered].map((m) => FY_MONTH_ORDER.indexOf(m) + 1).sort((a, b) => a - b).join(",") || "none")
+      : "",
+  });
 
   const downloadWorkbook = useCallback(async () => {
-    if (!kpis || !selectedMemberKey || exporting) return;
+    const headScope = Boolean(selectedHead && !selectedMemberKey);
+    if ((!kpis || !selectedMemberKey) && !headScope) return;
     setExporting(true);
     setExportError(null);
     try {
@@ -2448,7 +2457,7 @@ export default function SalesDeepDive() {
       const params = new URLSearchParams();
       params.set("fy", fy);
       params.set("stateHead", selectedHead);
-      params.set("member", selectedMemberKey);
+      if (selectedMemberKey) params.set("member", selectedMemberKey);
       params.set("periodPreset", dateFilter.preset ?? "");
       params.set("periodMonth", dateFilter.preset === "month" ? dateFilter.month : "");
       params.set("fromDate", dateFilter.fromDate);
@@ -2472,7 +2481,7 @@ export default function SalesDeepDive() {
       const blob = await response.blob();
       const disposition = response.headers.get("content-disposition") ?? "";
       const filename = disposition.match(/filename="?([^"]+)"?/i)?.[1]
-        ?? `SalesDeepDive_${kpis.name}_${fy}.xlsx`;
+        ?? `SalesDeepDive_${headScope ? selectedHead : kpis?.name}_${fy}.xlsx`;
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -2538,6 +2547,15 @@ export default function SalesDeepDive() {
       {/* Date range filter */}
       <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/50">
         <DateFilterBar fyLabel={fy} value={dateFilter} onChange={setDateFilter} />
+        <a
+          href={`${API}/mgmt/coverage-review/export?${coverageExportParams.toString()}`}
+          download
+          data-testid="button-export-operational-coverage"
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-xs font-medium hover:bg-muted/50"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          Export coverage review
+        </a>
       </div>
 
       {/* Quota wait banner */}
@@ -2564,7 +2582,29 @@ export default function SalesDeepDive() {
       {/* State head selected, no member → team summary panel */}
       {!kpis && !loading && !error && selectedHead && teamSummary && (
         <>
-          <TeamSummaryPanel summary={teamSummary} dataReadAt={dataReadAt} />
+          <div className="space-y-3">
+            <TeamSummaryPanel summary={teamSummary} dataReadAt={dataReadAt} />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={downloadWorkbook}
+                disabled={exporting}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium hover:bg-muted/50 disabled:cursor-wait disabled:opacity-60"
+                data-testid="button-download-sales-deep-dive-head"
+                title="Exports every member under this state head into five auditable sheets."
+              >
+                {exporting
+                  ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                  : <Download className="h-3 w-3" aria-hidden="true" />}
+                {exporting ? "Preparing…" : "Download Team Excel"}
+              </button>
+              {exportError && (
+                <span className="text-xs text-destructive" role="alert">
+                  Excel export failed: {exportError}
+                </span>
+              )}
+            </div>
+          </div>
           <RetailerDriftPanel fy={fy} stateHead={selectedHead} />
         </>
       )}

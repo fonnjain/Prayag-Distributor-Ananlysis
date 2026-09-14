@@ -1099,6 +1099,23 @@ export async function loadMemberTargetSnapshots(
   }));
 }
 
+/**
+ * Return the fully resolved Data-tab rows for a selected state head.  The
+ * member-level export must remain unchanged, so this narrow accessor is used
+ * by the additional head-scope export instead of adding a second payload to
+ * the existing deep-dive response.
+ */
+export async function loadMemberKpisForStateHead(
+  fy: string,
+  stateHead?: string,
+): Promise<MemberKpis[] | null> {
+  const entry = await loadAllMembers(fy);
+  if (!entry) return null;
+  return stateHead
+    ? entry.allMembers.filter((member) => member.stateHead === stateHead)
+    : entry.allMembers;
+}
+
 async function loadAllMembers(fy: string): Promise<CacheEntry | null> {
   clearExpired();
   const hit = _cache.get(fy);

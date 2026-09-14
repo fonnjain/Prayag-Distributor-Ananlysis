@@ -23,6 +23,8 @@ export type HrSfaRecord = {
   totalNonLeadVisits: number | null;
   activePartiesVisits: number | null;
   businessReceivedVisits: number | null;
+  /** True when more than one source row collapsed to this normalized identity. */
+  identityAmbiguous?: boolean;
   visitedNoBusinessReceived: number | null;
   noVisitNoBusinessReceived: number | null;
   totalWorkingHours: number | null;
@@ -121,7 +123,7 @@ export async function loadHrSfaDashboard(): Promise<Map<string, HrSfaRecord>> {
 
     const g = (idx: number): unknown => (idx >= 0 ? r[idx] : undefined);
 
-    data.set(nk, {
+    const record: HrSfaRecord = {
       ctcMonthly:                toNum(g(iCtcMonthly)),
       workingDays:               toNum(g(iWorkingDays)),
       totalVisits:               toNum(g(iTotalVisits)),
@@ -144,7 +146,11 @@ export async function loadHrSfaDashboard(): Promise<Map<string, HrSfaRecord>> {
       costRatioPct:              toPct(g(iCostRatio)),
       designation:               toStr(g(iDesignation)),
       empCode:                   toStr(g(iEmpCode)),
-    });
+    };
+    const prior = data.get(nk);
+    data.set(nk, prior
+      ? { ...record, identityAmbiguous: true }
+      : record);
   }
 
   cache = { data, at: Date.now() };

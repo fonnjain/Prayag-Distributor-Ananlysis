@@ -47,6 +47,7 @@ import {
 import {
   loadDeepDiveData,
   loadMemberTargetSnapshots,
+  loadMemberKpisForStateHead,
   normSecKey,
   loadRegistry,
   getRegistry,
@@ -74,7 +75,19 @@ import {
   type DeepDiveMonthlyRow,
   type DeepDiveBenchmark,
 } from "../lib/mgmt/deepDiveExport.js";
+import {
+  buildStateHeadDeepDiveWorkbook,
+  resolveAuthoritativePeriodValue,
+  stateHeadWorkbookEvidence,
+  type StateHeadPeriodMember,
+} from "../lib/mgmt/stateHeadDeepDiveExport.js";
 import { provisionalMonthsExportInfo } from "../lib/exportInfo.js";
+import {
+  buildCoverageReviewWorkbook,
+  infoSheetEvidence,
+  mapOperationalCoverageKpis,
+  workbookSheetEvidence,
+} from "../lib/organisationCoverageExport.js";
 
 const router: IRouter = Router();
 
@@ -611,6 +624,139 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       error:
         "Could not load dashboard data. Google Sheets may be unavailable; try again in a minute.",
     });
+  }
+});
+
+// ── Operational Coverage Review export ───────────────────────────────────────
+// This is intentionally built from the same period-aware member payload as the
+// Management/Sales Deep Dive surfaces.  It must not use canonical coverage
+// tables: those are a separate, read-only evidence domain.
+router.get(["/mgmt/coverage-review/export", "/master/coverage-review/export"], async (req: Request, res: Response): Promise<void> => {
+  const fy =
+    typeof req.query.fy === "string" && req.query.fy.trim()
+      ? req.query.fy.trim()
+      : await defaultMgmtFy();
+  if (!FY_PATTERN.test(fy)) {
+    res.status(400).json({ error: "fy must look like 2026-27" });
+    return;
+  }
+  const intQ = (key: string, lo: number, hi: number, fallback: number): number => {
+    const value = Number(req.query[key]);
+    return Number.isFinite(value) && value >= lo && value <= hi ? Math.round(value) : fallback;
+  };
+  const monthFrom = intQ("monthFrom", 1, 12, 1);
+  const monthTo = intQ("monthTo", monthFrom, 12, 12);
+  const requestedMonths = typeof req.query.periodMonths === "string"
+    ? req.query.periodMonths.split(",").map(Number).filter((month) => Number.isInteger(month) && month >= 1 && month <= 12)
+    : [];
+  const effectiveMonthFrom = requestedMonths.length ? Math.min(...requestedMonths) : monthFrom;
+  const effectiveMonthTo = requestedMonths.length ? Math.max(...requestedMonths) : monthTo;
+  const stateHead = typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
+  const member = typeof req.query.member === "string" ? req.query.member.trim() : "";
+  const search = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+
+  try {
+    // Coverage tiles on the page come from MemberKpis/Data-tab fields, not
+    // /mgmt/data's smaller roster row. This keeps export parity with the page:
+    // totalRetailers, visitedRetailers, nonVisitedRetailers,
+    // newPartyOrderBooking, and businessPerRetailer.
+    const kpis = await loadMemberKpisForStateHead(fy, stateHead || undefined);
+    const hrSfa = await loadHrSfaDashboard().catch(() => new Map<string, HrSfaRecord>());
+    const rawRows = (kpis ?? []).filter((row) => {
+      if (member && row.normKey !== member) return false;
+      if (search && !row.name.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    const byMember = rawRows.map((row) => mapOperationalCoverageKpis({
+      ...row,
+      // HR/SFA uses the same normSecKey identity as the management assembly.
+      // Do not fall back to display-name matching: an absent or ambiguous
+      // normalized identity must remain UNKNOWN.
+      hrSfa: hrSfa.get(row.normKey) ?? null,
+    }));
+    const headMap = new Map<string, ReturnType<typeof mapOperationalCoverageKpis>[]>();
+    for (const row of byMember) {
+      const bucket = headMap.get(row.stateHead) ?? [];
+      bucket.push(row);
+      headMap.set(row.stateHead, bucket);
+    }
+    const sumKnown = (rows: ReturnType<typeof mapOperationalCoverageKpis>[], key: keyof Pick<ReturnType<typeof mapOperationalCoverageKpis>, "retailers" | "visited" | "notVisited" | "partiesGivingBusiness" | "businessAmount">): { value: number | null; state: "VALUE" | "ZERO" | "UNKNOWN" | "INCOMPLETE"; source: string } => {
+      const values = rows.map((row) => row[key]).filter((value): value is number => value != null);
+      const value = values.length ? values.reduce((sum, item) => sum + item, 0) : null;
+      const sourceKey = {
+        retailers: "retailersSource",
+        visited: "visitedSource",
+        notVisited: "notVisitedSource",
+        partiesGivingBusiness: "partiesGivingBusinessSource",
+        businessAmount: "businessAmountSource",
+      }[key];
+      const sourceLabels = [...new Set(rows.map((row) => (row as unknown as Record<string, unknown>)[sourceKey]).filter(Boolean))].join("; ");
+      return {
+        value,
+        state: values.length === 0 ? "UNKNOWN" : values.length < rows.length ? "INCOMPLETE" : value === 0 ? "ZERO" : "VALUE",
+        source: values.length < rows.length
+          ? `${sourceLabels}; known subset ${values.length}/${rows.length}; incomplete head population`
+          : `${sourceLabels}; sum of all selected member values`,
+      };
+    };
+    const byHead = [...headMap.entries()].map(([head, rows]) => ({
+      stateHead: head,
+      member: `${rows.length} member${rows.length === 1 ? "" : "s"}`,
+      retailers: sumKnown(rows, "retailers").value,
+      retailersSource: sumKnown(rows, "retailers").source,
+      visited: sumKnown(rows, "visited").value,
+      visitedSource: sumKnown(rows, "visited").source,
+      notVisited: sumKnown(rows, "notVisited").value,
+      notVisitedSource: sumKnown(rows, "notVisited").source,
+      partiesGivingBusiness: sumKnown(rows, "partiesGivingBusiness").value,
+      partiesGivingBusinessSource: sumKnown(rows, "partiesGivingBusiness").source,
+      businessAmount: sumKnown(rows, "businessAmount").value,
+      businessAmountSource: sumKnown(rows, "businessAmount").source,
+      businessPerRetailer: null,
+      businessPerRetailerSource: "Unavailable at head scope; no complete operands for a derived ratio",
+      states: {
+        retailers: sumKnown(rows, "retailers").state,
+        visited: sumKnown(rows, "visited").state,
+        notVisited: sumKnown(rows, "notVisited").state,
+        partiesGivingBusiness: sumKnown(rows, "partiesGivingBusiness").state,
+        businessAmount: sumKnown(rows, "businessAmount").state,
+        businessPerRetailer: "UNKNOWN" as const,
+      },
+    }));
+    const dataReadAt = new Date().toISOString();
+    const workbook = buildCoverageReviewWorkbook({
+      byHead,
+      byMember,
+      filters: {
+        stateHead: stateHead || "All",
+        member: member || "All",
+        search: search || "All",
+      },
+      fy,
+      period: requestedMonths.length
+        ? `Fiscal months ${requestedMonths.sort((a, b) => a - b).join(", ")}`
+        : `Fiscal months ${effectiveMonthFrom}–${effectiveMonthTo}`,
+      sources: "Member figures: STATE HEAD DASHBOARD — Data tab fields shown on Sales Deep Dive; parties-giving-business: HR/SFA Dashboard business received parties joined by normSecKey.",
+      dataReadAt,
+    });
+    req.log.info(
+      { export: "operational-coverage-review", sheets: workbookSheetEvidence(workbook), info: infoSheetEvidence(workbook) },
+      "operational coverage review export generated",
+    );
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="CoverageReview_${fy}_${new Date().toISOString().slice(0, 10)}.xlsx"`,
+    );
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err, fy }, "operational coverage review export failed");
+    res.status(500).json({ error: "Could not build the operational Coverage Review export." });
   }
 });
 
@@ -1421,7 +1567,7 @@ router.get("/mgmt/deep-dive/export", async (req: Request, res: Response): Promis
     const stateHeadRaw = typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
     const stateHead = stateHeadRaw || undefined;
     const memberRaw = typeof req.query.member === "string" ? req.query.member.trim() : "";
-    if (!memberRaw) {
+    if (!memberRaw && !stateHead) {
       res.status(400).json({ error: "member is required" });
       return;
     }
@@ -1462,6 +1608,185 @@ router.get("/mgmt/deep-dive/export", async (req: Request, res: Response): Promis
       fromDate,
       toDate,
     };
+
+    // Section C: an additional head-scope export.  This branch intentionally
+    // runs before member identity resolution and leaves the established
+    // member-level export path below byte-for-byte in scope and shape.
+    if (!memberRaw && stateHead) {
+      let headResult = await loadDeepDiveData(fy, stateHead, undefined, { skipExtras: true });
+      let canonicalHead = stateHead;
+      if (!headResult.teamSummary) {
+        // State-head options are normally canonical already, but resolve
+        // case/spacing differences defensively without guessing a member.
+        const allResult = await loadDeepDiveData(fy, undefined, undefined, { skipExtras: true });
+        const resolvedHead = allResult.stateHeads.find((candidate) => normName(candidate) === normName(stateHead));
+        if (resolvedHead) {
+          canonicalHead = resolvedHead;
+          headResult = await loadDeepDiveData(fy, canonicalHead, undefined, { skipExtras: true });
+        }
+      }
+      if (headResult.error && !headResult.teamSummary) throw new Error(headResult.error);
+      const headKpis = await loadMemberKpisForStateHead(fy, canonicalHead);
+      if (!headResult.teamSummary || !headKpis || headKpis.length === 0) {
+        res.status(404).json({ error: `No members found under state head ${stateHead}.` });
+        return;
+      }
+
+      const closedMonths = closedReportingMonthCount(fy);
+      let periodMembers: Record<string, StateHeadPeriodMember> | undefined;
+      let periodReportingMonthCount: number | null = null;
+      let periodTeamOperands: {
+        headlineOb: number | null;
+        headlineTarget: number | null;
+        lflOb: number | null;
+        lflTarget: number | null;
+      } | undefined;
+      if (periodMonths !== undefined) {
+        const monthlyRows = await db
+          .select({
+            headCanon: secondaryHeadMonths.headCanon,
+            monthIdx: secondaryHeadMonths.monthIdx,
+            planAmount: secondaryHeadMonths.planAmount,
+            orderedAmount: secondaryHeadMonths.orderedAmount,
+            receivedAmount: secondaryHeadMonths.receivedAmount,
+          })
+          .from(secondaryHeadMonths)
+          .where(and(
+            eq(secondaryHeadMonths.fy, fy),
+            eq(secondaryHeadMonths.stateHead, canonicalHead),
+          ))
+          .orderBy(secondaryHeadMonths.monthIdx);
+        const rowsByMember = new Map<string, typeof monthlyRows>();
+        for (const row of monthlyRows) {
+          const rows = rowsByMember.get(row.headCanon);
+          if (rows) rows.push(row);
+          else rowsByMember.set(row.headCanon, [row]);
+        }
+        // UI/API fiscal month indexes are 1=Apr..12=Mar; the authoritative
+        // secondary_head_month table stores 0=Apr..11=Mar.
+        const selectedSet = new Set(periodMonths.map((month) => month - 1));
+        const selectedClosedMonths = periodMonths.filter((month) => month <= closedMonths).length;
+        periodReportingMonthCount = selectedClosedMonths > 0 ? selectedClosedMonths : null;
+        const selectedValue = (
+          rows: typeof monthlyRows,
+          field: "planAmount" | "orderedAmount" | "receivedAmount",
+          label: string,
+        ): { value: number | null; reason: string } => {
+          const resolved = resolveAuthoritativePeriodValue(
+            rows.map((row) => ({ monthIdx: Number(row.monthIdx), value: row[field] == null ? null : Number(row[field]) })),
+            periodMonths,
+            label,
+          );
+          const exactMonthSet = new Set(rows.map((row) => Number(row.monthIdx)));
+          const exactRows = rows.length === periodMonths.length
+            && exactMonthSet.size === periodMonths.length
+            && [...selectedSet].every((month) => exactMonthSet.has(month));
+          if (field === "planAmount" && exactRows && rows.every((row) => row[field] == null)) {
+            return { value: null, reason: "No target recorded for the selected period." };
+          }
+          return resolved;
+        };
+        periodMembers = {};
+        for (const member of headKpis) {
+          const rows = (rowsByMember.get(member.normKey) ?? [])
+            .filter((row) => selectedSet.has(Number(row.monthIdx)));
+          const targetResult = selectedValue(rows, "planAmount", "target");
+          const obResult = selectedValue(rows, "orderedAmount", "order booking");
+          const salesResult = selectedValue(rows, "receivedAmount", "sales");
+          const explicitNoTarget = targetResult.reason === "No target recorded for the selected period.";
+          periodMembers[member.normKey] = {
+            target: explicitNoTarget ? 0 : targetResult.value,
+            orderBooking: obResult.value,
+            sales: salesResult.value,
+            source: "secondary_head_month authoritative monthly array",
+            targetReason: targetResult.value == null ? targetResult.reason : undefined,
+            orderBookingReason: obResult.value == null ? obResult.reason : undefined,
+            salesReason: salesResult.value == null ? salesResult.reason : undefined,
+            taBill: null,
+            taReason: "T.A. is supplied only as a YTD Data-tab field and cannot be period-resolved.",
+            coverageReason: "Coverage counts are supplied only as YTD Data-tab fields and cannot be period-resolved.",
+          };
+        }
+        const activePeriodMembers = headKpis.filter((member) => !member.isLeft);
+        const noTarget = (member: typeof headKpis[number]): boolean =>
+          periodMembers?.[member.normKey].target == null
+          && periodMembers?.[member.normKey].targetReason?.startsWith("No target recorded") === true;
+        const knownTargets = activePeriodMembers.filter((member) => !noTarget(member));
+        const headlineOb = activePeriodMembers.every((member) => periodMembers?.[member.normKey].orderBooking != null)
+          ? activePeriodMembers.reduce((sum, member) => sum + periodMembers![member.normKey].orderBooking!, 0)
+          : null;
+        const headlineTarget = activePeriodMembers.every((member) => noTarget(member) || periodMembers?.[member.normKey].target != null)
+          ? knownTargets.reduce((sum, member) => sum + periodMembers![member.normKey].target!, 0)
+          : null;
+        const lflMembers = activePeriodMembers.filter((member) => periodMembers![member.normKey].target != null
+          && periodMembers![member.normKey].target! > 0);
+        const unknownTarget = activePeriodMembers.some((member) =>
+          periodMembers?.[member.normKey].target == null && !noTarget(member));
+        const lflOb = !unknownTarget && lflMembers.every((member) => periodMembers?.[member.normKey].orderBooking != null)
+          ? lflMembers.reduce((sum, member) => sum + periodMembers![member.normKey].orderBooking!, 0)
+          : null;
+        const lflTarget = !unknownTarget && lflMembers.every((member) => periodMembers?.[member.normKey].target != null)
+          ? lflMembers.reduce((sum, member) => sum + periodMembers![member.normKey].target!, 0)
+          : null;
+        periodTeamOperands = { headlineOb, headlineTarget, lflOb, lflTarget };
+      }
+      const snapshots = await loadMemberTargetSnapshots(fy);
+      const benchmarkRatios = periodMonths === undefined ? (snapshots ?? [])
+        .filter((member) => !member.isLeft && member.saleAvailable && member.sale > 0 && member.ctcMonthly != null)
+        .map((member) => ((member.ctcMonthly! * closedMonths) + (member.taBillYtd ?? 0)) / member.sale) : [];
+      const benchmarkReturns = periodMonths === undefined ? (snapshots ?? [])
+        .filter((member) => !member.isLeft && member.saleAvailable && member.sale > 0 && member.ctcMonthly != null)
+        .map((member) => member.sale / ((member.ctcMonthly! * closedMonths) + (member.taBillYtd ?? 0)))
+        .filter((value) => Number.isFinite(value)) : [];
+      const median = (values: number[]): number | null => {
+        if (values.length === 0) return null;
+        const ordered = [...values].sort((a, b) => a - b);
+        const middle = Math.floor(ordered.length / 2);
+        return ordered.length % 2 === 0
+          ? (ordered[middle - 1] + ordered[middle]) / 2
+          : ordered[middle];
+      };
+      const companyBenchmark = {
+        costRatio: median(benchmarkRatios),
+        returnPerRupee: median(benchmarkReturns),
+        source: "Resolved Data-tab member target snapshots",
+        population: periodMonths === undefined
+          ? "All active company members with cost and sales"
+          : "Period-specific company benchmark unavailable; source snapshots are YTD",
+        peerCount: benchmarkRatios.length,
+      };
+      const workbook = buildStateHeadDeepDiveWorkbook({
+        fy,
+        stateHead: canonicalHead,
+        periodLabel,
+        periodMonths,
+        members: headKpis,
+        teamSummary: headResult.teamSummary,
+        reportingMonthCount: closedMonths,
+        periodMembers,
+        periodReportingMonthCount,
+        periodTeamOperands,
+        dataReadAt: headResult.dataReadAt,
+        provisionalMonths: await provisionalMonthsExportInfo(fy),
+        fromDbSnapshot: headResult.fromDbSnapshot,
+        stale: headResult.stale,
+        companyBenchmark,
+        sources: {
+          dashboard: "Resolved STATE HEAD DASHBOARD Data tab",
+          cost: "Resolved STATE HEAD DASHBOARD Data tab cost fields",
+          coverage: "Resolved STATE HEAD DASHBOARD Data tab coverage fields",
+        },
+      });
+      const evidence = stateHeadWorkbookEvidence(workbook);
+      req.log.info({ evidence, fy, stateHead: canonicalHead }, "mgmt/deep-dive head export generated");
+      const bytes = Buffer.from(await workbook.xlsx.writeBuffer());
+      const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+      const filename = `SalesDeepDive_${safe(canonicalHead)}_${fy}_${safe(period.label)}_Team.xlsx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.end(bytes);
+      return;
+    }
 
     // Keep export identity resolution byte-for-byte aligned with the normal
     // deep-dive route. In particular, an ambiguous registry name is never
