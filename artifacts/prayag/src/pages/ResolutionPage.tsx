@@ -17,7 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   buildResolutionExportDocument, filterResolutionItems, groupResolutionItems, normalizeResolutionItem, RESOLUTION_EXPORT_HEADERS, sortResolutionItems,
-  type ResolutionItem, type ResolutionSort,
+  type ResolutionItem, type ResolutionPriority, type ResolutionSort,
 } from "@/lib/resolutionItems";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -28,7 +28,7 @@ type ResolutionForm = {
   code: string; type: "HOLD" | "PENDING"; title: string; category: string;
   fiscalYear: string; month: string; scopeProduct: string; scopeMeasure: string;
   reason: string; evidence: string; valueAtStake: string; raisedOn: string;
-  raisedBy: string; owner: string; blocksApi: boolean;
+  raisedBy: string; owner: string; priority: ResolutionPriority; blocksApi: boolean;
 };
 
 type ResolveForm = { status: "resolved" | "answered" | "accepted-as-is"; resolutionNote: string };
@@ -37,7 +37,7 @@ const emptyForm: ResolutionForm = {
   code: "", type: "PENDING", title: "", category: "data quality", fiscalYear: "",
   month: "", scopeProduct: "", scopeMeasure: "", reason: "", evidence: "",
   valueAtStake: "", raisedOn: new Date().toISOString().slice(0, 10),
-  raisedBy: "", owner: "", blocksApi: false,
+  raisedBy: "", owner: "", priority: "medium", blocksApi: false,
 };
 
 function formFor(item?: ResolutionItem | null): ResolutionForm {
@@ -47,7 +47,7 @@ function formFor(item?: ResolutionItem | null): ResolutionForm {
     fiscalYear: item.fiscalYear ?? "", month: item.month ?? "",
     scopeProduct: item.scopeProduct ?? "", scopeMeasure: item.scopeMeasure ?? "",
     reason: item.reason, evidence: item.evidence, valueAtStake: item.valueAtStake === null ? "" : String(item.valueAtStake),
-    raisedOn: item.raisedOn, raisedBy: item.raisedBy, owner: item.owner, blocksApi: item.blocksApi,
+    raisedOn: item.raisedOn, raisedBy: item.raisedBy, owner: item.owner, priority: item.priority ?? "medium", blocksApi: item.blocksApi,
   };
 }
 
@@ -57,7 +57,7 @@ function createPayload(form: ResolutionForm): Record<string, unknown> {
     fiscalYear: form.fiscalYear || null, month: form.month || null, scopeProduct: form.scopeProduct || null,
     scopeMeasure: form.type === "HOLD" ? form.scopeMeasure : null, reason: form.reason, evidence: form.evidence,
     valueAtStake: form.valueAtStake === "" ? null : Number(form.valueAtStake), raisedOn: form.raisedOn,
-    raisedBy: form.raisedBy, owner: form.owner, status: "open",
+    raisedBy: form.raisedBy, owner: form.owner, priority: form.priority, status: "open",
     blocksApi: form.type === "HOLD" ? form.blocksApi : false,
   };
 }
@@ -68,7 +68,7 @@ function editPayload(form: ResolutionForm): Record<string, unknown> {
     month: form.month || null, scopeProduct: form.scopeProduct || null,
     scopeMeasure: form.type === "HOLD" ? form.scopeMeasure : null, reason: form.reason, evidence: form.evidence,
     valueAtStake: form.valueAtStake === "" ? null : Number(form.valueAtStake), raisedOn: form.raisedOn,
-    raisedBy: form.raisedBy, owner: form.owner, blocksApi: form.type === "HOLD" ? form.blocksApi : false,
+    raisedBy: form.raisedBy, owner: form.owner, priority: form.priority, blocksApi: form.type === "HOLD" ? form.blocksApi : false,
   };
 }
 
@@ -132,6 +132,7 @@ function ResolutionFormPanel({ initial, onClose, onSave, saving }: {
           <label className="space-y-1 text-sm"><span>Type</span><Select value={form.type} disabled={!!initial} onValueChange={(value) => set("type", value as ResolutionForm["type"])}><SelectTrigger data-testid="select-resolution-form-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="HOLD">HOLD</SelectItem><SelectItem value="PENDING">PENDING</SelectItem></SelectContent></Select></label>
           <label className="space-y-1 text-sm"><span>Category</span><Select value={form.category} onValueChange={(value) => set("category", value)}><SelectTrigger data-testid="select-resolution-form-category"><SelectValue /></SelectTrigger><SelectContent>{CATEGORIES.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></label>
           <label className="space-y-1 text-sm"><span>Owner</span><Input required value={form.owner} onChange={(e) => set("owner", e.target.value)} data-testid="input-resolution-owner" /></label>
+          <label className="space-y-1 text-sm"><span>Priority</span><Select value={form.priority} onValueChange={(value) => set("priority", value as ResolutionPriority)}><SelectTrigger data-testid="select-resolution-form-priority"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="urgent">Urgent</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="low">Low</SelectItem></SelectContent></Select></label>
           <label className="space-y-1 text-sm"><span>Raised by</span><Input required value={form.raisedBy} onChange={(e) => set("raisedBy", e.target.value)} data-testid="input-resolution-raised-by" /></label>
           <label className="space-y-1 text-sm"><span>Raised on</span><Input required type="date" value={form.raisedOn} onChange={(e) => set("raisedOn", e.target.value)} data-testid="input-resolution-raised-on" /></label>
           <label className="space-y-1 text-sm"><span>Fiscal year</span><Input value={form.fiscalYear} onChange={(e) => set("fiscalYear", e.target.value)} data-testid="input-resolution-fiscal-year" /></label>
@@ -254,7 +255,7 @@ export default function ResolutionPage() {
     const sheet = workbook.addWorksheet("Open resolution items");
     const columns = [
       { key: "code", width: 16 }, { key: "title", width: 36 },
-      { key: "type", width: 14 }, { key: "reason", width: 36 },
+      { key: "type", width: 14 }, { key: "priority", width: 14 }, { key: "reason", width: 36 },
       { key: "evidence", width: 50 }, { key: "valueAtStake", width: 16 },
       { key: "daysOpen", width: 12 }, { key: "owner", width: 22 },
       { key: "status", width: 14 }, { key: "fiscalYear", width: 14 },
@@ -262,10 +263,10 @@ export default function ResolutionPage() {
       { key: "scopeMeasure", width: 28 }, { key: "blocksApi", width: 14 },
     ];
     sheet.columns = columns;
-    sheet.mergeCells("A1:N1");
+    sheet.mergeCells("A1:O1");
     sheet.getCell("A1").value = exportReport.title;
     sheet.getCell("A2").value = `Generated: ${exportReport.generatedAt}`;
-    sheet.mergeCells("A3:N3");
+    sheet.mergeCells("A3:O3");
     sheet.getCell("A3").value = `Filters: ${exportReport.filterContext}`;
     sheet.getRow(1).font = { bold: true, size: 16, color: { argb: "FFFFFFFF" } };
     sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF174A5B" } };
@@ -315,7 +316,7 @@ export default function ResolutionPage() {
           <Select value={owner} onValueChange={setOwner}><SelectTrigger className="w-[160px]" data-testid="select-resolution-owner"><SelectValue placeholder="Owner" /></SelectTrigger><SelectContent><SelectItem value="all">All owners</SelectItem>{values.owners.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
           <Select value={category} onValueChange={setCategory}><SelectTrigger className="w-[160px]" data-testid="select-resolution-category"><SelectValue placeholder="Category" /></SelectTrigger><SelectContent><SelectItem value="all">All categories</SelectItem>{values.categories.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
           <Select value={type} onValueChange={setType}><SelectTrigger className="w-[150px]" data-testid="select-resolution-type"><SelectValue placeholder="Type" /></SelectTrigger><SelectContent><SelectItem value="all">All types</SelectItem>{values.types.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
-          <Select value={sort} onValueChange={(value) => setSort(value as ResolutionSort)}><SelectTrigger className="w-[165px]" data-testid="select-resolution-sort"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="days-open">Days open ↓</SelectItem><SelectItem value="value-at-stake">Value at stake ↓</SelectItem></SelectContent></Select>
+          <Select value={sort} onValueChange={(value) => setSort(value as ResolutionSort)}><SelectTrigger className="w-[165px]" data-testid="select-resolution-sort"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="priority">Priority ↓</SelectItem><SelectItem value="days-open">Days open ↓</SelectItem><SelectItem value="value-at-stake">Value at stake ↓</SelectItem></SelectContent></Select>
         </div>
         <div className="mt-2 text-xs text-muted-foreground">{openItems.length} open item{openItems.length === 1 ? "" : "s"} · Exports include open items and respect the current filters.</div>
       </div>
@@ -332,7 +333,7 @@ export default function ResolutionPage() {
             return <Card key={String(item.id)} id={`resolution-card-${item.id}`} className={cn("overflow-hidden border-l-4", item.type === "HOLD" ? "border-l-amber-400" : "border-l-sky-400", isHighlighted && "ring-2 ring-primary ring-offset-2")} data-testid={`card-resolution-${item.id}`}>
               <div className="flex items-start gap-3 p-4">
                 <button className="no-print mt-0.5 text-muted-foreground" onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next; })} aria-label={`${isExpanded ? "Collapse" : "Expand"} ${item.title}`} data-testid={`button-expand-resolution-${item.id}`}>{isExpanded ? <ChevronDown /> : <ChevronRight />}</button>
-                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold" data-testid={`text-resolution-title-${item.id}`}>{item.title}</h3><Badge variant="outline" className={typeClass(item.type)} data-testid={`type-resolution-${item.id}`}>{item.type}</Badge><Badge variant="outline" className={statusClass(item.status)} data-testid={`status-resolution-${item.id}`}>{item.status}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{scopeText(item)}</p><div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground"><span><strong className="text-foreground">{item.owner}</strong> owner</span><span><strong className="text-foreground">{item.daysOpen ?? "—"}</strong> days open</span><span><strong className="text-foreground">{money(item.valueAtStake)}</strong> at stake</span>{item.blocksApi && <span className="font-semibold text-amber-700">Blocks API</span>}</div></div>
+                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold" data-testid={`text-resolution-title-${item.id}`}>{item.title}</h3><Badge variant="outline" className={typeClass(item.type)} data-testid={`type-resolution-${item.id}`}>{item.type}</Badge>{item.priority && <Badge variant="outline" data-testid={`priority-resolution-${item.id}`}>{item.priority}</Badge>}<Badge variant="outline" className={statusClass(item.status)} data-testid={`status-resolution-${item.id}`}>{item.status}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{scopeText(item)}</p><div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground"><span><strong className="text-foreground">{item.owner}</strong> owner</span><span><strong className="text-foreground">{item.daysOpen ?? "—"}</strong> days open</span><span><strong className="text-foreground">{money(item.valueAtStake)}</strong> at stake</span>{item.blocksApi && <span className="font-semibold text-amber-700">Blocks API</span>}</div></div>
                 {isAdmin && item.status === "open" && <div className="no-print flex shrink-0 gap-1"><Button variant="ghost" size="icon" onClick={() => setFormItem(item)} aria-label={`Edit ${item.title}`} data-testid={`button-edit-resolution-${item.id}`}><Pencil /></Button><Button variant="outline" size="sm" onClick={() => setResolveItemState(item)} data-testid={`button-resolve-resolution-${item.id}`}>Resolve</Button></div>}
               </div>
               {isExpanded && <div className="grid gap-4 border-t bg-muted/20 px-12 py-4 text-sm md:grid-cols-4"><div><p className="font-medium">Evidence</p><p className="mt-1 whitespace-pre-wrap text-muted-foreground">{item.evidence || "No evidence recorded."}</p></div><div><p className="font-medium">Reason</p><p className="mt-1 whitespace-pre-wrap text-muted-foreground">{item.reason || "No reason recorded."}</p></div><div><p className="font-medium">Scope</p><p className="mt-1 whitespace-pre-wrap text-muted-foreground">{scopeText(item)}</p></div><div><p className="font-medium">What unblocked it</p><p className="mt-1 whitespace-pre-wrap text-muted-foreground">{item.resolutionNote || (item.status === "open" ? "Not resolved yet." : "No resolution note recorded.")}</p></div></div>}
@@ -346,8 +347,8 @@ export default function ResolutionPage() {
         <p><strong>Filters:</strong> {exportReport.filterContext}</p>
         {exportReport.sections.map((section) => <section key={section.category}>
           <h2>Category: {section.category}</h2>
-          <table><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Reason</th><th>Evidence</th><th>Value at stake</th><th>Days open</th><th>Owner</th><th>Status</th></tr></thead>
-            <tbody>{section.rows.map((row) => <tr key={row.code}><td>{row.code}</td><td>{row.title}</td><td>{row.type}</td><td>{row.reason}</td><td>{row.evidence}</td><td>{money(row.valueAtStake)}</td><td>{row.daysOpen ?? "—"}</td><td>{row.owner}</td><td>{row.status}</td></tr>)}</tbody>
+          <table><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Priority</th><th>Reason</th><th>Evidence</th><th>Value at stake</th><th>Days open</th><th>Owner</th><th>Status</th></tr></thead>
+            <tbody>{section.rows.map((row) => <tr key={row.code}><td>{row.code}</td><td>{row.title}</td><td>{row.type}</td><td>{row.priority || "—"}</td><td>{row.reason}</td><td>{row.evidence}</td><td>{money(row.valueAtStake)}</td><td>{row.daysOpen ?? "—"}</td><td>{row.owner}</td><td>{row.status}</td></tr>)}</tbody>
           </table>
         </section>)}
       </div>

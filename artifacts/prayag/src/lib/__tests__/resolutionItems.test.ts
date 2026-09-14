@@ -8,7 +8,7 @@ const base = {
   code: "R-1", type: "HOLD" as const, title: "Small hold", category: "commercial",
   fiscalYear: "2025-26", month: "May", scopeProduct: "SKU A", scopeMeasure: "sales",
   reason: "r", evidence: "e", valueAtStake: 1000, raisedOn: "2025-05-01", raisedBy: "Asha",
-  owner: "Asha", status: "open" as const, blocksApi: true, daysOpen: 4,
+  owner: "Asha", priority: "medium" as const, status: "open" as const, blocksApi: true, daysOpen: 4,
 };
 const items: ResolutionItem[] = [
   { ...base, id: 1, title: "Small hold" },
@@ -26,6 +26,16 @@ describe("resolution item transformations", () => {
   it("puts open items first, then supports days and value sorting", () => {
     expect(sortResolutionItems(items).map((item) => item.id)).toEqual([2, 1, 3]);
     expect(sortResolutionItems(items, "value-at-stake").map((item) => item.id)).toEqual([2, 1, 3]);
+  });
+
+  it("sorts urgent before lower priorities while retaining days-open tie breaking", () => {
+    const prioritized = [
+      { ...items[0], id: 4, priority: "high" as const, daysOpen: 20 },
+      { ...items[1], id: 5, priority: "urgent" as const, daysOpen: 2 },
+      { ...items[1], id: 6, priority: "urgent" as const, daysOpen: 10 },
+    ];
+    expect(sortResolutionItems(prioritized, "priority").map((item) => item.id)).toEqual([6, 5, 4]);
+    expect(sortResolutionItems(prioritized, "days-open").map((item) => item.id)).toEqual([4, 6, 5]);
   });
 
   it("applies owner, category, and type filters without mutating input", () => {

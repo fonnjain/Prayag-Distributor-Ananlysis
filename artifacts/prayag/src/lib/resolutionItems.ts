@@ -1,5 +1,6 @@
 export type ResolutionType = "HOLD" | "PENDING";
 export type ResolutionStatus = "open" | "answered" | "resolved" | "accepted-as-is";
+export type ResolutionPriority = "urgent" | "high" | "medium" | "low";
 
 export interface ResolutionItem {
   id: string | number;
@@ -17,6 +18,7 @@ export interface ResolutionItem {
   raisedOn: string;
   raisedBy: string;
   owner: string;
+  priority: ResolutionPriority | null;
   status: ResolutionStatus;
   resolvedOn?: string | null;
   resolvedBy?: string | null;
@@ -27,7 +29,7 @@ export interface ResolutionItem {
   updatedAt?: string;
 }
 
-export type ResolutionSort = "days-open" | "value-at-stake";
+export type ResolutionSort = "priority" | "days-open" | "value-at-stake";
 
 export interface ResolutionFilters {
   owner?: string;
@@ -41,6 +43,7 @@ const STATUS_ORDER: Record<ResolutionStatus, number> = {
   resolved: 2,
   "accepted-as-is": 3,
 };
+const PRIORITY_ORDER: Record<ResolutionPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
 function numberValue(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -66,6 +69,7 @@ export function normalizeResolutionItem(raw: Record<string, unknown>): Resolutio
     raisedOn: String(raw.raisedOn ?? ""),
     raisedBy: String(raw.raisedBy ?? ""),
     owner: String(raw.owner ?? ""),
+    priority: raw.priority ? String(raw.priority) as ResolutionPriority : null,
     status: String(raw.status ?? "open") as ResolutionStatus,
     resolvedOn: (raw.resolvedOn ?? null) as string | null,
     resolvedBy: (raw.resolvedBy ?? null) as string | null,
@@ -81,6 +85,10 @@ export function sortResolutionItems(items: ResolutionItem[], sort: ResolutionSor
   return [...items].sort((a, b) => {
     const statusDelta = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9);
     if (statusDelta) return statusDelta;
+    if (sort === "priority") {
+      const priorityDelta = (a.priority ? PRIORITY_ORDER[a.priority] : 9) - (b.priority ? PRIORITY_ORDER[b.priority] : 9);
+      return priorityDelta || (b.daysOpen ?? -Infinity) - (a.daysOpen ?? -Infinity) || a.title.localeCompare(b.title);
+    }
     const aValue = sort === "value-at-stake" ? (a.valueAtStake ?? -Infinity) : (a.daysOpen ?? -Infinity);
     const bValue = sort === "value-at-stake" ? (b.valueAtStake ?? -Infinity) : (b.daysOpen ?? -Infinity);
     return bValue - aValue || a.title.localeCompare(b.title);
@@ -102,6 +110,7 @@ export interface ResolutionExportRow {
   owner: string;
   type: string;
   status: string;
+  priority: string;
   daysOpen: number | null;
   valueAtStake: number | null;
   fiscalYear: string;
@@ -118,9 +127,15 @@ export function toResolutionExportRows(items: ResolutionItem[], sort: Resolution
   return [...items]
     .filter((item) => item.status === "open")
     .sort((a, b) => {
+      if (a.category !== b.category) return a.category.localeCompare(b.category);
+      if (sort === "priority") {
+        return (a.priority ? PRIORITY_ORDER[a.priority] : 9) - (b.priority ? PRIORITY_ORDER[b.priority] : 9)
+          || (b.daysOpen ?? -Infinity) - (a.daysOpen ?? -Infinity)
+          || a.title.localeCompare(b.title);
+      }
       const aValue = sort === "value-at-stake" ? (a.valueAtStake ?? -Infinity) : (a.daysOpen ?? -Infinity);
       const bValue = sort === "value-at-stake" ? (b.valueAtStake ?? -Infinity) : (b.daysOpen ?? -Infinity);
-      return a.category.localeCompare(b.category) || bValue - aValue || a.title.localeCompare(b.title);
+      return bValue - aValue || a.title.localeCompare(b.title);
     })
     .map((item) => ({
       category: item.category,
@@ -129,6 +144,7 @@ export function toResolutionExportRows(items: ResolutionItem[], sort: Resolution
       owner: item.owner,
       type: item.type,
       status: item.status,
+      priority: item.priority ?? "",
       daysOpen: item.daysOpen,
       valueAtStake: item.valueAtStake,
       fiscalYear: item.fiscalYear ?? "",
@@ -158,7 +174,7 @@ export interface ResolutionExportDocument {
 }
 
 export const RESOLUTION_EXPORT_HEADERS = [
-  "Code", "Title", "Type", "Reason", "Evidence", "Value at stake", "Days open",
+  "Code", "Title", "Type", "Priority", "Reason", "Evidence", "Value at stake", "Days open",
   "Owner", "Status", "FY", "Month", "Product", "Measure", "Blocks API",
 ] as const;
 
@@ -174,7 +190,7 @@ export function buildResolutionExportDocument(
     `Category: ${context.category === "all" ? "All" : context.category}`,
     `Type: ${context.type === "all" ? "All" : context.type}`,
     context.search ? `Search: ${context.search}` : "Search: None",
-    `Sort: ${context.sort === "value-at-stake" ? "Value at stake" : "Days open"}`,
+    `Sort: ${context.sort === "value-at-stake" ? "Value at stake" : context.sort === "priority" ? "Priority" : "Days open"}`,
   ].join(" · ");
   return {
     title: "Open resolution items",
@@ -197,7 +213,7 @@ export function buildResolutionExportLayout(document: ResolutionExportDocument):
     rows.push([`Category: ${section.category}`], [...RESOLUTION_EXPORT_HEADERS]);
     for (const item of section.rows) {
       rows.push([
-        item.code, item.title, item.type, item.reason, item.evidence,
+        item.code, item.title, item.type, item.priority, item.reason, item.evidence,
         item.valueAtStake === null ? "" : String(item.valueAtStake),
         item.daysOpen === null ? "" : String(item.daysOpen), item.owner, item.status,
         item.fiscalYear, item.month, item.scopeProduct, item.scopeMeasure, item.blocksApi,

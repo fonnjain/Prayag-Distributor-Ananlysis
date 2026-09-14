@@ -7,15 +7,16 @@ const router = Router();
 const TYPES = new Set(["HOLD", "PENDING"]);
 const CATEGORIES = new Set(["data quality", "master data", "access", "infrastructure", "commercial"]);
 const STATUSES = new Set(["open", "answered", "resolved", "accepted-as-is"]);
+const PRIORITIES = new Set(["urgent", "high", "medium", "low"]);
 const MAX_TEXT = 20_000;
 const CREATE_KEYS = new Set([
   "code", "type", "title", "category", "fiscalYear", "month", "scopeProduct",
   "scopeMeasure", "reason", "evidence", "valueAtStake", "raisedOn", "raisedBy",
-  "owner", "status", "blocksApi",
+  "owner", "priority", "status", "blocksApi",
 ]);
 const EDIT_KEYS = new Set([
   "title", "category", "fiscalYear", "month", "scopeProduct", "scopeMeasure",
-  "reason", "evidence", "valueAtStake", "raisedOn", "raisedBy", "owner",
+  "reason", "evidence", "valueAtStake", "raisedOn", "raisedBy", "owner", "priority",
   "blocksApi",
 ]);
 const RESOLVE_KEYS = new Set(["status", "resolutionNote"]);
@@ -35,6 +36,7 @@ type ItemInput = {
   raisedOn: string;
   raisedBy: string;
   owner: string;
+  priority: string;
   status: string;
   blocksApi: boolean;
 };
@@ -128,6 +130,11 @@ export function validateResolutionItem(body: unknown): ItemInput {
     raisedOn: dateValue(input.raisedOn, "raisedOn", true)!,
     raisedBy: textValue(input.raisedBy, "raisedBy", true, 200)!,
     owner: textValue(input.owner, "owner", true, 200)!,
+    priority: (() => {
+      const priority = textValue(input.priority, "priority", true, 20)!;
+      if (!PRIORITIES.has(priority)) throw new Error("Invalid priority");
+      return priority;
+    })(),
     status,
     blocksApi,
   };
@@ -158,6 +165,11 @@ function validateEdit(body: unknown): Record<string, unknown> {
   if ("raisedOn" in input) result.raisedOn = dateValue(input.raisedOn, "raisedOn", true);
   if ("raisedBy" in input) result.raisedBy = textValue(input.raisedBy, "raisedBy", true, 200);
   if ("owner" in input) result.owner = textValue(input.owner, "owner", true, 200);
+  if ("priority" in input) {
+    const priority = textValue(input.priority, "priority", true, 20)!;
+    if (!PRIORITIES.has(priority)) throw new Error("Invalid priority");
+    result.priority = priority;
+  }
   if ("blocksApi" in input) {
     if (typeof input.blocksApi !== "boolean") throw new Error("blocksApi must be a boolean");
     result.blocksApi = input.blocksApi;
@@ -187,6 +199,7 @@ function itemJson(row: Record<string, any>): Record<string, unknown> {
     raisedOn: String(row.raised_on).slice(0, 10),
     raisedBy: row.raised_by,
     owner: row.owner,
+    priority: row.priority,
     status: row.status,
     resolvedOn: row.resolved_on ? String(row.resolved_on).slice(0, 10) : null,
     resolvedBy: row.resolved_by,
@@ -214,6 +227,7 @@ function auditSnapshot(row: Record<string, any>): Record<string, unknown> {
     raisedOn: row.raised_on,
     raisedBy: row.raised_by,
     owner: row.owner,
+    priority: row.priority,
     status: row.status,
     resolvedOn: row.resolved_on,
     resolvedBy: row.resolved_by,
@@ -231,14 +245,14 @@ function idFromRequest(req: Request): number | null {
 router.use(requireAuthenticated);
 
 router.get("/resolution-items", async (req, res): Promise<void> => {
-  const allowedQuery = new Set(["owner", "category", "type", "status", "sort"]);
+  const allowedQuery = new Set(["owner", "category", "type", "status", "priority", "sort"]);
   if (Object.keys(req.query).some((key) => !allowedQuery.has(key))) {
     res.status(400).json({ error: "Unknown query parameter" });
     return;
   }
   const filters: string[] = [];
   const params: unknown[] = [];
-  for (const field of ["owner", "category", "type", "status"] as const) {
+  for (const field of ["owner", "category", "type", "status", "priority"] as const) {
     const value = req.query[field];
     if (value !== undefined) {
       if (typeof value !== "string" || value.length > 200) {
@@ -257,15 +271,23 @@ router.get("/resolution-items", async (req, res): Promise<void> => {
         res.status(400).json({ error: "Invalid status" });
         return;
       }
+      if (field === "priority" && !PRIORITIES.has(value)) {
+        res.status(400).json({ error: "Invalid priority" });
+        return;
+      }
       params.push(value);
       filters.push(`${field} = $${params.length}`);
     }
   }
-  if (req.query.sort !== undefined && req.query.sort !== "value" && req.query.sort !== "days") {
-    res.status(400).json({ error: "sort must be value or days" });
+  if (req.query.sort !== undefined && !["value", "days", "priority"].includes(String(req.query.sort))) {
+    res.status(400).json({ error: "sort must be value, days, or priority" });
     return;
   }
-  const sort = req.query.sort === "value" ? "value_at_stake DESC NULLS LAST, raised_on ASC" : "raised_on ASC";
+  const sort = req.query.sort === "value"
+    ? "value_at_stake DESC NULLS LAST, raised_on ASC"
+    : req.query.sort === "priority"
+      ? "CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, raised_on ASC"
+      : "raised_on ASC";
   try {
     const result = await pool.query(
       `SELECT * FROM resolution_item ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""}
@@ -274,7 +296,12 @@ router.get("/resolution-items", async (req, res): Promise<void> => {
     );
     const items = result.rows.map(itemJson);
     if (sort === "raised_on ASC") items.sort((a, b) => Number(b.daysOpen ?? 0) - Number(a.daysOpen ?? 0));
-    res.json({ items });
+    const relationships = await pool.query(
+      `SELECT source_code AS "sourceCode", target_code AS "targetCode", relation, created_at AS "createdAt"
+         FROM resolution_item_relationship
+        ORDER BY source_code, target_code, relation`,
+    );
+    res.json({ items, relationships: relationships.rows });
   } catch (err) {
     req.log.error({ err }, "resolution items read failed");
     res.status(500).json({ error: "Unable to load resolution items" });
@@ -295,12 +322,12 @@ router.post("/resolution-items", requireAdmin, async (req, res): Promise<void> =
     const result = await client.query(
       `INSERT INTO resolution_item
        (code, type, title, category, fiscal_year, month, scope_product, scope_measure,
-        reason, evidence, value_at_stake, raised_on, raised_by, owner, status, blocks_api)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         reason, evidence, value_at_stake, raised_on, raised_by, owner, priority, status, blocks_api)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING *`,
       [item.code, item.type, item.title, item.category, item.fiscalYear, item.month, item.scopeProduct,
         item.scopeMeasure, item.reason, item.evidence, item.valueAtStake, item.raisedOn, item.raisedBy,
-        item.owner, item.status, item.blocksApi],
+         item.owner, item.priority, item.status, item.blocksApi],
     );
     await writeAudit(client, "resolution_item_added", req, req.authUser?.id ?? null, null, { id: result.rows[0].id, code: item.code });
     await client.query("COMMIT");

@@ -5180,6 +5180,149 @@ const MIGRATIONS: Migration[] = [
       $do$;
     `,
   },
+  {
+    id: "109_resolution_priority_relationships_p21_p42",
+    sql: `
+      DO $do$
+      BEGIN
+        CREATE TYPE resolution_priority AS ENUM ('urgent', 'high', 'medium', 'low');
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END
+      $do$;
+      DO $do$
+      BEGIN
+        CREATE TYPE resolution_relation_type AS ENUM ('derived-from', 'ask-supported-by', 'question-for-gap');
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END
+      $do$;
+
+      ALTER TABLE resolution_item
+        ADD COLUMN IF NOT EXISTS priority resolution_priority;
+      CREATE INDEX IF NOT EXISTS resolution_item_priority_idx ON resolution_item (priority);
+
+      CREATE TABLE IF NOT EXISTS resolution_item_relationship (
+        id          SERIAL PRIMARY KEY,
+        source_code TEXT NOT NULL REFERENCES resolution_item(code) ON DELETE CASCADE,
+        target_code TEXT NOT NULL REFERENCES resolution_item(code) ON DELETE CASCADE,
+        relation    resolution_relation_type NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT resolution_item_relationship_uq UNIQUE (source_code, target_code, relation)
+      );
+      CREATE INDEX IF NOT EXISTS resolution_item_relationship_source_idx
+        ON resolution_item_relationship (source_code);
+      CREATE INDEX IF NOT EXISTS resolution_item_relationship_target_idx
+        ON resolution_item_relationship (target_code);
+
+      INSERT INTO resolution_item
+        (code, type, title, category, reason, evidence, value_at_stake, raised_on,
+         raised_by, owner, priority, status, resolved_on, resolved_by, resolution_note, blocks_api)
+      VALUES
+        ('P21','PENDING','Item codes 20, 25 and 32 — on the website or not?','master data',
+         'Confirm whether item codes 20, 25 and 32 belong in the authoritative website catalogue.',
+         '[Source: Resolution register P21 onward, 14 September 2026] Three unreviewed priced codes were excluded from the reviewed catalogue denominator.',NULL,'2026-09-14','Resolution register P21 onward','Prayag price team','high','open',NULL,NULL,NULL,FALSE),
+        ('P22','PENDING','When do the September prices actually go live?','master data',
+         'Confirm the effective date for the September price generation.',
+         '[Source: Resolution register P21 onward, 14 September 2026] The commercial go-live date is not recorded.',NULL,'2026-09-14','Resolution register P21 onward','Prayag price team','high','open',NULL,NULL,NULL,FALSE),
+        ('P23','PENDING','The 64 PEA brass fittings — 1 February or 10 August 2026?','master data',
+         'Confirm which effective date applies to the 64 PEA brass-fitting prices.',
+         '[Source: Resolution register P21 onward, 14 September 2026] Qualitative exposure affects every discount using these codes since 1 February 2026; no defensible single rupee value is available.',NULL,'2026-09-14','Resolution register P21 onward','Prayag price team','urgent','open',NULL,NULL,NULL,FALSE),
+        ('P24','PENDING','What does “Unchanged — carried forward” mean?','master data',
+         'Define whether carried-forward prices remain approved current prices or require fresh review.',
+         '[Source: Resolution register P21 onward, 14 September 2026] The source label is operationally ambiguous.',NULL,'2026-09-14','Resolution register P21 onward','Prayag price team','medium','open',NULL,NULL,NULL,FALSE),
+        ('P25','PENDING','Is 1 September correct for TTS-01, TTS-02 and TTS-03?','master data',
+         'Confirm the effective date for TTS-01, TTS-02 and TTS-03.',
+         '[Source: Resolution register P21 onward, 14 September 2026] The listed date requires price-team confirmation.',NULL,'2026-09-14','Resolution register P21 onward','Prayag price team','medium','open',NULL,NULL,NULL,FALSE),
+        ('P26','PENDING','Should colour-wise prices be added to the website?','master data',
+         'Confirm whether colour variants require separately published website prices.',
+         '[Source: Resolution register P21 onward, 14 September 2026] Colour-specific pricing policy is not recorded.',NULL,'2026-09-14','Resolution register P21 onward','Prayag price team','medium','open',NULL,NULL,NULL,FALSE),
+        ('P27','PENDING','The 1 September change is described as Hardware, but is mostly PTMT','master data',
+         'Confirm the correct category label for the 1 September price change.',
+         '[Source: Resolution register P21 onward, 14 September 2026] The source description says Hardware while the affected products are mainly PTMT.',NULL,'2026-09-14','Resolution register P21 onward','Prayag price team','low','open',NULL,NULL,NULL,FALSE),
+        ('P28','PENDING','Eight new WT water-tank prices — real or placeholder, and why backdated?','master data',
+         'Confirm whether the eight WT prices are approved and explain their backdated effective dates.',
+         '[Source: Resolution register P21 onward, 14 September 2026] The entries may be real or placeholder prices.',NULL,'2026-09-14','Resolution register P21 onward','Prayag price team','high','open',NULL,NULL,NULL,FALSE),
+        ('P29','PENDING','Are these eight PS codes discontinued?','master data',
+         'Confirm whether the eight listed PS codes are discontinued.',
+         '[Source: Resolution register P21 onward, 14 September 2026] Product lifecycle status is not authoritative.',NULL,'2026-09-14','Resolution register P21 onward','Prayag price team','low','open',NULL,NULL,NULL,FALSE),
+        ('P30','PENDING','Confirm 34 existing distributor codes and create codes for the rest','master data',
+         'Confirm the 34 existing DIST# matches and assign stable codes to remaining distributors.',
+         '[Source: Resolution register P21 onward, 14 September 2026] P1 records the confirmation set and P2 records Rs 6.52 Cr of unattributed distributor sales.',65200000,'2026-09-14','Resolution register P21 onward','Prayag sales / master data','high','open',NULL,NULL,NULL,FALSE),
+        ('P31','PENDING','Is VIKRAM TRADERS (JAMMU) an active distributor?','master data',
+         'Confirm the active status and distributor identity for VIKRAM TRADERS (JAMMU).',
+         '[Source: Resolution register P21 onward, 14 September 2026] Current distributor status is not confirmed.',NULL,'2026-09-14','Resolution register P21 onward','Prayag sales / master data','medium','open',NULL,NULL,NULL,FALSE),
+        ('P32','PENDING','Do Chandigarh, Delhi NCR, Himachal Pradesh and J&K have distributors?','master data',
+         'Confirm distributor coverage for Chandigarh, Delhi NCR, Himachal Pradesh and Jammu and Kashmir.',
+         '[Source: Resolution register P21 onward, 14 September 2026] No authoritative coverage answer is recorded.',NULL,'2026-09-14','Resolution register P21 onward','Prayag sales / master data','medium','open',NULL,NULL,NULL,FALSE),
+        ('P33','PENDING','Who heads West U.P and Rajasthan, and is Sunil Mohanty a new joiner?','master data',
+         'Confirm the current heads for West U.P and Rajasthan and Sunil Mohanty''s employment status.',
+         '[Source: Resolution register P21 onward, 14 September 2026] P11 records that Sunil Mohanty has no HR or registry record.',NULL,'2026-09-14','Resolution register P21 onward','Prayag HR / sales management','high','open',NULL,NULL,NULL,FALSE),
+        ('P34','PENDING','Who owns Rajasthan, and who takes the 354 unassigned customers?','master data',
+         'Confirm Rajasthan ownership and the assignee for 354 currently unassigned customers.',
+         '[Source: Resolution register P21 onward, 14 September 2026] Ownership cannot be inferred safely from current master data.',NULL,'2026-09-14','Resolution register P21 onward','Prayag HR / sales management','high','open',NULL,NULL,NULL,FALSE),
+        ('P35','PENDING','Who owns distributors in Karnataka and Maharashtra? Is Prashant a head or member?','master data',
+         'Confirm distributor ownership in Karnataka and Maharashtra and Prashant''s organisation role.',
+         '[Source: Resolution register P21 onward, 14 September 2026] Current hierarchy evidence is ambiguous.',NULL,'2026-09-14','Resolution register P21 onward','Prayag HR / sales management','high','open',NULL,NULL,NULL,FALSE),
+        ('P36','PENDING','How many Maharashtra territories — two, three, or none?','master data',
+         'Confirm the authoritative Maharashtra territory structure.',
+         '[Source: Resolution register P21 onward, 14 September 2026] Available sources imply two, three, or no explicit territories.',NULL,'2026-09-14','Resolution register P21 onward','Prayag HR / sales management','medium','open',NULL,NULL,NULL,FALSE),
+        ('P37','PENDING','Are these six State Head folders former heads or a different structure?','master data',
+         'Classify the six State Head folders as former-head history or another organisation structure.',
+         '[Source: Resolution register P21 onward, 14 September 2026] Folder names alone are insufficient to classify the people.',NULL,'2026-09-14','Resolution register P21 onward','Prayag HR / sales management','medium','open',NULL,NULL,NULL,FALSE),
+        ('P38','PENDING','Are monthly PLAN cells typed in, or linked to each PLAN 26-27 file?','data quality',
+         'Confirm whether monthly PLAN cells are manually entered or linked to individual PLAN 26-27 files.',
+         '[Source: Resolution register P21 onward, 14 September 2026] Target lineage is not explicit.',NULL,'2026-09-14','Resolution register P21 onward','Prayag sales management','high','open',NULL,NULL,NULL,FALSE),
+        ('P39','PENDING','Should Ravi Upadhyay and Shiv Kumar have monthly rows at all?','data quality',
+         'Confirm whether Ravi Upadhyay and Shiv Kumar should carry monthly planning rows.',
+         '[Source: Resolution register P21 onward, 14 September 2026] Their intended planning scope is unresolved.',NULL,'2026-09-14','Resolution register P21 onward','Prayag sales management','medium','open',NULL,NULL,NULL,FALSE),
+        ('P40','PENDING','Which of the 58 names are former employees, and how is off-roll staff handled?','master data',
+         'Classify the 58 historical or off-roll names and define their treatment.',
+         '[Source: Resolution register P21 onward, 14 September 2026] This population is 58 historical/off-roll names carrying 25,575 FY2025-26 order-booking rows worth Rs 13.51 Cr. It is distinct from P14, which covers seven current roster members with no HR record; the two populations must remain separate.',135100000,'2026-09-14','Resolution register P21 onward','Prayag sales management','high','open',NULL,NULL,NULL,FALSE),
+        ('P41','PENDING','Which is authoritative for visits — Dashboard Data or Visit Report?','data quality',
+         'Confirm the authoritative source for visit counts.',
+         '[Source: Resolution register P21 onward, 14 September 2026] Dashboard Data and Visit Report differ.',NULL,'2026-09-14','Resolution register P21 onward','Prayag sales management','medium','open',NULL,NULL,NULL,FALSE),
+        ('P42','PENDING','What source holds order-booking lines for 1 April–31 July 2026?','data quality',
+         'Locate and reconcile the raw order-booking source for 1 April through 31 July 2026.',
+         '[Source: Resolution register P21 onward, 14 September 2026] PSCode 3 archives were located and loaded.',NULL,'2026-09-14','Resolution register P21 onward','Prayag data / IT','urgent','answered','2026-09-14','PSCode 3 archive load','PSCode 3 archives located and loaded: 123,326 rows, Rs 81.36 Cr, reconciled against secondary_sku_line with Rs 0 variance in every month.',FALSE)
+      ON CONFLICT (code) DO NOTHING;
+
+      INSERT INTO resolution_item_relationship (source_code, target_code, relation)
+      SELECT 'P' || n::text, 'P20', 'derived-from'::resolution_relation_type
+        FROM generate_series(21, 42) AS n
+      ON CONFLICT (source_code, target_code, relation) DO NOTHING;
+      INSERT INTO resolution_item_relationship (source_code, target_code, relation)
+      VALUES
+        ('P30', 'P1', 'ask-supported-by'),
+        ('P30', 'P2', 'ask-supported-by'),
+        ('P33', 'P11', 'question-for-gap')
+      ON CONFLICT (source_code, target_code, relation) DO NOTHING;
+
+      DO $do$
+      BEGIN
+        IF (SELECT COUNT(*) FROM resolution_item WHERE code ~ '^P(2[1-9]|3[0-9]|4[0-2])$') <> 22 THEN
+          RAISE EXCEPTION 'P21-P42 seed is incomplete';
+        END IF;
+        IF (SELECT COUNT(*) FROM resolution_item_relationship WHERE target_code = 'P20' AND relation = 'derived-from') <> 22 THEN
+          RAISE EXCEPTION 'P20 derived-from relationships are incomplete';
+        END IF;
+        IF EXISTS (
+          SELECT 1 FROM resolution_item_relationship
+           WHERE (source_code = 'P40' AND target_code = 'P14')
+              OR (source_code = 'P14' AND target_code = 'P40')
+        ) THEN
+          RAISE EXCEPTION 'P40 and P14 must remain separate';
+        END IF;
+      END
+      $do$;
+
+      UPDATE resolution_item
+         SET status = 'resolved',
+             resolved_on = '2026-09-14',
+             resolved_by = 'Resolution register P21-P42 handoff',
+             resolution_note = 'Superseded by P21-P42, which record all 22 questions from the previously unsent 31 August 2026 query pack.',
+             updated_at = now()
+       WHERE code = 'P20' AND status = 'open';
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

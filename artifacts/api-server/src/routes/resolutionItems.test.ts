@@ -11,6 +11,7 @@ const pending = {
   raisedOn: "2026-09-14",
   raisedBy: "test",
   owner: "internal",
+  priority: "medium",
 };
 
 describe("resolution item validation", () => {
@@ -52,6 +53,11 @@ describe("resolution item validation", () => {
     expect(() => validateResolutionItem({ ...pending, raisedOn: "14-09-2026" })).toThrow(
       "raisedOn must be YYYY-MM-DD",
     );
+  });
+
+  it("requires a valid structured priority", () => {
+    expect(() => validateResolutionItem({ ...pending, priority: "critical" })).toThrow("Invalid priority");
+    expect(validateResolutionItem({ ...pending, priority: "urgent" }).priority).toBe("urgent");
   });
 
   it("treats every non-open status as closed", () => {

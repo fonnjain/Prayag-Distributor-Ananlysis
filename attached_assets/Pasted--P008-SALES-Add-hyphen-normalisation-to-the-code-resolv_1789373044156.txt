@@ -1,0 +1,133 @@
+# P008 — SALES — Add hyphen normalisation to the code resolver
+
+**App:** SALES · `prayag-sales.com` · `fonnjain/Prayag-Distributor-Ananlysis`
+**This prompt changes code.** It is not a read-only query.
+**Quote P008 when reporting back.**
+
+---
+
+## The gap
+
+P007 reported **822 sold codes** that do not resolve to the pricing catalogue,
+worth **₹9.90 Cr**. Some are not missing products at all — they differ from a
+real catalogue code only by a hyphen.
+
+**Confirmed by Prayag: `324-K` is the same product as `324K`.**
+
+The resolver currently runs four ordered rules:
+
+1. exact code
+2. leading `P` removal for numeric codes
+3. colour-suffix removal
+4. whitespace normalisation
+
+None removes an internal hyphen. So `324-K` and `323-K` fail to match `324K` and
+`323K`, and roughly **₹42 lakh** of FY2026-27 sales between them are reported
+against unknown products.
+
+## It is safe to add
+
+Checked against the full authoritative catalogue of 6,106 codes:
+
+| Check | Result |
+|---|---:|
+| Codes that collide when hyphens are removed | **0** |
+| Codes whose de-hyphenated form is also a catalogue code | **0** |
+
+No two catalogue codes become identical without their hyphens, and no code's
+de-hyphenated form is itself a different product. The rule cannot create a false
+match inside the catalogue.
+
+---
+
+## What to add
+
+**A fifth ordered rule: remove internal hyphens, applied after the existing
+four.**
+
+Two conditions, both required:
+
+**1. Accept only a unique match.** If removing hyphens resolves to more than one
+catalogue code, do not match — report the ambiguity. Given the check above this
+should never happen, but the rule must not assume that stays true as the
+catalogue grows.
+
+**2. Record which rule resolved each code.** P007 already reports resolution by
+rule — leading-P 19, colour-suffix 23, whitespace 4. Add hyphen removal to that
+breakdown so its contribution is visible and reversible.
+
+**Do not combine rules silently.** If a code needs both whitespace and hyphen
+removal to match, that is fine, but the trace must say so. A code matched by
+three transformations is a weaker match than one matched exactly, and whoever
+reviews it should be able to see the difference.
+
+---
+
+## Re-run the classification afterwards
+
+P007's figures move once this is in. Report:
+
+- how many of the 822 are recovered by hyphen removal, and their FY2026-27 value
+- the remaining unresolved count and value
+- the updated resolution breakdown by rule
+
+**And state which products gained sales.** Recovering `324-K` to `324K` moves
+roughly ₹42 lakh from "unknown" onto a named product. The FY2025-26 total does
+not move — Test 5 proves that — but **product-level figures do**, and anyone who
+has quoted `324K` will see them change. That should be visible rather than
+discovered.
+
+---
+
+## Then look at what is left
+
+`324-K` was found because Prayag confirmed it by hand. Among the remaining
+unresolved codes, report any that are **within one character** of a catalogue code
+— a single insertion, deletion or substitution.
+
+**Do not match those automatically.** Report them as candidates for confirmation.
+`324-K` was safe because someone verified it; a near-match found by edit distance
+is a question, not an answer.
+
+The top twenty by value from P007 are the place to start — `824XD`,
+`WCT-3LL-10`, `HD140B`, `Q724MB`, `PSS-5`, `PTA-49` and the rest. Several look
+like real product families rather than typographical errors, and those are a
+catalogue coverage question rather than a resolver one.
+
+---
+
+## Acceptance tests
+
+```
+1. 324-K resolves to catalogue code 324K, and 323-K to 323K.
+
+2. The resolution trace names hyphen removal as the rule that matched.
+
+3. A hypothetical code resolving to two catalogue codes after hyphen
+   removal is NOT matched, and is reported as ambiguous.
+
+4. Codes that matched exactly before still match exactly - the new rule
+   runs last and changes no existing resolution.
+
+5. The FY2025-26 reconciliation still returns 145,613 rows and
+   Rs 3,60,99,53,808.51.
+
+6. The absent-code count and value are re-reported after the change.
+```
+
+**Test 4 is the guard.** A resolver change must not alter any match that already
+worked.
+
+**Test 5 matters because the total must not move.** Recovering a code changes
+which product a sale is attributed to, not whether the sale exists.
+
+---
+
+## Report
+
+1. Codes recovered, and their value.
+2. Updated unresolved count and value.
+3. Resolution breakdown by rule, including the new one.
+4. **Which products gained sales**, with the before and after figure for each.
+5. Near-match candidates for confirmation — reported, not matched.
+6. Confirmation that FY2025-26 still reconciles exactly.
