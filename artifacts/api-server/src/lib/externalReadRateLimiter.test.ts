@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   error: vi.fn(),
+  info: vi.fn(),
 }));
 
 vi.mock("@workspace/db", () => ({
@@ -10,12 +11,13 @@ vi.mock("@workspace/db", () => ({
 }));
 
 vi.mock("./logger.js", () => ({
-  logger: { error: mocks.error },
+  logger: { error: mocks.error, info: mocks.info },
 }));
 
 import {
   consumeExternalReadQuota,
   EXTERNAL_READ_RATE_LIMIT,
+  logExternalReadResponse,
   rateLimitExternalRead,
 } from "./externalReadRateLimiter.js";
 
@@ -31,6 +33,7 @@ describe("external read rate limiter", () => {
   beforeEach(() => {
     mocks.query.mockReset();
     mocks.error.mockReset();
+    mocks.info.mockReset();
   });
 
   it("uses one atomic Postgres upsert and allows the first request", async () => {
@@ -108,5 +111,36 @@ describe("external read rate limiter", () => {
     );
     expect(mocks.query).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledTimes(2);
+  });
+
+  it("logs the external path and final response status for the accepted key", () => {
+    const finishHandlers: Array<() => void> = [];
+    const req = {
+      method: "GET",
+      path: "/external/sales-by-item",
+      originalUrl: "/api/external/sales-by-item?fy=2026-27",
+      apiKey: { id: 6, name: "prayag-comp", scope: "external_read" },
+    };
+    const res = {
+      statusCode: 409,
+      once: vi.fn((event: string, handler: () => void) => {
+        if (event === "finish") finishHandlers.push(handler);
+      }),
+    };
+    const next = vi.fn();
+
+    logExternalReadResponse(req as any, res as any, next);
+    finishHandlers[0]();
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(mocks.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKeyId: 6,
+        method: "GET",
+        path: "/api/external/sales-by-item",
+        statusCode: 409,
+      }),
+      "external read request completed",
+    );
   });
 });

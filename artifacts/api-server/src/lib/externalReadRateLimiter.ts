@@ -6,6 +6,33 @@ import { logger } from "./logger.js";
 export const EXTERNAL_READ_RATE_LIMIT = 60;
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 
+/**
+ * Log the final response for an authenticated external-read request without
+ * ever recording the raw credential.
+ */
+export function logExternalReadResponse(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (req.apiKey?.scope !== "external_read" || !isExternalReadEndpoint(req)) {
+    next();
+    return;
+  }
+
+  const startedAt = Date.now();
+  res.once("finish", () => {
+    logger.info({
+      apiKeyId: req.apiKey!.id,
+      method: req.method,
+      path: req.originalUrl?.split("?")[0] ?? req.path,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    }, "external read request completed");
+  });
+  next();
+}
+
 export interface ExternalReadQuota {
   allowed: boolean;
   requestCount: number;
