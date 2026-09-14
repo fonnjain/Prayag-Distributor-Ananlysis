@@ -898,3 +898,17 @@ mtime_ms = 1789380708575
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/b3fddbe5-4616-4c57-9318-b3333be0e958/38a87c21-37bc-443e-aaac-efff7167904f"
 storage_version_token = "1789380752552557"
 content_type = "text/plain"
+
+[[outputs]]
+id = "0-Q82aT9Ms2xRnfGgV8G5"
+uri = "file://reports/P91_Development_Export_Audit.txt"
+type = "text"
+title = "Prompt 91 Development Export Audit"
+description = "Actual generated sheet lists, data-row counts, Info-sheet contents, source disclosures, coverage, and Sales People three-state counts for all five workbooks."
+logical_id = "d0289f41-4da8-4f58-9dc7-d071cbd3dd66"
+content_hash = "sha256:8282cfb76e4037c82b220f92aa08fce36a157c57e1dd00d80867de630c70cb59"
+size = 7459
+mtime_ms = 1789383727734
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/d0289f41-4da8-4f58-9dc7-d071cbd3dd66/3c4dc400-8dc0-4339-9161-811dd2aee6c2"
+storage_version_token = "1789383828004199"
+content_type = "text/plain"

@@ -1,0 +1,209 @@
+# Replit Prompt 91 — Four exports, and one defect
+
+**Date:** 14 September 2026
+**Scope:** Section A is a defect. Sections B–E are exports, one per page.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Section A — Sales People shows unavailable as 0.00%
+
+On the Sales People table, several members show **Sales as an em dash** and
+**Sales/Plan% as 0.00%** on the same row.
+
+| Name | Plan | OB | Sales | Sales/Plan% |
+|---|---:|---:|---:|---:|
+| M. Raman | ₹12.30 L | ₹2.99 L | — | **0.00%** |
+| Manish Kumar Trivedi | ₹9.35 L | ₹3.45 L | — | **0.00%** |
+| Aditya Dasgupta | ₹8.48 L | ₹1.87 L | — | **0.00%** |
+
+If Sales is unavailable, the ratio built on it is **unavailable, not zero**. A
+member with no sales data and a member with genuinely zero sales look identical,
+and the second is a performance problem while the first is a data gap.
+
+```
+Code change. Display only.
+
+A1. Print the query behind the Sales column. Is the em dash "no value
+    returned" or "value is null"?
+
+A2. Where Sales is unavailable, Sales/Plan% must be unavailable too -
+    blank-grey with a reason, never 0.00%.
+
+A3. Where Sales is genuinely zero and Plan is non-zero, 0.00% is correct
+    and should show.
+
+A4. How many of the 229 members are in each state - sales available, sales
+    unavailable, sales genuinely zero? If most of the dashes are
+    unavailable, the headline Sales figure of Rs 96.63 Cr covers fewer
+    members than the table implies, and the card should say so.
+
+A5. The cards show 139 members with plan out of 229. Does the Sales card
+    cover all 229 or only the 139? State the basis on the card.
+```
+
+---
+
+## Section B — Sales People export
+
+```
+Add Export Excel to the Sales People page.
+
+  Sheet 1  Summary
+    the four cards - members with plan, Plan, OB, Sales - each with its
+    basis and coverage. "Sales Rs 96.63 Cr across N of 229 members."
+
+  Sheet 2  Members
+    every row of the table as filtered: name, state head, plan, OB, sales,
+    sales/plan %, and the three-state marker for each figure
+    include the "show primary-role members" state in the filter record
+
+  Sheet 3  Missing data
+    members with no plan, no sales, or no OB, with the reason
+
+  Sheet 4  Info
+    FY, period, filters applied, member count, source of each column,
+    provisional months, data-read timestamp
+
+The export honours every active filter - state head, member, search text,
+and the primary-role toggle. If 229 members are shown, 229 are exported;
+if a filter reduces it, the export matches.
+```
+
+---
+
+## Section C — Sales Deep Dive at state-head level
+
+The export currently appears only when a member is selected. With a head selected
+and no member, there is a **Team Summary** with real content — 72 active members,
+3 LEFT, 11 with no target, 63.80% headline OB against 60.43% like-for-like.
+
+```
+Add Export Excel to the state-head view, exporting ALL members under that
+head.
+
+  Sheet 1  Team summary
+    active members, LEFT, no target
+    headline OB % and like-for-like %, with numerator and denominator
+    THE DISCLOSURE ALREADY ON SCREEN, carried verbatim:
+      "11 active members have no target recorded - carrying Rs 2.61 Cr of
+       order booking. Headline includes their OB but contributes no target
+       denominator. Like-for-like excludes them entirely."
+    and the eleven names
+
+  Sheet 2  Members
+    one row per member: targets, OB, sales, achievement, cost, coverage
+    a column marking which members are excluded from like-for-like
+
+  Sheet 3  Cost and ROI
+    per member: CTC, T.A., cost ratio, return per rupee
+    the head total and the company benchmark
+
+  Sheet 4  Missing data
+  Sheet 5  Info - head, FY, period, filters, sources, coverage
+
+Keep the existing member-level export unchanged. This is an additional
+export at head scope.
+
+The like-for-like distinction is the important part. A head reading 63.80%
+and 60.43% must be able to see which members explain the gap.
+```
+
+---
+
+## Section D — Customers export, for master data mapping
+
+The Organisation → Customers page shows **3,376 unassigned** customers and a
+review queue.
+
+```
+Add Export Excel. The purpose is master-data mapping, so it needs the
+identifiers, not just the names.
+
+  Sheet 1  Customers
+    id, name, type - distributor, retailer, direct dealer
+    DIST# or CP code where one exists, BLANK where not
+    linked state head, member, state
+    the link indicator and status dot - state what each means in Info
+    source of the record
+
+  Sheet 2  Unassigned
+    all 3,376, with what is missing - no head, no state, no code, or
+    several
+    sorted by whatever value they carry, so the largest are first
+
+  Sheet 3  Review queue
+    whatever is pending, with why
+
+  Sheet 4  Info
+
+This connects directly to the Resolution register:
+  P1   34 existing DIST# codes need confirmation
+  P2   Rs 6.52 Cr of distributor sales with no DIST# code
+  P30  the ask behind both
+
+An export that lists the uncoded distributors with their sales value is
+what makes those three answerable. Include the value where it exists.
+```
+
+---
+
+## Section E — People and Coverage Review exports
+
+```
+Two more, same standard.
+
+E1. ORGANISATION -> PEOPLE
+    employee code, name, role, state head, HQ, state, working state
+    HR status, roster status, date of joining AS A DATE
+    email and mobile where held
+    a column flagging the known conflicts:
+      - 7 roster members with no HR record        register P14
+      - 58 historic names not in the roster       register P40
+      - Sunil Mohanty, no record anywhere         register P11
+      - Pawan Sharma, HR Deactive vs active head  register P12
+
+E2. COVERAGE REVIEW
+    whatever the page shows, per head and per member
+    retailers, visited, not visited, parties giving business
+    the three-state marker on every figure - visits data is missing for
+    some members and must not read as zero visits
+
+Both carry an Info sheet naming sources and coverage.
+```
+
+---
+
+## Common rules for all four exports
+
+```
+Already established elsewhere; apply them here.
+
+  - Indian number format: >= 1 Cr as Rs x.xx Cr, >= 1 L as Rs x.xx L,
+    below that grouped with no decimals
+  - percentages as percentages, with numerator and denominator shown
+  - THREE STATES on every figure: value, blank-grey-with-reason, genuine
+    zero. Never a zero standing in for unknown
+  - order booking never labelled sales
+  - every export honours the page's active filters exactly
+  - an Info sheet on every one: scope, filters, sources, coverage,
+    provisional months, data-read timestamp
+  - freeze panes, sensible widths, no sheet wider than it needs
+
+AFTER EACH, print the sheet list with row counts and the Info sheet as
+generated.
+```
+
+---
+
+## Notes
+
+- **Section A first.** It is small, and it is the same defect these exports would
+  otherwise inherit — an unavailable figure rendered as zero.
+- **Section C's disclosure is the best thing on that page.** Eleven members with no
+  target carrying ₹2.61 Cr, with the headline including their OB and like-for-like
+  excluding them. Carry it into the export verbatim rather than paraphrasing.
+- **Section D is not just an export.** It is what makes P1, P2 and P30 answerable —
+  Prayag cannot confirm distributor codes without a list of which ones are
+  missing and what they are worth.
