@@ -1,0 +1,179 @@
+P21-P42 DEVELOPMENT LOAD AUDIT
+Generated 14 September 2026
+
+MIGRATIONS
+id,applied_at
+109_resolution_priority_relationships_p21_p42,2026-09-14T08:04:47.887Z
+110_resolution_p008_product_code_findings,2026-09-14T08:33:39.684Z
+111_resolution_p43_priority,2026-09-14T09:56:14.623Z
+112_resolution_p14_p40_population_distinction,2026-09-14T09:59:48.794Z
+
+
+STARTUP APPLIED LINES
+[migrations] Applied: 111_resolution_p43_priority
+[migrations] Applied: 112_resolution_p14_p40_population_distinction
+
+REGISTER TOTALS
+records,open,closed
+46,42,4
+
+
+BY TYPE
+type,records,open,closed
+HOLD,3,3,0
+PENDING,43,39,4
+
+
+BY OWNER
+owner,records,open,closed
+IT,1,1,0
+Prayag,17,16,1
+Prayag - Deepak J,1,1,0
+Prayag HR / sales management,5,5,0
+Prayag data / IT,1,0,1
+Prayag price team,9,9,0
+Prayag sales / master data,3,3,0
+Prayag sales management,4,4,0
+internal,5,3,2
+
+
+EVERY RELATIONSHIP ROW
+source_code,target_code,relation
+P21,P20,derived-from
+P22,P20,derived-from
+P23,P20,derived-from
+P24,P20,derived-from
+P25,P20,derived-from
+P26,P20,derived-from
+P27,P20,derived-from
+P28,P20,derived-from
+P29,P20,derived-from
+P30,P1,ask-supported-by
+P30,P2,ask-supported-by
+P30,P20,derived-from
+P31,P20,derived-from
+P32,P20,derived-from
+P33,P11,question-for-gap
+P33,P20,derived-from
+P34,P20,derived-from
+P35,P20,derived-from
+P36,P20,derived-from
+P37,P20,derived-from
+P38,P20,derived-from
+P39,P20,derived-from
+P40,P20,derived-from
+P41,P20,derived-from
+P42,P20,derived-from
+
+
+P14 AND P40 DISTINCT POPULATIONS
+code,evidence
+P14,"[Source: Replit Prompt 88 extended, Section D, 14 September 2026] Seven current roster members have no HR record. This population is distinct from P40, which covers 58 historical/off-roll names carrying Rs 13.51 Cr; the two populations must remain separate."
+P40,"[Source: Resolution register P21 onward, 14 September 2026] This population is 58 historical/off-roll names carrying 25,575 FY2025-26 order-booking rows worth Rs 13.51 Cr. It is distinct from P14, which covers seven current roster members with no HR record; the two populations must remain separate."
+
+
+P20 AND P42 CLOSED METADATA — FULL
+id,code,type,title,category,fiscal_year,month,scope_product,scope_measure,reason,evidence,value_at_stake,raised_on,raised_by,owner,priority,status,resolved_on,resolved_by,resolution_note,blocks_api,created_at,updated_at
+23,P20,PENDING,"The 22-query pack, unsent since 31 August",data quality,,31-Aug-2026,,,The query pack has not been sent.,"[Source: Replit Prompt 88 extended, Section D, 14 September 2026] The 22-query pack, unsent since 31 August.",,2026-08-31T00:00:00.000Z,Prompt 88 extended,internal,,resolved,2026-09-14T00:00:00.000Z,Resolution register P21-P42 handoff,"Superseded by P21-P42, which record all 22 questions from the previously unsent 31 August 2026 query pack.",f,2026-09-14T04:59:27.039Z,2026-09-14T08:04:47.887Z
+45,P42,PENDING,What source holds order-booking lines for 1 April–31 July 2026?,data quality,,,,,Locate and reconcile the raw order-booking source for 1 April through 31 July 2026.,"[Source: Resolution register P21 onward, 14 September 2026] PSCode 3 archives were located and loaded.",,2026-09-14T00:00:00.000Z,Resolution register P21 onward,Prayag data / IT,urgent,answered,2026-09-14T00:00:00.000Z,PSCode 3 archive load,"PSCode 3 archives located and loaded: 123,326 rows, Rs 81.36 Cr, reconciled against secondary_sku_line with Rs 0 variance in every month.",f,2026-09-14T08:04:47.887Z,2026-09-14T08:04:47.887Z
+
+
+REGISTER SORTED BY PRIORITY
+code,priority,status,type,owner,raised_on,days_open,value_at_stake,title
+P23,urgent,open,PENDING,Prayag price team,2026-09-14,0,,The 64 PEA brass fittings — 1 February or 10 August 2026?
+P42,urgent,answered,PENDING,Prayag data / IT,2026-09-14,,,What source holds order-booking lines for 1 April–31 July 2026?
+P21,high,open,PENDING,Prayag price team,2026-09-14,0,,"Item codes 20, 25 and 32 — on the website or not?"
+P22,high,open,PENDING,Prayag price team,2026-09-14,0,,When do the September prices actually go live?
+P28,high,open,PENDING,Prayag price team,2026-09-14,0,,"Eight new WT water-tank prices — real or placeholder, and why backdated?"
+P30,high,open,PENDING,Prayag sales / master data,2026-09-14,0,65200000,Confirm 34 existing distributor codes and create codes for the rest
+P33,high,open,PENDING,Prayag HR / sales management,2026-09-14,0,,"Who heads West U.P and Rajasthan, and is Sunil Mohanty a new joiner?"
+P34,high,open,PENDING,Prayag HR / sales management,2026-09-14,0,,"Who owns Rajasthan, and who takes the 354 unassigned customers?"
+P35,high,open,PENDING,Prayag HR / sales management,2026-09-14,0,,Who owns distributors in Karnataka and Maharashtra? Is Prashant a head or member?
+P38,high,open,PENDING,Prayag sales management,2026-09-14,0,,"Are monthly PLAN cells typed in, or linked to each PLAN 26-27 file?"
+P40,high,open,PENDING,Prayag sales management,2026-09-14,0,135100000,"Which of the 58 names are former employees, and how is off-roll staff handled?"
+P43,high,open,PENDING,Prayag,2026-09-14,0,15000000,Six product codes have multiple one-edit catalogue candidates
+P24,medium,open,PENDING,Prayag price team,2026-09-14,0,,What does “Unchanged — carried forward” mean?
+P25,medium,open,PENDING,Prayag price team,2026-09-14,0,,"Is 1 September correct for TTS-01, TTS-02 and TTS-03?"
+P26,medium,open,PENDING,Prayag price team,2026-09-14,0,,Should colour-wise prices be added to the website?
+P31,medium,open,PENDING,Prayag sales / master data,2026-09-14,0,,Is VIKRAM TRADERS (JAMMU) an active distributor?
+P32,medium,open,PENDING,Prayag sales / master data,2026-09-14,0,,"Do Chandigarh, Delhi NCR, Himachal Pradesh and J&K have distributors?"
+P36,medium,open,PENDING,Prayag HR / sales management,2026-09-14,0,,"How many Maharashtra territories — two, three, or none?"
+P37,medium,open,PENDING,Prayag HR / sales management,2026-09-14,0,,Are these six State Head folders former heads or a different structure?
+P39,medium,open,PENDING,Prayag sales management,2026-09-14,0,,Should Ravi Upadhyay and Shiv Kumar have monthly rows at all?
+P41,medium,open,PENDING,Prayag sales management,2026-09-14,0,,Which is authoritative for visits — Dashboard Data or Visit Report?
+P27,low,open,PENDING,Prayag price team,2026-09-14,0,,"The 1 September change is described as Hardware, but is mostly PTMT"
+P29,low,open,PENDING,Prayag price team,2026-09-14,0,,Are these eight PS codes discontinued?
+P20,,resolved,PENDING,internal,2026-08-31,,,"The 22-query pack, unsent since 31 August"
+H1,,open,HOLD,Prayag - Deepak J,2026-09-14,0,,"PTMT MARGIN, JAN-APR 2026"
+H2,,open,HOLD,Prayag,2026-09-14,0,,AUGUST 2026 SECONDARY SKU
+H3,,open,HOLD,Prayag,2026-09-14,0,,FY2024-25 MONTHLY ATTRIBUTION
+P1,,open,PENDING,Prayag,2026-09-14,0,,34 existing DIST# codes need confirmation
+P10,,open,PENDING,Prayag,2026-09-14,0,,Master_and_Sub_category.xlsx cleanup
+P11,,open,PENDING,Prayag,2026-09-14,0,,Sunil Mohanty has no HR or registry record
+P12,,open,PENDING,Prayag,2026-09-14,0,,Pawan Sharma roster and HR status disagree
+P13,,open,PENDING,Prayag,2026-09-14,0,,Prashant Onam Naik has no alert route
+P14,,open,PENDING,Prayag,2026-09-14,0,,7 roster members with no HR record
+P15,,open,PENDING,IT,2026-09-14,0,,SMTP or Resend credentials
+P16,,open,PENDING,internal,2026-09-14,0,,WhatsApp provider decision
+P17,,open,PENDING,internal,2026-09-14,0,,Alert state-head routing entity keys
+P18,,accepted-as-is,PENDING,internal,2026-09-14,,,PSCode3 brand mirror never generated
+P19,,open,PENDING,internal,2026-09-14,0,,Whether state heads should receive email as well as WhatsApp
+P2,,open,PENDING,Prayag,2026-09-14,0,65200000,Rs 6.52 Cr of distributor sales with no DIST# code
+P3,,open,PENDING,Prayag,2026-09-14,0,93600000,814 sold codes with no MRP master record
+P4,,open,PENDING,Prayag,2026-09-14,0,11700000,Confirm three WCT one-edit product-code candidates
+P5,,open,PENDING,Prayag,2026-09-14,0,,"15 -VB codes in excluded_do_not_load, no price or date"
+P6,,open,PENDING,Prayag,2026-09-14,0,,Large v2 price moves need confirmation
+P7,,open,PENDING,Prayag,2026-09-14,0,2000000,70 discontinued codes still selling
+P8,,open,PENDING,Prayag,2026-09-14,0,,September 2026 SAP - 604 invoices vs ~700 derived
+P9,,answered,PENDING,Prayag,2026-09-14,,5595,"4 rows and Rs 5,595 missing from FY2024-25 - variance accepted"
+
+
+REGISTER SORTED BY DAYS OPEN
+code,priority,status,type,owner,raised_on,days_open,value_at_stake,title
+H1,,open,HOLD,Prayag - Deepak J,2026-09-14,0,,"PTMT MARGIN, JAN-APR 2026"
+H2,,open,HOLD,Prayag,2026-09-14,0,,AUGUST 2026 SECONDARY SKU
+H3,,open,HOLD,Prayag,2026-09-14,0,,FY2024-25 MONTHLY ATTRIBUTION
+P1,,open,PENDING,Prayag,2026-09-14,0,,34 existing DIST# codes need confirmation
+P10,,open,PENDING,Prayag,2026-09-14,0,,Master_and_Sub_category.xlsx cleanup
+P11,,open,PENDING,Prayag,2026-09-14,0,,Sunil Mohanty has no HR or registry record
+P12,,open,PENDING,Prayag,2026-09-14,0,,Pawan Sharma roster and HR status disagree
+P13,,open,PENDING,Prayag,2026-09-14,0,,Prashant Onam Naik has no alert route
+P14,,open,PENDING,Prayag,2026-09-14,0,,7 roster members with no HR record
+P15,,open,PENDING,IT,2026-09-14,0,,SMTP or Resend credentials
+P16,,open,PENDING,internal,2026-09-14,0,,WhatsApp provider decision
+P17,,open,PENDING,internal,2026-09-14,0,,Alert state-head routing entity keys
+P19,,open,PENDING,internal,2026-09-14,0,,Whether state heads should receive email as well as WhatsApp
+P2,,open,PENDING,Prayag,2026-09-14,0,65200000,Rs 6.52 Cr of distributor sales with no DIST# code
+P21,high,open,PENDING,Prayag price team,2026-09-14,0,,"Item codes 20, 25 and 32 — on the website or not?"
+P22,high,open,PENDING,Prayag price team,2026-09-14,0,,When do the September prices actually go live?
+P23,urgent,open,PENDING,Prayag price team,2026-09-14,0,,The 64 PEA brass fittings — 1 February or 10 August 2026?
+P24,medium,open,PENDING,Prayag price team,2026-09-14,0,,What does “Unchanged — carried forward” mean?
+P25,medium,open,PENDING,Prayag price team,2026-09-14,0,,"Is 1 September correct for TTS-01, TTS-02 and TTS-03?"
+P26,medium,open,PENDING,Prayag price team,2026-09-14,0,,Should colour-wise prices be added to the website?
+P27,low,open,PENDING,Prayag price team,2026-09-14,0,,"The 1 September change is described as Hardware, but is mostly PTMT"
+P28,high,open,PENDING,Prayag price team,2026-09-14,0,,"Eight new WT water-tank prices — real or placeholder, and why backdated?"
+P29,low,open,PENDING,Prayag price team,2026-09-14,0,,Are these eight PS codes discontinued?
+P3,,open,PENDING,Prayag,2026-09-14,0,93600000,814 sold codes with no MRP master record
+P30,high,open,PENDING,Prayag sales / master data,2026-09-14,0,65200000,Confirm 34 existing distributor codes and create codes for the rest
+P31,medium,open,PENDING,Prayag sales / master data,2026-09-14,0,,Is VIKRAM TRADERS (JAMMU) an active distributor?
+P32,medium,open,PENDING,Prayag sales / master data,2026-09-14,0,,"Do Chandigarh, Delhi NCR, Himachal Pradesh and J&K have distributors?"
+P33,high,open,PENDING,Prayag HR / sales management,2026-09-14,0,,"Who heads West U.P and Rajasthan, and is Sunil Mohanty a new joiner?"
+P34,high,open,PENDING,Prayag HR / sales management,2026-09-14,0,,"Who owns Rajasthan, and who takes the 354 unassigned customers?"
+P35,high,open,PENDING,Prayag HR / sales management,2026-09-14,0,,Who owns distributors in Karnataka and Maharashtra? Is Prashant a head or member?
+P36,medium,open,PENDING,Prayag HR / sales management,2026-09-14,0,,"How many Maharashtra territories — two, three, or none?"
+P37,medium,open,PENDING,Prayag HR / sales management,2026-09-14,0,,Are these six State Head folders former heads or a different structure?
+P38,high,open,PENDING,Prayag sales management,2026-09-14,0,,"Are monthly PLAN cells typed in, or linked to each PLAN 26-27 file?"
+P39,medium,open,PENDING,Prayag sales management,2026-09-14,0,,Should Ravi Upadhyay and Shiv Kumar have monthly rows at all?
+P4,,open,PENDING,Prayag,2026-09-14,0,11700000,Confirm three WCT one-edit product-code candidates
+P40,high,open,PENDING,Prayag sales management,2026-09-14,0,135100000,"Which of the 58 names are former employees, and how is off-roll staff handled?"
+P41,medium,open,PENDING,Prayag sales management,2026-09-14,0,,Which is authoritative for visits — Dashboard Data or Visit Report?
+P43,high,open,PENDING,Prayag,2026-09-14,0,15000000,Six product codes have multiple one-edit catalogue candidates
+P5,,open,PENDING,Prayag,2026-09-14,0,,"15 -VB codes in excluded_do_not_load, no price or date"
+P6,,open,PENDING,Prayag,2026-09-14,0,,Large v2 price moves need confirmation
+P7,,open,PENDING,Prayag,2026-09-14,0,2000000,70 discontinued codes still selling
+P8,,open,PENDING,Prayag,2026-09-14,0,,September 2026 SAP - 604 invoices vs ~700 derived
+P20,,resolved,PENDING,internal,2026-08-31,,,"The 22-query pack, unsent since 31 August"
+P18,,accepted-as-is,PENDING,internal,2026-09-14,,,PSCode3 brand mirror never generated
+P42,urgent,answered,PENDING,Prayag data / IT,2026-09-14,,,What source holds order-booking lines for 1 April–31 July 2026?
+P9,,answered,PENDING,Prayag,2026-09-14,,5595,"4 rows and Rs 5,595 missing from FY2024-25 - variance accepted"
+

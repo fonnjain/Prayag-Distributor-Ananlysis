@@ -5391,6 +5391,62 @@ const MIGRATIONS: Migration[] = [
       $do$;
     `,
   },
+  {
+    id: "111_resolution_p43_priority",
+    sql: `
+      UPDATE resolution_item
+         SET priority = 'high'::resolution_priority,
+             updated_at = now()
+       WHERE code = 'P43';
+
+      DO $do$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+            FROM resolution_item
+           WHERE code = 'P43'
+             AND priority = 'high'::resolution_priority
+             AND value_at_stake = 15000000
+             AND status = 'open'
+        ) THEN
+          RAISE EXCEPTION 'P43 priority update is incomplete';
+        END IF;
+      END
+      $do$;
+    `,
+  },
+  {
+    id: "112_resolution_p14_p40_population_distinction",
+    sql: `
+      UPDATE resolution_item
+         SET evidence = '[Source: Replit Prompt 88 extended, Section D, 14 September 2026] Seven current roster members have no HR record. This population is distinct from P40, which covers 58 historical/off-roll names carrying Rs 13.51 Cr; the two populations must remain separate.',
+             updated_at = now()
+       WHERE code = 'P14';
+
+      DO $do$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+            FROM resolution_item
+           WHERE code = 'P14'
+             AND evidence ILIKE '%distinct from P40%'
+             AND evidence ILIKE '%seven current roster members%'
+             AND evidence ILIKE '%58 historical/off-roll names%'
+        ) THEN
+          RAISE EXCEPTION 'P14 and P40 population distinction is incomplete';
+        END IF;
+        IF EXISTS (
+          SELECT 1
+            FROM resolution_item_relationship
+           WHERE (source_code = 'P14' AND target_code = 'P40')
+              OR (source_code = 'P40' AND target_code = 'P14')
+        ) THEN
+          RAISE EXCEPTION 'P14 and P40 must remain separate without a relationship row';
+        END IF;
+      END
+      $do$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
