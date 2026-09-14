@@ -1,0 +1,119 @@
+# Replit Prompt 89 — Two follow-ups from Prompt 87
+
+**Date:** 14 September 2026
+**Scope:** Both read-only. Neither is urgent.
+
+**Standing rule:** every figure states which database or source it came from.
+
+Prompt 87 is implemented and verified — commit `fcf2070e5f` confirmed on the
+remote, FY2026-27 projected at ₹387.06 Cr, +7.2% nominal. These two points came
+out of that answer and were not addressed.
+
+---
+
+## Section A — the two surviving flat run-rates
+
+Your A6 sweep found two, both labelled:
+
+**Sales Deep Dive** — `YTD OB ÷ elapsed months × 12`
+**Momentum** — a flat comparator alongside its preferred seasonal projection
+
+Labelling is honest. But on a business with **34.56% of its year in Q4**, a flat
+run-rate understates a full year by roughly **17 percentage points** — the exact
+error just corrected on Overview, sitting two pages away under a different name.
+
+```
+Read-only. Change nothing.
+
+A1. For a sample of five members, print the Sales Deep Dive flat run-rate
+    beside the seasonal projection of the same figure. Show the gap in
+    rupees and percent.
+
+    If the gap is material, a reader comparing a run-rate on one page with
+    a projection on another is comparing two different things.
+
+A2. Same for Momentum. Which of the two does a reader see first, and which
+    is emphasised?
+
+A3. Does anything CONSUME the flat run-rate - an alert, a target proposal,
+    an AI narrative, an export - or is it display only?
+
+    A flat run-rate that only displays is a labelling question. One that
+    feeds a threshold is a defect.
+
+A4. RECOMMEND one of three:
+      - show the seasonal projection as primary, flat run-rate secondary
+      - remove the flat run-rate entirely
+      - keep as is, if the label genuinely suffices
+
+    My position: a reader does not reliably distinguish "flat run-rate"
+    from "projection" when both are rupee figures on a card. If both are
+    shown, the seasonal one should lead.
+
+Report only.
+```
+
+---
+
+## Section B — primary and secondary targets are not additive
+
+Your B10 answer was clear:
+
+> *"Primary growth proposals use company-dispatch data from `sale_line_current`.
+> Secondary People proposals use retailer-booking data from `secondary_sku_line`.
+> These engines measure different commercial flows and must not be added
+> together."*
+
+That is settled. The question is whether anything in the app already does it.
+
+```
+Read-only. Change nothing.
+
+B1. Print every surface where a primary target and a secondary target
+    appear for the SAME person, head or period.
+
+    Sales Deep Dive shows both - "Secondary Target (to date)" and "Primary
+    Target (to date)" - and a "Total Target (to date)".
+
+    Is that total the SUM of the two? For Rajan Srivastava the page showed
+    secondary Rs 1.63 Cr, primary Rs 26.66 L and total Rs 1.90 Cr.
+    1.63 Cr + 26.66 L = 1.8966 Cr, which rounds to 1.90 Cr.
+
+    So it appears to add them. Confirm.
+
+B2. If it does add them, is that wrong given B10, or is "Total Target"
+    a legitimate combined commitment even though the two are measured on
+    different flows?
+
+    That is a business question, not a code one. State the case both ways
+    so it can be decided.
+
+B3. What else reads that total? "Total OB Achievement" is computed as
+    (Sec OB + DD) / Total Target - so the combined total is already
+    driving an achievement percentage and, through it, alert thresholds.
+
+B4. Does anything sum primary and secondary at HEAD or COMPANY level -
+    State Head Dashboard, Company Reports, Targets, AI Targets, any export?
+
+B5. If the sum is legitimate, say so plainly and note it where both appear,
+    so nobody re-raises this. If it is not, print what changes and which
+    achievement percentages move.
+
+Report only. Do not change any figure.
+```
+
+---
+
+## Notes
+
+- **B1 is the specific instance.** Sales Deep Dive shows a "Total Target" that
+  appears to be the arithmetic sum of a dispatch-based primary target and a
+  booking-based secondary target. Given B10 says those must not be added, either
+  the page is wrong or "must not be added" needs qualifying.
+- **B3 is why it matters beyond presentation.** That total is the denominator of
+  Total OB Achievement, which drives alert thresholds. If the denominator is
+  questionable, so is every achievement percentage built on it.
+- **A3 is the same distinction one level down.** A flat run-rate that only
+  displays is a labelling question; one feeding a threshold is a defect.
+- Neither section is urgent. Both are worth settling before anyone builds further
+  on top of these figures.
