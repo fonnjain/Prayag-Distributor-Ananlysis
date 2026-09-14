@@ -1,0 +1,162 @@
+# Prompt for SALES app (`prayag-sales.com` / `fonnjain/Prayag-Distributor-Ananlysis`)
+
+The Competition Analysis application (`prayag-price.com`) needs **item-code-level sales and gross margin** in order to build an MRP suggestion tool. Pricing decisions will be informed by what each product sells and what margin it makes.
+
+This is a request for a read-only external API. **Answer section 1 before building anything** — it may change the shape of the whole integration.
+
+---
+
+## 1. You already consume our prices — show us that join
+
+The Competition Analysis application already exposes a read-only API that this Sales app consumes:
+
+```
+GET /api/v1/products             catalogue with currentMrp
+GET /api/v1/products/:itemCode   single product
+GET /api/v1/comparison           Prayag vs Sparsh Pearl and Ashirvad, with gaps
+GET /api/v1/analysis/overview    analysis summary
+```
+
+All `X-API-Key`, GET-only. So sales already holds Prayag MRP **and** competitor prices, keyed on our **catalogue codes** — `151`, `PS-1`, `C51`, `CH82F`.
+
+**That means a working join between the two code spaces already exists here.** We need the same one in reverse.
+
+Report:
+
+1. **Where and how** this app consumes the Competition API — which endpoints, how often, and where the response lands.
+2. **How our catalogue code is matched to `sale_line.code`.** Direct equality, a mapping table, normalisation, or something else. Show the code.
+3. **How complete that join is today** — of our 6,106 priced products, how many match a code in `sale_line_current`? How many sale lines have no matching Prayag product?
+4. Whether `margin_fact.item_code` uses the same space as `sale_line.code`, or needs its own step.
+
+If the join is direct, the rest of this is straightforward. If it goes through a mapping table, we need that table exposed too — a suggestion engine cannot work on products it cannot identify.
+
+### Related: 780 sold codes have no MRP record
+
+Worth ₹9.64 Cr. Confirm whether those codes are absent from our catalogue entirely, or present but unpriced. The first is a mapping gap; the second is a pricing gap, and they need different answers.
+
+---
+
+## 2. Two endpoints
+
+```
+GET /api/external/sales-by-item?fy=2026-27&from=2026-04&to=2026-08
+GET /api/external/margin-by-item?fy=2026-27&from=2026-04&to=2026-06
+```
+
+### Sales
+
+Per item code, per month and aggregated for the range:
+
+- `code`, `month_label`, `fy`
+- `qty` — **in pieces**, with `qty_ltr` separately for water tanks
+- `amount` — taxable value
+- Row count contributing to each figure
+
+From `sale_line_current` only. **Primary sale and dispatch, never order booking** — the consumer is going to label these figures "sales" and act on them.
+
+### Margin
+
+Per item code, per month:
+
+- `item_code`, `month_label`, `fy`, `segment`
+- `qty`, `sale_value`, `bom_value`
+- `gross_margin_pct` computed as `(sale_value - bom_value) / sale_value`
+- `mrp`, `avg_sale`, `discount_frac`
+
+**Label every derived figure `gross_margin` or `gross_contribution`, never `profit`.** `bom_cost` is factory cost only — no freight, overhead or SG&A. The consuming application will carry that rule forward, and the field names are how it learns it.
+
+---
+
+## 3. Held and missing periods must be explicit, never silent
+
+**This is the most important requirement in this document.**
+
+A consumer that receives nothing will substitute zero. A product with no margin data must never look like a product with zero margin — the first is unknown, the second is a loss-making item, and an MRP tool would treat them very differently.
+
+Known holds today:
+
+| Hold | Scope |
+|---|---|
+| PTMT margin overstated ~21 points | PTMT, `2026-27` Apr-26, and `2025-26` Jan/Feb/Mar |
+| Margin data does not exist | any month after June 2026 |
+| Day/month reversed on 28,613 rows | FY2024-25 monthly attribution |
+
+For any requested period touching a hold, return a **structured exclusion**, not an empty array:
+
+```json
+{
+  "data": [ ... ],
+  "coverage": {
+    "requested":   { "from": "2026-04", "to": "2026-08" },
+    "returned":    ["2026-04", "2026-05", "2026-06"],
+    "held":        [ { "months": ["2026-04"], "scope": "PTMT",
+                       "reason": "Factory cost recorded at ~40% of true level; gross margin overstated by ~21 points",
+                       "hold_id": "PTMT-COST-2026" } ],
+    "unavailable": [ { "months": ["2026-07","2026-08"],
+                       "reason": "Margin source workbooks do not exist for these months" } ],
+    "provisional": ["2026-06"],
+    "read_at":     "2026-09-14T09:00:00Z"
+  }
+}
+```
+
+Every response carries `coverage`, whether or not anything is held. A consumer should never have to infer coverage from the shape of the data.
+
+**Enforce the holds server-side.** Do not return held data and rely on the consumer to filter it — state whether this is what you have implemented.
+
+---
+
+## 4. Water tanks
+
+`sale_line` records water tank quantity in **litres**, not pieces, while MRP is per tank. A naive `amount / qty` produces ₹5.10 against a ₹16,000 MRP.
+
+Return `qty` **in pieces**, resolved through `tankResolution.ts`, with litres in `qty_ltr`.
+
+**46 current rows have `qty_ltr` NULL**, and for those `qty` still holds raw litres. Those rows must be flagged in the response — a `qty_unresolved: true` field or equivalent — not silently returned as if they were pieces.
+
+---
+
+## 5. Open months
+
+Months stay writable for four months. So FY2026-27 figures supplied today can change by December.
+
+Mark any month inside the open window as **provisional** in `coverage`, and tell the consumer how it learns that a previously supplied month has changed. Either:
+
+- a `GET /api/external/changes?since=<timestamp>` feed, or
+- a per-month `last_modified` the consumer can poll
+
+Say which you have implemented. Without one, the consuming application will hold figures it believes are settled and has no way to discover otherwise.
+
+---
+
+## 6. Access and practicalities
+
+- A **dedicated read-only identity** scoped to these two endpoints. Do not reuse an admin account or `X-Admin-Secret`.
+- **Pagination.** FY2025-26 alone is 145,613 sale lines; aggregated by item code it will be far smaller, but state the expected response size and the page limit.
+- **Rate limits**, stated.
+- State which database served the response — `neondb` or `heliumdb`. Development lags production by weeks and four false findings this month traced to that confusion.
+
+---
+
+## 7. Reconcile before releasing
+
+The aggregate of the sales endpoint must reconcile to the verified control totals:
+
+```
+FY2025-26          145,613 rows      Rs 3,60,99,53,808.51
+FY2026-27 Apr-Aug        —           Rs 1,35,34,00,568.14
+```
+
+Report the reconciliation. An item-level extract that does not sum to the register is not usable for pricing.
+
+---
+
+## 8. Report
+
+- **Section 1 in full** — this determines whether the integration is possible as specified.
+- The endpoint contracts as built, with a sample response including `coverage`.
+- Whether holds are enforced server-side.
+- How water tank quantities resolve, and how the 46 unresolved rows appear.
+- The change-notification mechanism for open months.
+- Reconciliation against the control totals.
+- **780 sold codes have no MRP record, worth ₹9.64 Cr.** Confirm whether those appear in this endpoint, since the consumer has no price for them.
