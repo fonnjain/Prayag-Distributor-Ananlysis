@@ -1,0 +1,148 @@
+# Replit Prompt 96 — Pending Orders: drill through team member
+
+**Date:** 15 September 2026
+**Scope:** A is read-only and decides feasibility. B is the change.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## What is wanted
+
+Pending Orders currently drills **State Head → Party**. Sandeep Ji expands
+directly into 45 parties.
+
+It should drill **State Head → Team Member → Party**.
+
+## The thing that will break it
+
+The page says the source is the *"Factory pending sheet — balance quantity by
+state head and party."* So the sheet carries **head and party, not member**.
+Member has to be derived from the customer-to-member assignment.
+
+And that assignment is incomplete. The Customers page shows **3,376 unassigned**
+customers, and there is an Attribution Conflicts page in the sidebar — so
+multi-member and disputed assignments exist too.
+
+**If any of Sandeep's 45 parties do not map to a member, the member rows will not
+sum to 1,68,445 pieces**, and the head total will appear to be wrong when the
+attribution is what is missing.
+
+---
+
+## Section A — read-only, before building
+
+```
+Read-only. Change nothing.
+
+A1. Does the factory pending sheet carry a team member column, or must
+    member be derived? Print the source columns.
+
+A2. If derived, which mapping - customer_master assignment, person_registry,
+    the dashboard Data tab, or something else? Print the join and its
+    coverage.
+
+A3. FOR SANDEEP DADHEECH specifically, of his 45 parties:
+      how many map to exactly one member
+      how many map to none
+      how many map to more than one
+      how many map to a member marked LEFT
+
+    And the piece quantity in each group. His head total is 1,68,445 pieces
+    and the member rows must reconcile to it.
+
+A4. THE SAME ACROSS ALL 15 HEADS. Print, per head: parties, pieces, and
+    what share of pieces map to exactly one member.
+
+    If coverage is poor for some heads, the drill is useful for some and
+    misleading for others, and that must be known before it ships.
+
+A5. What does the Attribution Conflicts page hold, and do any of these
+    parties appear in it? A party under dispute should not be silently
+    attributed to whichever member wins a tiebreak.
+
+A6. Are there parties with pending stock whose member has LEFT? Those are
+    worth surfacing rather than hiding - pending stock against a departed
+    member is an ownership gap.
+
+Report before building.
+```
+
+---
+
+## Section B — the change
+
+```
+Code change. Pending Orders page. Show the diff before applying.
+
+Add a TEAM MEMBER level between state head and party.
+
+  State Head  ->  Team Member  ->  Party  ->  (existing product group
+                                                columns)
+
+1. MEMBER ROWS MUST RECONCILE TO THE HEAD TOTAL.
+
+   Sum of member rows plus the unassigned bucket equals the head total,
+   exactly. Print the reconciliation on screen the way Company Reports
+   does - parent total, sum of children, difference.
+
+2. UNASSIGNED IS AN EXPLICIT ROW, never a silent omission.
+
+   Label it plainly - "Not assigned to a member" - with its party count and
+   piece quantity. It is not zero and it is not hidden.
+
+   If it is large, that is a finding worth seeing, not a defect to smooth
+   over.
+
+3. DISPUTED ATTRIBUTION gets its own treatment.
+
+   A party mapping to more than one member is shown once, in a
+   "Disputed attribution" row, NOT counted under either member and NOT
+   silently assigned to the first.
+
+   Link it to the Attribution Conflicts page.
+
+4. DEPARTED MEMBERS still show.
+
+   A member marked LEFT with pending stock keeps their row, marked LEFT.
+   Pending stock against a departed member is an ownership gap and hiding
+   it does not close it.
+
+5. THE BREADCRUMB follows the Company Reports pattern already built -
+   clicking a row expands in place or opens the next level with a visible
+   path back. Use the same behaviour; do not invent a second one.
+
+6. COLLAPSED BY DEFAULT at member level, as the head level is now. A head
+   with 45 parties across 12 members should not open into 45 rows.
+
+7. THE EXPORT follows the same hierarchy - head, member, party - with the
+   unassigned and disputed rows included and labelled.
+
+DO NOT CHANGE any figure. The head totals, the balance quantity of 2,98,679
+pieces, the 147 parties and the cross-check block must all be identical
+before and after.
+
+AFTER APPLYING, print:
+  - Sandeep Dadheech expanded to member level, with the reconciliation
+  - the unassigned and disputed rows with their quantities
+  - the company totals before and after, which must match
+```
+
+---
+
+## Notes
+
+- **A3 is the check that decides this.** If a meaningful share of Sandeep's 45
+  parties do not map to a member, the drill will look broken when the attribution
+  is what is missing. Better to know the number first.
+- **Requirement 2 is the same principle applied everywhere else in this app.** An
+  unassigned bucket stated plainly is information. Parties silently dropped from a
+  member view is a total that does not add up.
+- **Requirement 3 matters because of the winner-take-all problem** found earlier in
+  distributor attribution — a state's distributors going entirely to whichever
+  head had most rows, decided in one case by a margin of six. A disputed party
+  should be visible as disputed, not resolved by a tiebreak nobody sees.
+- **The page is already careful** — it states that water tanks are in pieces not
+  litres in this source, and the cross-check block explains that derived pending
+  and factory pending are independent measures in different units that should not
+  be added. Keep both.
