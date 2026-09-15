@@ -1,8 +1,11 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
   buildFactoryPending,
+  buildFactoryPendingWorkbook,
+  buildPendingPricingFromRows,
   buildConflictIndex,
   invalidateFactoryPendingCache,
+  saleQuantityDenominator,
   type AttributionIndex,
   type PendingHead,
 } from "./factoryPending.js";
@@ -353,5 +356,158 @@ describe("factory pending attribution audit", () => {
     expect(result.attributionAvailable).toBe(false);
     expect(result.attributionError).toContain("conflict report unavailable");
     expect(result.coverage.safeQty).toBeNull();
+  });
+
+  it("keeps REPORT 2 quantity when pricing fails and reports an explicit amount error", async () => {
+    const result = await buildFactoryPending({
+      readReport2: async () => ({
+        groups: ["GARDEN PIPE"],
+        grandTotal: 10,
+        byHead: [{
+          head: "Factory",
+          total: 10,
+          parties: [party("SOURCE", 10)],
+          buckets: [],
+          members: [],
+          reconciliation: { parent: 10, children: 10, difference: 0, exact: true },
+          coverage: {
+            candidateCoveragePct: 0, safeCoveragePct: 0, conflictCostPp: 0, cost: 0,
+            candidateQty: 0, safeQty: 0, conflictQty: 0, unassignedQty: 0, disputedQty: 0,
+          },
+          candidateQty: 0, safeQty: 0, conflictQty: 0, disputedQty: 0, unassignedQty: 0,
+          candidateCoveragePct: 0, safeCoveragePct: 0, conflictCostPp: 0,
+        }],
+      }),
+      loadOrderBookSaleByHead: async () => ({ total: 0, error: null } as never),
+      loadStateHeadSale: async () => ({ total: 0, error: null } as never),
+      loadAttributionIndex: async () => new Map(),
+      loadConflictIndex: async () => new Map(),
+      loadPricing: async () => {
+        throw new Error("sale pricing dependency unavailable");
+      },
+    });
+    expect(result.grandTotal).toBe(10);
+    expect(result.byHead[0].parties[0].total).toBe(10);
+    expect(result.pricingAvailable).toBe(false);
+    expect(result.pricingError).toContain("sale pricing dependency unavailable");
+    expect(result.pricedAmount).toBeNull();
+    expect(result.unpriceableQty).toBeNull();
+    expect(result.amountReconciliation).toBeNull();
+    expect(result.byHead[0].amountReconciliation).toBeUndefined();
+  });
+
+  it("prices product groups independently and retains total-minus-group residual as unpriceable", async () => {
+    const source = party("SOURCE", 10);
+    source.byGroup = { "GARDEN PIPE": 8 };
+    source.reconciliation = { parent: 10, children: 8, difference: 2, exact: false };
+    const result = await buildFactoryPending({
+      readReport2: async () => ({
+        groups: ["GARDEN PIPE"],
+        grandTotal: 10,
+        byHead: [{
+          head: "Factory",
+          total: 10,
+          parties: [source],
+          buckets: [],
+          members: [],
+          reconciliation: { parent: 10, children: 8, difference: 2, exact: false },
+          coverage: {
+            candidateCoveragePct: 0, safeCoveragePct: 0, conflictCostPp: 0, cost: 0,
+            candidateQty: 0, safeQty: 0, conflictQty: 0, unassignedQty: 0, disputedQty: 0,
+          },
+          candidateQty: 0, safeQty: 0, conflictQty: 0, disputedQty: 0, unassignedQty: 0,
+          candidateCoveragePct: 0, safeCoveragePct: 0, conflictCostPp: 0,
+        }],
+      }),
+      loadOrderBookSaleByHead: async () => ({ total: 0, error: null } as never),
+      loadStateHeadSale: async () => ({ total: 0, error: null } as never),
+      loadAttributionIndex: async () => new Map(),
+      loadConflictIndex: async () => new Map(),
+      loadPricing: async () => ({
+        source: "sale_line_current",
+        fy: "2026-27",
+        basis: "test",
+        byGroup: {
+          "Garden Pipe": {
+            canonicalGroup: "Garden Pipe",
+            averageRealisedRate: 10,
+            medianCodeLevelRealisedRate: 10,
+            p10RealisedRate: 10,
+            p90RealisedRate: 10,
+            contributingCodeCount: 1,
+            amount: null,
+            unpriceableQty: 0,
+            unpriceableReason: null,
+          },
+        },
+      }),
+    });
+    expect(result.pricedAmount).toBe(80);
+    expect(result.unpriceableQty).toBe(2);
+    expect(result.byHead[0].parties[0].pricedAmount).toBe(80);
+    expect(result.amountReconciliation?.company.difference).toBe(0);
+  });
+
+  it("keeps CP source labels separate while resolving both to the canonical CP price", async () => {
+    const first = party("CP ONE", 2);
+    first.byGroup = { "C P": 2 };
+    const second = party("CP TWO", 3);
+    second.byGroup = { "CP ACCESSORIES": 3 };
+    const result = await buildFactoryPending({
+      readReport2: async () => ({
+        groups: ["C P", "CP ACCESSORIES"],
+        grandTotal: 5,
+        byHead: [{
+          head: "Factory", total: 5, parties: [first, second], buckets: [], members: [],
+          reconciliation: { parent: 5, children: 5, difference: 0, exact: true },
+          coverage: {
+            candidateCoveragePct: 0, safeCoveragePct: 0, conflictCostPp: 0, cost: 0,
+            candidateQty: 0, safeQty: 0, conflictQty: 0, unassignedQty: 0, disputedQty: 0,
+          },
+          candidateQty: 0, safeQty: 0, conflictQty: 0, disputedQty: 0, unassignedQty: 0,
+          candidateCoveragePct: 0, safeCoveragePct: 0, conflictCostPp: 0,
+        }],
+      }),
+      loadOrderBookSaleByHead: async () => ({ total: 0, error: null } as never),
+      loadStateHeadSale: async () => ({ total: 0, error: null } as never),
+      loadAttributionIndex: async () => new Map(),
+      loadConflictIndex: async () => new Map(),
+      loadPricing: async () => ({
+        source: "sale_line_current", fy: "2026-27", basis: "test",
+        byGroup: {
+          "CP (Chrome-Plated)": {
+            canonicalGroup: "CP (Chrome-Plated)", averageRealisedRate: 10,
+            medianCodeLevelRealisedRate: 10, p10RealisedRate: 10, p90RealisedRate: 10,
+            contributingCodeCount: 2, amount: null, unpriceableQty: 0, unpriceableReason: null,
+          },
+        },
+      }),
+    });
+    expect(Object.keys(result.pricing?.byGroup ?? {})).toEqual(["C P", "CP ACCESSORIES"]);
+    expect(result.pricing?.byGroup["C P"].canonicalGroup).toBe("CP (Chrome-Plated)");
+    expect(result.pricing?.byGroup["C P"].amount).toBe(20);
+    expect(result.pricing?.byGroup["CP ACCESSORIES"].amount).toBe(30);
+    expect(result.byHead[0].parties[0].byGroupAmount?.["C P"]).toBe(20);
+    expect(result.byHead[0].parties[0].amountReconciliation?.difference).toBe(0);
+    expect(result.amountReconciliation?.parties.every((row) => row.difference === 0)).toBe(true);
+    const workbook = buildFactoryPendingWorkbook(result);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toContain("Info");
+    expect(workbook.getWorksheet("Pending Detail")?.getRow(1).values).toEqual(
+      expect.arrayContaining(["Priced Amount (₹)", "Unpriceable Qty", "C P Amount (₹)"]),
+    );
+  });
+
+  it("uses pieces for resolved tanks and litres divided by canonical capacity for old rows", () => {
+    expect(saleQuantityDenominator("WT-02", "WATER TANK", 7, 1400)).toBe(7);
+    expect(saleQuantityDenominator("WT-02", "WATER TANK", 1400, null)).toBe(7);
+    expect(saleQuantityDenominator("WT-001", "WATER TANK", 12, null)).toBe(12);
+  });
+
+  it("excludes null sale amounts from both realised numerator and denominator", () => {
+    const pricing = buildPendingPricingFromRows([
+      { code: "GP-1", group_canon: "Garden Pipe", group_raw: null, amount: null, qty: 100, qty_ltr: null },
+      { code: "GP-2", group_canon: "Garden Pipe", group_raw: null, amount: 1000, qty: 10, qty_ltr: null },
+    ]);
+    expect(pricing.byGroup["Garden Pipe"].averageRealisedRate).toBe(100);
   });
 });

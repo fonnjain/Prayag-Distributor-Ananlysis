@@ -1,0 +1,212 @@
+# Replit Prompt 97 (revised) — Pending Orders: quantity and amount tabs
+
+**Date:** 15 September 2026
+**Supersedes:** the earlier Prompt 97, written before the attribution hierarchy
+shipped.
+**Scope:** A is a decision. B is read-only. C is the build.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## What changed since the first version
+
+Prompt 96 is live at `197b7369`. The drill is now **State Head → Team Member →
+Party**, with three first-class buckets and exact reconciliation at every level.
+
+**That changes this prompt in three ways, and adds one requirement.**
+
+Sandeep now reads:
+
+| Bucket | Pieces |
+|---|---:|
+| Named members | 67,718 |
+| Not assigned | 58,839 |
+| Disputed attribution | 41,888 |
+| **Total** | **1,68,445** |
+
+And the head row carries coverage: *42.82% has exactly one assignment candidate;
+40.20% safely mapped after conflict holds.*
+
+**The Amount tab must reconcile through the same buckets.** Amount by member plus
+amount unassigned plus amount disputed must equal the head amount, exactly as the
+quantity tab does. Otherwise switching tabs would change the shape of the answer,
+not just its units.
+
+---
+
+## Section A — the decision, unchanged and still first
+
+There are two pending measures on this page and they are **not the same
+population**:
+
+| | Measure | Source | Value |
+|---|---|---|---|
+| Factory pending | **unit quantity** | REPORT 2 sheet | 2,98,679 pcs |
+| Derived pending | **rupee value** | OB minus Sale sheets | ₹16.41 Cr |
+
+The page says it plainly: *"They are in different units and cannot be added or
+directly compared."*
+
+```
+Decide before building.
+
+OPTION A - PRICE THE FACTORY PENDING QUANTITIES
+  Both tabs describe the SAME balance through the SAME attribution
+  hierarchy. A party's quantity and its amount are one order in two units.
+  Cost: the price basis is a choice we make.
+
+OPTION B - SHOW DERIVED PENDING
+  A value measure from real sheets rather than a price assumption.
+  Cost: a DIFFERENT population from the quantity tab, with no party-level
+  or member-level detail - so it cannot drill at all, and the two tabs
+  could not reconcile.
+
+MY RECOMMENDATION: OPTION A, and more strongly than before.
+
+  Prompt 96 built a hierarchy that reconciles to zero at every level.
+  Option B would have no member or party breakdown to hang on it, so the
+  Amount tab could not drill and the two tabs would disagree by design.
+
+  Derived pending stays where it is, in the cross-check block, as the
+  independent check it already is.
+```
+
+---
+
+## Section B — read-only, the price basis
+
+```
+Read-only. Change nothing.
+
+B1. GRAIN FIRST - this may change everything.
+
+    The A1 audit found REPORT 2 carries: B state head, C party name,
+    D balance qty, E-AB product-group quantities. Twenty-three product
+    groups - GARDEN PIPE, WATER TANK, C P, CISTERN and so on.
+
+    THERE IS NO ITEM CODE. Pricing must therefore use a GROUP-LEVEL
+    average price, not an item price.
+
+    Confirm that, and say what a group average would be built from -
+    FY2026-27 sale_line amount over quantity, per group_canon? And over
+    what period?
+
+    A group average across a group as wide as "C P" spans very different
+    products. Print the price dispersion within each group so the weakness
+    is measurable, not just acknowledged.
+
+B2. THE PRICE CANDIDATES. Compute the company pending total under each:
+
+      group average realised price x pending qty - from sale_line,
+        FY2026-27
+      group average MRP x pending qty
+      group median realised price x pending qty
+
+    MRP will overstate badly - measured realisation runs 45-62% below MRP.
+    Print all three so the gap is visible.
+
+B3. SANITY CHECK AGAINST DERIVED PENDING. Derived pending is Rs 16.41 Cr.
+
+    2,98,679 pieces at Rs 16.41 Cr implies about Rs 550 per piece. Is that
+    plausible against measured group averages?
+
+    If priced pending lands at Rs 30 Cr or Rs 5 Cr, find out why before the
+    tab ships.
+
+B4. UNPRICEABLE PENDING. Which of the 23 product groups have no usable
+    price, and how many pieces sit in them?
+
+    Note WT LID, QUAA, TEFELON TAPE and FLOOR TRAP are small groups where
+    a reliable average may not exist.
+
+B5. WATER TANKS. The page states they are pieces in this source, not
+    litres - which is correct. Confirm the price applied is per tank.
+
+    A litre price on a piece quantity would understate by 500 to 5,000x.
+
+B6. THE DISPUTED AND UNASSIGNED BUCKETS carry 41,888 and 58,839 pieces for
+    Sandeep alone, and 1,32,491 unassigned company-wide.
+
+    Those price exactly as any other pending does - the pricing is by
+    product group, and the attribution bucket does not affect it. Confirm.
+```
+
+---
+
+## Section C — the build
+
+```
+Code change, after A and B.
+
+Two tabs: QUANTITY and AMOUNT.
+
+1. SAME HIERARCHY, SAME BUCKETS, SAME RECONCILIATION.
+
+   State Head -> Team Member -> Party -> product group, with named,
+   unassigned and disputed buckets on both tabs.
+
+   Amount must reconcile to zero difference at every level, exactly as
+   quantity does. Print Sandeep's amount reconciliation alongside his
+   quantity one.
+
+2. SWITCHING TABS KEEPS POSITION. A user drilled into Sandeep -> a member
+   -> a party stays there. Switching the measure must not reset the view
+   or collapse the tree.
+
+3. THE HEAD-ROW COVERAGE LINE STAYS on both tabs. "42.82% has exactly one
+   assignment candidate; 40.20% safely mapped" is about attribution, not
+   about units, so it is true on both.
+
+4. STATE THE PRICE BASIS PROMINENTLY on the Amount tab. Not a footnote:
+
+     "Pending value = pending quantity x average realised price per product
+      group, FY2026-27. Estimated worth of outstanding orders, not an
+      invoiced amount. The source carries product groups, not item codes,
+      so this is a group-level estimate."
+
+   Quantity is a measured fact. Amount is a calculation on a coarse grain.
+   Both facts belong on the tab.
+
+5. UNPRICEABLE IS EXPLICIT, never zero. A party whose pending sits in an
+   unpriceable group shows blank-grey with the reason. A party with
+   genuinely zero pending shows zero.
+
+   Tab header states the split: "Rs X Cr priced, Y pieces unpriceable."
+
+6. THE CROSS-CHECK BLOCK gains one line - priced factory pending against
+   derived pending, noting they are independent measures which should
+   agree in magnitude. That is the block's stated purpose.
+
+7. THE EXPORT, built in Prompt 96, gains amount columns beside quantity at
+   every hierarchy level, with the price basis in the Info sheet.
+
+DO NOT CHANGE any quantity figure. 2,98,679 pieces, 147 parties, 15 heads,
+23 groups, and every Prompt 96 bucket total must be identical before and
+after. The regression tests from Prompt 96 must still pass unchanged.
+
+AFTER APPLYING, print:
+  - company totals on both tabs
+  - Sandeep on both, with both reconciliations
+  - priced versus unpriceable split
+  - the cross-check line against derived pending
+  - confirmation the Prompt 96 tests pass
+```
+
+---
+
+## Notes
+
+- **B1 is now the load-bearing question**, and the A1 audit already half-answers
+  it: the source has product groups, not item codes. So this is a group-level
+  estimate and must be labelled as one. B1's dispersion check is what makes the
+  weakness measurable rather than merely disclosed.
+- **Option A is a stronger recommendation than before.** Prompt 96 built a
+  hierarchy that reconciles to zero at every level; derived pending has no member
+  or party detail to hang on it, so Option B could not drill at all.
+- **Requirement 1 is the new constraint.** The Amount tab must reconcile through
+  the same three buckets. If it reconciles only at head level, switching tabs
+  changes the shape of the answer rather than its units.
+- **B3 remains a free check.** If priced factory pending lands near ₹16.41 Cr,
+  two independently sourced measures agree and the cross-check block earns its
+  keep.

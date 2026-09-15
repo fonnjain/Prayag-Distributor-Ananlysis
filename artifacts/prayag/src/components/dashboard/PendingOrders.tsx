@@ -46,6 +46,12 @@ export type PendingParty = {
   attributionLink?: string | null;
   attribution?: PendingAttribution;
   reconciliation?: ReconciliationCheck;
+  pricedAmount?: number | null;
+  amount?: number | null;
+  unpriceableQty?: number | null;
+  unpriceableReason?: string | null;
+  byGroupAmount?: Record<string, number | null>;
+  amountReconciliation?: ReconciliationCheck;
 };
 
 export type PendingBucket = {
@@ -53,6 +59,11 @@ export type PendingBucket = {
   total: number;
   parties: PendingParty[];
   reconciliation?: ReconciliationCheck;
+  pricedAmount?: number | null;
+  amount?: number | null;
+  unpriceableQty?: number | null;
+  unpriceableReason?: string | null;
+  amountReconciliation?: ReconciliationCheck;
 };
 
 export type PendingHead = {
@@ -62,6 +73,11 @@ export type PendingHead = {
   buckets?: PendingBucket[];
   coverage?: PendingCoverage;
   reconciliation?: ReconciliationCheck;
+  pricedAmount?: number | null;
+  amount?: number | null;
+  unpriceableQty?: number | null;
+  unpriceableReason?: string | null;
+  amountReconciliation?: ReconciliationCheck;
 };
 
 export type PendingCoverage = {
@@ -101,6 +117,21 @@ type PendingOrdersData = {
   attributionError?: string | null;
   computedAt: string;
   error: string | null;
+  pricingAvailable?: boolean;
+  pricingError?: string | null;
+  pricedAmount?: number | null;
+  amount?: number | null;
+  unpriceableQty?: number | null;
+  pricing?: {
+    basis: string;
+    byGroup: Record<string, {
+      averageRealisedRate: number | null;
+      amount: number | null;
+      unpriceableQty: number;
+      unpriceableReason: string | null;
+    }>;
+  } | null;
+  amountReconciliation?: PendingReconciliation | null;
 };
 
 // ── Formatters ─────────────────────────────────────────────────────────────────
@@ -113,21 +144,54 @@ function fmtCr(n: number): string {
   return "\u20b9" + trunc2((n / 1e7)) + " Cr";
 }
 
+function fmtAmount(n: number): string {
+  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function AmountCell({
+  value,
+  unpriceableQty = 0,
+  reason,
+}: {
+  value?: number | null;
+  unpriceableQty?: number | null;
+  reason?: string | null;
+}) {
+  if (value == null) {
+    return (
+      <span
+        className="text-muted-foreground/60 bg-muted/50 px-1 rounded"
+        title={reason ?? "No usable positive realised rate"}
+      >
+        —
+      </span>
+    );
+  }
+  return <span title={(unpriceableQty ?? 0) > 0 ? `${fmtQty(unpriceableQty ?? 0)} pieces unpriceable` : undefined}>{fmtAmount(value)}</span>;
+}
+
 // ── Shared components ──────────────────────────────────────────────────────────
 
-function ReconText({ rec }: { rec?: ReconciliationCheck }) {
+export function ReconText({
+  rec,
+  measure = "quantity",
+}: {
+  rec?: ReconciliationCheck | null;
+  measure?: "quantity" | "amount";
+}) {
   if (!rec) return null;
+  const format = measure === "amount" ? fmtAmount : fmtQty;
   if (rec.exact) {
     return (
       <span className="text-[11px] text-muted-foreground font-normal">
-        Parent {fmtQty(rec.parent)}, Children {fmtQty(rec.children)}, Difference 0
+        Parent {format(rec.parent)}, Children {format(rec.children)}, Difference {format(0)}
       </span>
     );
   }
   return (
     <span className="text-[11px] text-destructive font-medium flex items-center gap-1">
       <AlertTriangle className="h-3 w-3 shrink-0" />
-      Mismatch: Parent {fmtQty(rec.parent)}, Children {fmtQty(rec.children)}, Difference {fmtQty(rec.difference)}
+      Mismatch: Parent {format(rec.parent)}, Children {format(rec.children)}, Difference {format(rec.difference)}
     </span>
   );
 }
@@ -135,11 +199,20 @@ function ReconText({ rec }: { rec?: ReconciliationCheck }) {
 function BucketGroup({
   bucket,
   activeGroups,
+  measure = "quantity",
+  stateKey,
+  openState,
+  onOpenChange,
 }: {
   bucket: PendingBucket;
   activeGroups: string[];
+  measure?: "quantity" | "amount";
+  stateKey?: string;
+  openState?: Record<string, boolean>;
+  onOpenChange?: (key: string, value: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = stateKey && openState ? openState[stateKey] ?? false : localOpen;
   const isDisputed = bucket.bucket === "Attribution Conflicts";
   const isUnassigned = bucket.bucket === "Unassigned";
   const bucketName = isDisputed ? "Disputed" : isUnassigned ? "Not assigned" : bucket.bucket;
@@ -148,7 +221,7 @@ function BucketGroup({
     <Fragment>
       <tr
         className="bg-muted/10 border-b border-border font-medium cursor-pointer hover:bg-muted/20"
-        onClick={() => setOpen(!open)}
+        onClick={() => stateKey && onOpenChange ? onOpenChange(stateKey, !open) : setLocalOpen(!open)}
       >
         <td className="px-3 py-2 text-foreground flex flex-col gap-0.5">
           <div className="flex items-center gap-2">
@@ -156,17 +229,29 @@ function BucketGroup({
             <span>{bucketName}</span>
           </div>
           <div className="pl-6">
-            <ReconText rec={bucket.reconciliation} />
+            <ReconText rec={measure === "amount" ? bucket.amountReconciliation : bucket.reconciliation} measure={measure} />
           </div>
         </td>
         <td className="px-3 py-2 text-right tabular-nums text-foreground align-top">
-          {fmtQty(bucket.total)}
+          {measure === "amount" ? (
+            <AmountCell value={bucket.pricedAmount ?? bucket.amount} unpriceableQty={bucket.unpriceableQty} reason={bucket.unpriceableReason} />
+          ) : fmtQty(bucket.total)}
         </td>
+        {measure === "amount" && (
+          <td className="px-3 py-2 text-right tabular-nums text-amber-700 align-top">
+            {bucket.unpriceableQty ? fmtQty(bucket.unpriceableQty) : ""}
+          </td>
+        )}
         {activeGroups.map(g => {
           const sum = bucket.parties.reduce((acc, p) => acc + (p.byGroup[g] ?? 0), 0);
+          const groupAmounts = bucket.parties
+            .map((party) => party.byGroupAmount?.[g] ?? null)
+            .filter((amount): amount is number => amount != null);
           return (
             <td key={g} className="px-2 py-2 text-right tabular-nums text-muted-foreground align-top">
-              {sum > 0 ? fmtQty(sum) : ""}
+              {measure === "amount"
+                ? <AmountCell value={groupAmounts.length ? groupAmounts.reduce((a, value) => a + value, 0) : null} />
+                : sum > 0 ? fmtQty(sum) : ""}
             </td>
           );
         })}
@@ -197,7 +282,7 @@ function BucketGroup({
                     </span>
                   )}
                 </div>
-                <ReconText rec={p.reconciliation} />
+                <ReconText rec={measure === "amount" ? p.amountReconciliation : p.reconciliation} measure={measure} />
 
                 {isConflict && p.candidateEvidence && p.candidateEvidence.length > 0 && (
                   <div className="text-[10px] text-destructive flex flex-col gap-0.5 mt-1">
@@ -209,14 +294,23 @@ function BucketGroup({
               </div>
             </td>
             <td className="px-3 py-2 text-right font-medium tabular-nums align-top">
-              {fmtQty(p.total)}
+              {measure === "amount" ? (
+                <AmountCell value={p.pricedAmount ?? p.amount} unpriceableQty={p.unpriceableQty} reason={p.unpriceableReason} />
+              ) : fmtQty(p.total)}
             </td>
+            {measure === "amount" && (
+              <td className="px-3 py-2 text-right tabular-nums text-amber-700 align-top">
+                {p.unpriceableQty ? fmtQty(p.unpriceableQty) : ""}
+              </td>
+            )}
             {activeGroups.map((g) => (
               <td
                 key={g}
                 className="px-2 py-2 text-right tabular-nums text-muted-foreground align-top"
               >
-                {(p.byGroup[g] ?? 0) > 0 ? fmtQty(p.byGroup[g]) : ""}
+                {measure === "amount"
+                  ? <AmountCell value={p.byGroupAmount?.[g] ?? null} />
+                  : (p.byGroup[g] ?? 0) > 0 ? fmtQty(p.byGroup[g]) : ""}
               </td>
             ))}
           </tr>
@@ -232,12 +326,19 @@ export function HeadSection({
   head,
   groups,
   defaultOpen,
+  measure = "quantity",
+  openState,
+  onOpenChange,
 }: {
   head: PendingHead;
   groups: string[];
   defaultOpen: boolean;
+  measure?: "quantity" | "amount";
+  openState?: Record<string, boolean>;
+  onOpenChange?: (key: string, value: boolean) => void;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [localOpen, setLocalOpen] = useState(defaultOpen);
+  const open = openState ? openState[`head:${head.head}`] ?? defaultOpen : localOpen;
 
   // Compute coverage facts for the head
   const headCandidatePct = head.coverage?.candidateCoveragePct ?? 0;
@@ -258,7 +359,7 @@ export function HeadSection({
     <div className="border border-border rounded-lg overflow-hidden">
       <button
         className="w-full flex flex-col sm:flex-row sm:items-start justify-between px-4 py-3 bg-muted/40 hover:bg-muted/70 transition-colors text-left gap-4"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => onOpenChange ? onOpenChange(`head:${head.head}`, !open) : setLocalOpen((v) => !v)}
       >
         <div className="flex items-start gap-2 min-w-0">
           <div className="mt-0.5">
@@ -271,7 +372,7 @@ export function HeadSection({
           <div className="flex flex-col">
             <div className="flex flex-col">
               <span className="font-semibold text-base">{head.head}</span>
-              <ReconText rec={head.reconciliation} />
+              <ReconText rec={measure === "amount" ? head.amountReconciliation : head.reconciliation} measure={measure} />
             </div>
 
             <div className="text-[11.5px] text-muted-foreground mt-2 flex flex-col gap-0.5">
@@ -300,8 +401,13 @@ export function HeadSection({
 
         <div className="flex flex-col text-left sm:text-right pl-6 sm:pl-0 shrink-0">
           <span className="text-base font-bold tabular-nums">
-            {fmtQty(head.total)} pcs
+            {measure === "amount" ? (
+              <AmountCell value={head.pricedAmount ?? head.amount} unpriceableQty={head.unpriceableQty} reason={head.unpriceableReason} />
+            ) : `${fmtQty(head.total)} pcs`}
           </span>
+          {measure === "amount" && head.unpriceableQty ? (
+            <span className="text-xs text-amber-700">{fmtQty(head.unpriceableQty)} pcs unpriceable</span>
+          ) : null}
           <span className="text-xs text-muted-foreground mt-1">
             {head.parties.length} {head.parties.length === 1 ? "party" : "parties"}
           </span>
@@ -317,8 +423,11 @@ export function HeadSection({
                   Bucket / Party
                 </th>
                 <th className="text-right px-3 py-2 font-medium text-muted-foreground w-24 shrink-0">
-                  Total (pcs)
+                  {measure === "amount" ? "Priced amount (₹)" : "Total (pcs)"}
                 </th>
+                {measure === "amount" && (
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">Unpriceable (pcs)</th>
+                )}
                 {activeGroups.map((g) => (
                   <th
                     key={g}
@@ -331,17 +440,32 @@ export function HeadSection({
             </thead>
             <tbody>
               {buckets.map((bucket, bIdx) => (
-                <BucketGroup key={bucket.bucket + bIdx} bucket={bucket} activeGroups={activeGroups} />
+                <BucketGroup
+                  key={bucket.bucket + bIdx}
+                  bucket={bucket}
+                  activeGroups={activeGroups}
+                  measure={measure}
+                  stateKey={`bucket:${head.head}:${bucket.bucket}`}
+                  openState={openState}
+                  onOpenChange={onOpenChange}
+                />
               ))}
 
               <tr className="border-t-2 border-border bg-muted/30 font-semibold">
                 <td className="px-3 py-2 text-sm flex flex-col gap-0.5 pl-9">
                   <span>Total — {head.head}</span>
-                  <ReconText rec={head.reconciliation} />
+                    <ReconText rec={measure === "amount" ? head.amountReconciliation : head.reconciliation} measure={measure} />
                 </td>
                 <td className="px-3 py-2 text-right text-sm tabular-nums align-top">
-                  {fmtQty(head.total)}
+                  {measure === "amount" ? (
+                    <AmountCell value={head.pricedAmount ?? head.amount} unpriceableQty={head.unpriceableQty} reason={head.unpriceableReason} />
+                  ) : fmtQty(head.total)}
                 </td>
+                {measure === "amount" && (
+                  <td className="px-3 py-2 text-right text-amber-700">
+                    {head.unpriceableQty ? fmtQty(head.unpriceableQty) : ""}
+                  </td>
+                )}
                 {activeGroups.map((g) => {
                   const sum = head.parties.reduce(
                     (acc, p) => acc + (p.byGroup[g] ?? 0),
@@ -349,7 +473,14 @@ export function HeadSection({
                   );
                   return (
                     <td key={g} className="px-2 py-2 text-right tabular-nums text-sm align-top">
-                      {sum > 0 ? fmtQty(sum) : ""}
+                     {measure === "amount"
+                       ? <AmountCell value={(() => {
+                           const values = head.parties
+                             .map((party) => party.byGroupAmount?.[g] ?? null)
+                             .filter((amount): amount is number => amount != null);
+                           return values.length ? values.reduce((a, value) => a + value, 0) : null;
+                         })()} />
+                       : sum > 0 ? fmtQty(sum) : ""}
                     </td>
                   );
                 })}
@@ -365,9 +496,11 @@ export function HeadSection({
 export function SourceOnlyHeadSection({
   head,
   groups,
+  measure = "quantity",
 }: {
   head: PendingHead;
   groups: string[];
+  measure?: "quantity" | "amount";
 }) {
   const [open, setOpen] = useState(false);
   const activeGroups = groups.filter((group) =>
@@ -392,11 +525,13 @@ export function SourceOnlyHeadSection({
             <div className="text-xs text-amber-800">
               Attribution unavailable — source parties and quantities only.
             </div>
-            <ReconText rec={head.reconciliation} />
+            <ReconText rec={measure === "amount" ? head.amountReconciliation : head.reconciliation} measure={measure} />
           </div>
         </div>
         <div className="text-right shrink-0">
-          <div className="font-bold tabular-nums">{fmtQty(head.total)} pcs</div>
+           <div className="font-bold tabular-nums">
+             {measure === "amount" ? <AmountCell value={head.pricedAmount ?? head.amount} unpriceableQty={head.unpriceableQty} reason={head.unpriceableReason} /> : `${fmtQty(head.total)} pcs`}
+           </div>
           <div className="text-xs text-muted-foreground">
             {head.parties.length} {head.parties.length === 1 ? "party" : "parties"}
           </div>
@@ -411,8 +546,9 @@ export function SourceOnlyHeadSection({
                   Source party
                 </th>
                 <th className="text-right px-3 py-2 font-medium text-muted-foreground">
-                  Total (pcs)
+                   {measure === "amount" ? "Priced amount (₹)" : "Total (pcs)"}
                 </th>
+                {measure === "amount" && <th className="text-right px-3 py-2 font-medium text-muted-foreground">Unpriceable (pcs)</th>}
                 {activeGroups.map((group) => (
                   <th
                     key={group}
@@ -428,14 +564,17 @@ export function SourceOnlyHeadSection({
                 <tr key={`${party.party}-${index}`} className="border-b border-border/50">
                   <td className="px-3 py-2">
                     <div>{party.party}</div>
-                    <ReconText rec={party.reconciliation} />
+                    <ReconText rec={measure === "amount" ? party.amountReconciliation : party.reconciliation} measure={measure} />
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtQty(party.total)}</td>
+                   <td className="px-3 py-2 text-right tabular-nums">
+                     {measure === "amount" ? <AmountCell value={party.pricedAmount ?? party.amount} unpriceableQty={party.unpriceableQty} reason={party.unpriceableReason} /> : fmtQty(party.total)}
+                   </td>
+                   {measure === "amount" && <td className="px-3 py-2 text-right tabular-nums text-amber-700">{party.unpriceableQty ? fmtQty(party.unpriceableQty) : ""}</td>}
                   {activeGroups.map((group) => (
                     <td key={group} className="px-2 py-2 text-right tabular-nums">
-                      {(party.byGroup[group] ?? 0) > 0
-                        ? fmtQty(party.byGroup[group] ?? 0)
-                        : ""}
+                       {measure === "amount"
+                         ? <AmountCell value={party.byGroupAmount?.[group] ?? null} />
+                         : (party.byGroup[group] ?? 0) > 0 ? fmtQty(party.byGroup[group] ?? 0) : ""}
                     </td>
                   ))}
                 </tr>
@@ -458,6 +597,9 @@ export default function PendingOrders() {
   // a retry is scheduled automatically after the server's retryAfter hint.
   const [quotaWait, setQuotaWait] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
+  const [measure, setMeasure] = useState<"quantity" | "amount">("quantity");
+  // Stable keys mean changing the measure never collapses a head or bucket.
+  const [openState, setOpenState] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -532,8 +674,40 @@ export default function PendingOrders() {
           <h2 className="text-lg font-semibold">Pending Order Book</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             Factory pending sheet — balance quantity by state head and party. All figures
-            are in units (pieces). Water tanks are in pieces in this source, not litres.
+            are in units (pieces); quantity is the REPORT 2 source measure. Water tanks
+            are pieces, not litres.
           </p>
+          {measure === "amount" && data.pricingAvailable === true && (
+            <p className="text-sm font-semibold mt-2">
+              {data.pricedAmount != null ? fmtCr(data.pricedAmount) : "—"} priced, {fmtQty(data.unpriceableQty ?? 0)} pieces unpriceable
+            </p>
+          )}
+          <div className="mt-3 flex items-center gap-1 rounded-md border border-border bg-muted/30 p-1 w-fit">
+            <button
+              type="button"
+              className={cn("px-3 py-1.5 text-xs font-medium rounded", measure === "quantity" ? "bg-background shadow-sm" : "text-muted-foreground")}
+              onClick={() => setMeasure("quantity")}
+            >
+              Quantity
+            </button>
+            <button
+              type="button"
+              className={cn("px-3 py-1.5 text-xs font-medium rounded", measure === "amount" ? "bg-background shadow-sm" : "text-muted-foreground")}
+              onClick={() => setMeasure("amount")}
+            >
+              Amount
+            </button>
+          </div>
+          {measure === "amount" && (
+            <div className="text-xs text-muted-foreground mt-2 max-w-3xl leading-relaxed">
+              <p className="font-semibold text-foreground">
+                Pending value = pending quantity x average realised price per product group, FY2026-27. Estimated worth of outstanding orders, not an invoiced amount. The source carries product groups, not item codes, so this is a group-level estimate.
+              </p>
+              <p className="mt-1">
+                Partial coverage is disclosed: product-group quantities without a usable positive realised rate, and REPORT 2 total-minus-group residuals, remain unpriceable. Water tank pricing is per tank; REPORT 2 water-tank quantities are pieces, with mapped tank denominators resolved from the canonical per-tank litre map.
+              </p>
+            </div>
+          )}
         </div>
         {data.attributionAvailable !== false ? (
           <a
@@ -567,6 +741,13 @@ export default function PendingOrders() {
         </div>
       )}
 
+      {data.pricingError && (
+        <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/20 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>Amount unavailable: {data.pricingError}. Source quantities remain available.</span>
+        </div>
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-lg border border-border bg-card p-3 flex flex-col justify-between">
@@ -578,9 +759,21 @@ export default function PendingOrders() {
             <div className="text-xs text-muted-foreground">pieces</div>
           </div>
           <div className="mt-2">
-            <ReconText rec={data.reconciliation?.company} />
+            <ReconText
+              rec={measure === "amount" ? data.amountReconciliation?.company : data.reconciliation?.company}
+              measure={measure}
+            />
           </div>
         </div>
+        {data.pricingAvailable === true && <div className="rounded-lg border border-border bg-card p-3">
+          <div className="text-xs text-muted-foreground mb-1">Priced amount</div>
+          <div className="text-xl font-bold tabular-nums">
+            {data.pricedAmount != null ? fmtCr(data.pricedAmount) : "—"}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {data.unpriceableQty != null ? `${fmtQty(data.unpriceableQty)} pcs unpriceable` : "—"}
+          </div>
+        </div>}
         <div className="rounded-lg border border-border bg-card p-3">
           <div className="text-xs text-muted-foreground mb-1">Parties</div>
           <div className="text-xl font-bold tabular-nums">
@@ -642,14 +835,21 @@ export default function PendingOrders() {
       )}
 
       {/* Cross-check panel */}
-      <div className="rounded-lg border border-border bg-card p-4 mt-2">
+      {(measure !== "amount" || data.pricingAvailable === true) && <div className="rounded-lg border border-border bg-card p-4 mt-2">
         <div className="flex items-center gap-2 mb-3">
           <Info className="h-4 w-4 text-muted-foreground shrink-0" />
           <span className="text-sm font-medium">
             Cross-check: Derived pending vs factory pending
           </span>
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 text-sm">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 text-sm">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs text-muted-foreground">Priced factory pending</span>
+            <span className="font-semibold tabular-nums">
+              {data.pricedAmount != null ? fmtCr(data.pricedAmount) : "—"}
+            </span>
+            <span className="text-xs text-muted-foreground">Independent REPORT 2 amount measure</span>
+          </div>
           <div className="flex flex-col gap-0.5">
             <span className="text-xs text-muted-foreground">Order Booking (OB)</span>
             <span className="font-semibold tabular-nums">
@@ -681,15 +881,12 @@ export default function PendingOrders() {
           </div>
         </div>
         <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
-          The derived pending (₹ value, from OB minus Sale sheets) and the factory
-          pending (unit quantity, from the internal pending sheet) are independent
-          measures of the same outstanding order balance. They are in different
-          units and cannot be added or directly compared, but they should point to
-          the same order of magnitude. A large divergence in direction (e.g. derived
-          pending is positive but factory pending is zero, or vice versa) would
-          indicate a data integrity issue worth investigating.
+           The priced factory pending and derived pending are independent measures.
+           They are expected to agree in magnitude as a cross-check, but are not fully
+           comparable: derived pending is OB minus Sale while factory pending is priced
+           REPORT 2 quantity.
         </p>
-      </div>
+      </div>}
 
       {/* Per-head sections */}
       {data.byHead.length === 0 && !data.error && (
@@ -697,7 +894,11 @@ export default function PendingOrders() {
           No pending orders found in factory sheet.
         </div>
       )}
-      {data.attributionAvailable === false ? (
+      {measure === "amount" && data.pricingAvailable !== true ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 mt-4">
+          Amount pricing unavailable{data.pricingError ? `: ${data.pricingError}` : "."}
+        </div>
+      ) : data.attributionAvailable === false ? (
         <div className="flex flex-col gap-2 mt-4">
           <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             Factory totals and source parties remain available, but the member
@@ -708,7 +909,7 @@ export default function PendingOrders() {
             .slice()
             .sort((a, b) => b.total - a.total)
             .map((head) => (
-              <SourceOnlyHeadSection key={head.head} head={head} groups={data.groups} />
+               <SourceOnlyHeadSection key={head.head} head={head} groups={data.groups} measure={measure} />
             ))}
         </div>
       ) : (
@@ -722,6 +923,9 @@ export default function PendingOrders() {
                 head={h}
                 groups={data.groups}
                 defaultOpen={false}
+                measure={measure}
+                openState={openState}
+                onOpenChange={(key, value) => setOpenState((current) => ({ ...current, [key]: value }))}
               />
             ))}
         </div>

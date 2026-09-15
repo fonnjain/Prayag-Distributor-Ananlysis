@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   HeadSection,
+  ReconText,
   SourceOnlyHeadSection,
   type PendingHead,
 } from "../PendingOrders";
@@ -62,6 +63,16 @@ function zeroCoverageHead(head: string): PendingHead {
 }
 
 describe("Pending Orders zero-coverage heads", () => {
+  it("formats amount reconciliation in rupees rather than quantity units", () => {
+    const markup = renderToStaticMarkup(createElement(ReconText, {
+      measure: "amount",
+      rec: { parent: 1250.5, children: 1250.5, difference: 0, exact: true },
+    }));
+    expect(markup).toContain("Parent ₹1,250.50");
+    expect(markup).toContain("Children ₹1,250.50");
+    expect(markup).toContain("Difference ₹0.00");
+  });
+
   it.each(ZERO_COVERAGE_HEADS)(
     "renders %s as a known attribution gap, not an error",
     (headName) => {
@@ -98,5 +109,59 @@ describe("Pending Orders zero-coverage heads", () => {
     expect(html).toContain("Attribution unavailable — source parties and quantities only.");
     expect(html).not.toContain("0.00% has exactly one assignment candidate");
     expect(html).not.toContain("Known attribution gap");
+  });
+
+  it("renders a blank grey amount for a fully unpriceable row and preserves the amount basis surface", () => {
+    const head = zeroCoverageHead("AMOUNT HEAD");
+    head.pricedAmount = null;
+    head.unpriceableQty = 100;
+    head.unpriceableReason = "No usable positive realised rate";
+    const html = renderToStaticMarkup(
+      createElement(HeadSection, {
+        head,
+        groups: ["GARDEN PIPE"],
+        defaultOpen: true,
+        measure: "amount",
+      }),
+    );
+    expect(html).toContain("Priced amount");
+    expect(html).toContain("Unpriceable");
+    expect(html).toContain("bg-muted/50");
+    expect(html).toContain("No usable positive realised rate");
+  });
+
+  it("renders genuine zero amount rather than treating it as missing", () => {
+    const head = zeroCoverageHead("ZERO AMOUNT");
+    head.pricedAmount = 0;
+    head.unpriceableQty = 0;
+    head.parties[0].byGroupAmount = { "GARDEN PIPE": 0 };
+    const html = renderToStaticMarkup(
+      createElement(HeadSection, {
+        head,
+        groups: ["GARDEN PIPE"],
+        defaultOpen: true,
+        measure: "amount",
+      }),
+    );
+    expect(html).toContain("₹0.00");
+  });
+
+  it("shows the matching Sandeep amount reconciliation while quantity stays in pieces", () => {
+    const head = zeroCoverageHead("Sandeep");
+    head.pricedAmount = 0;
+    head.unpriceableQty = 0;
+    head.amountReconciliation = { parent: 0, children: 0, difference: 0, exact: true };
+    head.parties[0].byGroupAmount = { "GARDEN PIPE": 0 };
+    head.parties[0].amountReconciliation = { parent: 0, children: 0, difference: 0, exact: true };
+    head.buckets![0].amountReconciliation = { parent: 0, children: 0, difference: 0, exact: true };
+    const amount = renderToStaticMarkup(createElement(HeadSection, {
+      head, groups: ["GARDEN PIPE"], defaultOpen: true, measure: "amount",
+    }));
+    expect(amount).toContain("Sandeep");
+    expect(amount).toContain("Parent ₹0.00, Children ₹0.00, Difference ₹0.00");
+    const quantity = renderToStaticMarkup(createElement(HeadSection, {
+      head, groups: ["GARDEN PIPE"], defaultOpen: true, measure: "quantity",
+    }));
+    expect(quantity).toContain("Parent 100, Children 100, Difference 0");
   });
 });
