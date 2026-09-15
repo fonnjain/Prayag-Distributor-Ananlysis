@@ -5436,7 +5436,24 @@ components:
         margin: { type: object, additionalProperties: true }
         breakeven: { type: object, additionalProperties: true }
         breakevenLiftRequired: { type: object, additionalProperties: true }
-        flags: { type: object, additionalProperties: true }
+        flags:
+          type: object
+          required: [beyondPrecedent, observedDefinitionExceeded, rateClamped, modeledRateCeilingApplied, modeledRateCeilingBinding, historicalCostCeilingAvailable, historicalCostComparisonPerformed, breadthBeyondPrecedent, amountBeyondPrecedent, targetGroupHistoryAvailable, borrowedFromComparableGroup, controlsAndLiftAvailable, statement]
+          properties:
+            beyondPrecedent: { type: boolean, description: "True only when observed scheme-definition structure is exceeded; never a historical-cost comparison." }
+            observedDefinitionExceeded: { type: boolean }
+            rateClamped: { type: boolean }
+            modeledRateCeilingApplied: { type: boolean, description: "The supplied margin cap is used as a modeled proposal-rate ceiling." }
+            modeledRateCeilingBinding: { type: boolean, description: "At least one observed precedent rate was reduced by the modeled rate ceiling." }
+            historicalCostCeilingAvailable: { type: boolean, description: "Always false until actual qualification and payout history exists." }
+            historicalCostComparisonPerformed: { type: boolean, description: "Always false while exact historical scheme spend remains unavailable." }
+            breadthBeyondPrecedent: { type: boolean }
+            amountBeyondPrecedent: { type: boolean }
+            targetGroupHistoryAvailable: { type: boolean }
+            borrowedFromComparableGroup: { type: boolean }
+            controlsAndLiftAvailable: { type: boolean }
+            statement: { type: string }
+          additionalProperties: false
         controlLift: { type: object, additionalProperties: true }
         evidenceBasis: { type: array, items: { type: string } }
         guardrails: { type: object, additionalProperties: true }

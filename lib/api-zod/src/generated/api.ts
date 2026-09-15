@@ -707,7 +707,21 @@ export const GenerateAiSchemesHistoryResponse = zod.object({
   "margin": zod.record(zod.string(), zod.unknown()),
   "breakeven": zod.record(zod.string(), zod.unknown()),
   "breakevenLiftRequired": zod.record(zod.string(), zod.unknown()),
-  "flags": zod.record(zod.string(), zod.unknown()),
+  "flags": zod.object({
+  "beyondPrecedent": zod.boolean().describe('True only when observed scheme-definition structure is exceeded; never a historical-cost comparison.'),
+  "observedDefinitionExceeded": zod.boolean(),
+  "rateClamped": zod.boolean(),
+  "modeledRateCeilingApplied": zod.boolean().describe('The supplied margin cap is used as a modeled proposal-rate ceiling.'),
+  "modeledRateCeilingBinding": zod.boolean().describe('At least one observed precedent rate was reduced by the modeled rate ceiling.'),
+  "historicalCostCeilingAvailable": zod.boolean().describe('Always false until actual qualification and payout history exists.'),
+  "historicalCostComparisonPerformed": zod.boolean().describe('Always false while exact historical scheme spend remains unavailable.'),
+  "breadthBeyondPrecedent": zod.boolean(),
+  "amountBeyondPrecedent": zod.boolean(),
+  "targetGroupHistoryAvailable": zod.boolean(),
+  "borrowedFromComparableGroup": zod.boolean(),
+  "controlsAndLiftAvailable": zod.boolean(),
+  "statement": zod.string()
+}),
   "controlLift": zod.record(zod.string(), zod.unknown()),
   "evidenceBasis": zod.array(zod.string()),
   "guardrails": zod.record(zod.string(), zod.unknown())

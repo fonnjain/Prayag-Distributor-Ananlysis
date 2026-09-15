@@ -85,7 +85,21 @@ describe("Prompt 95 historical scheme basis", () => {
     expect(result.writes).toEqual([]);
     expect((result.breakeven as { available: boolean; value: number }).available).toBe(true);
     expect((result.breakeven as { value: number }).value).toBe(500_000);
-    expect((result.flags as { beyondPrecedent: boolean }).beyondPrecedent).toBe(false);
+    const flags = result.flags as {
+      beyondPrecedent: boolean;
+      modeledRateCeilingApplied: boolean;
+      modeledRateCeilingBinding: boolean;
+      historicalCostCeilingAvailable: boolean;
+      historicalCostComparisonPerformed: boolean;
+      statement: string;
+    };
+    expect(flags.beyondPrecedent).toBe(false);
+    expect(flags.modeledRateCeilingApplied).toBe(true);
+    expect(flags.modeledRateCeilingBinding).toBe(true);
+    expect(flags.historicalCostCeilingAvailable).toBe(false);
+    expect(flags.historicalCostComparisonPerformed).toBe(false);
+    expect(flags.statement).toMatch(/modeled rate ceiling/i);
+    expect(flags.statement).toMatch(/no historical cost comparison/i);
     expect((result.proposal as { modeledCostAssumption: string }).modeledCostAssumption)
       .toBe("Conservative modeled cost assumption: first usable observed percentage slab threshold × breadthOpportunityRetailers.");
     expect(query.mock.calls.every(([statement]) => !/\b(INSERT|UPDATE|DELETE|TRUNCATE)\b/i.test(statement))).toBe(true);

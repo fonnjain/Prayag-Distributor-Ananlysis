@@ -102,7 +102,12 @@ interface MarginBreakevenData {
 
 interface FlagsData {
   beyondPrecedent: boolean;
+  observedDefinitionExceeded: boolean;
   rateClamped: boolean;
+  modeledRateCeilingApplied: boolean;
+  modeledRateCeilingBinding: boolean;
+  historicalCostCeilingAvailable: boolean;
+  historicalCostComparisonPerformed: boolean;
   breadthBeyondPrecedent: boolean;
   amountBeyondPrecedent: boolean;
   targetGroupHistoryAvailable: boolean;
@@ -809,9 +814,15 @@ export function HistoricalBasisTab() {
                         Warning Flags
                       </h4>
                       <ul className="space-y-2 text-xs text-orange-800 dark:text-orange-300">
-                        {flags.beyondPrecedent && <li>• Requested structure goes beyond the observed precedent shape.</li>}
+                        {flags.beyondPrecedent && <li>• Requested definition structure goes beyond observed scheme definitions.</li>}
                         {flags.borrowedFromComparableGroup && <li>• <span className="font-semibold">Borrowed</span>: Target group lacked history; borrowed from comparable group.</li>}
-                        {flags.rateClamped && <li>• Rates were clamped to match the provided margin cap.</li>}
+                        {flags.modeledRateCeilingApplied && (
+                          <li>• <span className="font-semibold">Modeled rate ceiling:</span> the supplied margin cap limits proposal rates; it is not an observed historical cost ceiling.</li>
+                        )}
+                        {flags.modeledRateCeilingBinding && <li>• The modeled rate ceiling was binding, so one or more observed rates were clamped.</li>}
+                        {!flags.historicalCostCeilingAvailable && (
+                          <li>• No historical cost ceiling is available, and no proposal-cost comparison against historical spend was performed.</li>
+                        )}
                         <li>• {flags.statement}</li>
                       </ul>
                     </div>

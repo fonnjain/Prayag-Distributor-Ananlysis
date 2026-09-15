@@ -5843,6 +5843,42 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
         WHERE status <> 'superseded';
     `,
   },
+  {
+    id: "121_scheme_item_group_spelling_eligibility_pending",
+    sql: `
+      INSERT INTO resolution_item
+        (code, type, title, category, reason, evidence, value_at_stake, raised_on,
+         raised_by, owner, priority, status, resolved_on, resolved_by, resolution_note, blocks_api)
+      VALUES
+        ('P46','PENDING','Resolve duplicate scheme eligibility labels: CP/C P and CONNECTION/CONECTION','master data',
+         'Confirm and apply one canonical spelling for each duplicate scheme_item_group label so distributor eligibility cannot depend on source spelling.',
+         '[Source: AI Schemes Historical Basis audit, 15 September 2026] Seven live schemes use at least one duplicated-label family. ANNUAL_WB includes both CONNECTION and CONECTION. CP_KL_KA, CP_LALAN and CP_WAHID include both CP and C P; ANNUAL_WB, PTMT_CP_AP_TEL and PTMT_CP_WB include CP only and are therefore spelling-sensitive at definition level. All use cumulative_value qualification. No qualification, payout or order-to-scheme linkage table exists, so an actual distributor-level qualification difference cannot be measured.',
+         NULL,'2026-09-15','AI Schemes Historical Basis audit','Prayag','high','open',NULL,NULL,NULL,FALSE)
+      ON CONFLICT (code) DO UPDATE SET
+        type = EXCLUDED.type,
+        title = EXCLUDED.title,
+        category = EXCLUDED.category,
+        reason = EXCLUDED.reason,
+        evidence = EXCLUDED.evidence,
+        owner = EXCLUDED.owner,
+        priority = EXCLUDED.priority,
+        status = EXCLUDED.status,
+        blocks_api = FALSE,
+        updated_at = now();
+
+      UPDATE resolution_item
+      SET evidence = CASE
+            WHEN evidence LIKE '%P46 scheme-eligibility note%' THEN evidence
+            ELSE evidence || ' [Q28 note, 15 September 2026] P46 scheme-eligibility note: scheme_item_group repeats CP/C P and CONNECTION/CONECTION. Because eligibility may depend on exact source spelling and actual qualification outcomes are unavailable, Prayag must confirm canonical labels.'
+          END,
+          updated_at = now()
+      WHERE code = 'P28';
+
+      INSERT INTO resolution_item_relationship (source_code, target_code, relation)
+      VALUES ('P46','P28','question-for-gap')
+      ON CONFLICT (source_code, target_code, relation) DO NOTHING;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

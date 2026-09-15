@@ -81,6 +81,10 @@ vi.mock('@workspace/api-client-react', () => ({
       },
       flags: { 
         beyondPrecedent: true,
+        modeledRateCeilingApplied: true,
+        modeledRateCeilingBinding: true,
+        historicalCostCeilingAvailable: false,
+        historicalCostComparisonPerformed: false,
         statement: "Flag statement"
       },
       guardrails: { 
@@ -122,6 +126,9 @@ describe('HistoricalBasisTab UI rendering', () => {
     expect(html).toMatch(/data-testid="result-cost-pct"[^>]*>.*15.5%/);
     expect(html).toMatch(/data-testid="result-cost-assumption"[^>]*>Modeled cost assumption text/);
     expect(html).toMatch(/data-testid="result-breakeven"[^>]*>.*1.50L/);
+    expect(html).toContain('Modeled rate ceiling');
+    expect(html).toContain('not an observed historical cost ceiling');
+    expect(html).toContain('no proposal-cost comparison against historical spend was performed');
     
     consoleSpy.mockRestore();
   });

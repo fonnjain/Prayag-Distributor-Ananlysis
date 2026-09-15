@@ -2874,7 +2874,26 @@ export type GenerateAiSchemesHistoryResponseBreakeven = { [key: string]: unknown
 
 export type GenerateAiSchemesHistoryResponseBreakevenLiftRequired = { [key: string]: unknown };
 
-export type GenerateAiSchemesHistoryResponseFlags = { [key: string]: unknown };
+export type GenerateAiSchemesHistoryResponseFlags = {
+  /** True only when observed scheme-definition structure is exceeded; never a historical-cost comparison. */
+  beyondPrecedent: boolean;
+  observedDefinitionExceeded: boolean;
+  rateClamped: boolean;
+  /** The supplied margin cap is used as a modeled proposal-rate ceiling. */
+  modeledRateCeilingApplied: boolean;
+  /** At least one observed precedent rate was reduced by the modeled rate ceiling. */
+  modeledRateCeilingBinding: boolean;
+  /** Always false until actual qualification and payout history exists. */
+  historicalCostCeilingAvailable: boolean;
+  /** Always false while exact historical scheme spend remains unavailable. */
+  historicalCostComparisonPerformed: boolean;
+  breadthBeyondPrecedent: boolean;
+  amountBeyondPrecedent: boolean;
+  targetGroupHistoryAvailable: boolean;
+  borrowedFromComparableGroup: boolean;
+  controlsAndLiftAvailable: boolean;
+  statement: string;
+};
 
 export type GenerateAiSchemesHistoryResponseControlLift = { [key: string]: unknown };
 

@@ -474,8 +474,9 @@ export async function generateAiSchemesHistoryProposal(body: Record<string, unkn
   const modeledCostInr = firstUsableSlab.thresholdFrom * breadthOpportunityRetailers;
   const costAsMarginPct = modeledCostInr / categoryGrossMarginInr * 100;
   const breakevenLiftRequiredInr = modeledCostInr / (grossMarginRatePct / 100);
-  // A lower cap changes the proposed rate but does not create a structure or
-  // amount that was never observed. Exact spend bounds are unavailable.
+  // "Beyond precedent" is limited to observed definition structure. The
+  // supplied margin cap is a modeled design ceiling, not historical cost
+  // evidence, and exact historical spend bounds are unavailable.
   const beyondPrecedent = false;
   const validTerritory = Boolean(precedent.territoryGroup);
   const targetGroupHistoryAvailable = itemGroup
@@ -544,15 +545,20 @@ export async function generateAiSchemesHistoryProposal(body: Record<string, unkn
     },
     flags: {
       beyondPrecedent,
+      observedDefinitionExceeded: beyondPrecedent,
       rateClamped,
+      modeledRateCeilingApplied: true,
+      modeledRateCeilingBinding: rateClamped,
+      historicalCostCeilingAvailable: false,
+      historicalCostComparisonPerformed: false,
       breadthBeyondPrecedent: false,
       amountBeyondPrecedent: false,
       targetGroupHistoryAvailable,
       borrowedFromComparableGroup: !targetGroupHistoryAvailable,
       controlsAndLiftAvailable: validTerritory ? false : false,
       statement: beyondPrecedent
-        ? "Requested depth or breadth goes beyond the observed definition precedent."
-        : "Requested structure is within the observed definition shape; this does not establish expected outcomes.",
+        ? "Requested definition structure goes beyond observed scheme definitions. No historical cost comparison was performed."
+        : "No observed definition structure was exceeded. The supplied margin cap is a modeled rate ceiling, not an observed historical cost ceiling; no historical cost comparison was performed.",
     },
     controlLift: {
       available: false,
