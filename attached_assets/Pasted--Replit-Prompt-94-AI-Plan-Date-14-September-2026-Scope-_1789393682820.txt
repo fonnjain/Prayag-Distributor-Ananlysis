@@ -1,0 +1,260 @@
+# Replit Prompt 94 — AI Plan
+
+**Date:** 14 September 2026
+**Scope:** A is a defect. B is persistence. C is the page. D is completion
+tracking. E records the source-authority finding.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**A new page: `/ai-plan`.** The third of the AI family — `/ai-targets` proposes
+targets, `/ai-schemes` proposes schemes, `/ai-plan` proposes where to go.
+
+---
+
+## What already exists, and it is more than I credited
+
+`visitPlan.ts` is a real planner, not a pro-rating. It anchors monthly capacity
+on **last closed FY actual visits**, splits it into maintenance and development
+budgets, and selects named retailer targets by:
+
+```
+priority = businessPlan / max(distanceKm, 5)
+```
+
+**Business potential over distance.** That is one term away from the breadth
+logic in `/ai-schemes`, and it already ranks dormant retailers by what they are
+worth against what they cost to reach.
+
+Three target types, correctly differentiated — **Maintain** (active, top five by
+order booking), **Develop** (inactive, assigned, untouched, ranked by
+plan-over-distance and removed from later pools so nobody is scheduled twice),
+**Reduce** (visited, inactive, zero order booking).
+
+## What is missing, and it is one thing
+
+**The plan is never persisted.** Computed in memory from connected sheets, cached
+in process, never written to the database or back to Sheets.
+
+So there is no plan ID, no approval, no planned-versus-completed comparison, and
+no history. **The app can tell a member where to go and can never check whether
+they went.**
+
+That single gap is what blocks the feedback loop for visit planning *and* for
+scheme proposals — because without it, nobody can measure whether a visit
+produced an order.
+
+---
+
+## Section A — the planner coerces unavailable to zero
+
+```
+Code change. Fix before persisting anything, or the defect gets written to
+the database.
+
+From the analysis: "Missing retailer visit values are commonly coerced to
+zero in VisitPlan sums, so unavailable and no recorded visit can converge
+in calculated totals."
+
+This is the empty-versus-unknown failure inside the planner, where it
+decides who gets scheduled.
+
+A1. Print every place VisitPlan coerces a missing value to zero -
+    totalVisit, visitsRequired, businessPlan, distanceKm.
+
+A2. Three states, as everywhere else:
+      recorded value
+      unavailable, with the reason
+      genuine zero
+
+    A retailer with no visit record and a retailer recorded as visited zero
+    times must not converge. The first may need a visit; the second has
+    been tried.
+
+A3. THE DEFAULTS ARE DOING REAL WORK AND MUST BE VISIBLE.
+
+      businessPlan defaults to Rs 50,000 when missing
+      distanceKm defaults to 20 km when missing
+      visitsRequired defaults to 12 when missing
+
+    So priority = 50,000 / 20 = 2,500 for any retailer missing both. That
+    is a manufactured rank, not a measured one.
+
+    Print how many targets are currently selected on defaulted inputs. Mark
+    them on the plan. A target ranked on two defaults is a guess wearing a
+    score.
+
+A4. Confirm no total that reads as a count is actually a sum of defaults.
+```
+
+---
+
+## Section B — persist the plan
+
+```
+Code change. After A.
+
+TABLE: visit_plan
+  id, member, state_head, fy, month
+  generated_at, generated_from - the source snapshot and its timestamp
+  capacity, working_days, maintenance_budget, development_budget
+  status: proposed | approved | superseded
+  approved_by, approved_at
+  pool_exhausted flag
+  excluded_count and reason - retailers without a distributor
+
+TABLE: visit_plan_target
+  plan_id, retailer identity, district, distance_km
+  priority_type: maintain | develop | reduce
+  priority_score, and WHICH INPUTS WERE DEFAULTED
+  business_plan, order_booking, visits_done
+  reason - why this retailer was selected
+  status: planned | visited | not_visited | superseded
+  visited_on, order_value_after - filled by Section D
+
+RULES
+
+1. A PLAN IS A PROPOSAL until approved. Same rule as engine_targets and
+   the scheme proposals. Generating is not committing.
+
+2. REGENERATING SUPERSEDES, never overwrites. The previous plan stays,
+   marked superseded, with its targets. Otherwise there is no way to ask
+   what was planned last month.
+
+3. RECORD THE SOURCE SNAPSHOT. Connected sheets change. A plan generated
+   on Monday from a sheet edited on Tuesday must be traceable to what it
+   read.
+
+4. Do not write back to Google Sheets. Read-only there, as everywhere.
+```
+
+---
+
+## Section C — the page
+
+```
+/ai-plan.
+
+  TAB 1  THIS MONTH
+    per member: capacity, working days, maintenance and development split
+    the target list with priority, type, distance, business plan, reason
+    DEFAULTED INPUTS MARKED - a target ranked on a Rs 50,000 default and a
+    20 km default is flagged, not silently ranked
+    approve / regenerate / export
+
+  TAB 2  PACE
+    visits done against pro-rated required, per member and per head
+    capacity gap - feasible remaining minus remaining required
+    demonstrated visit rate, and which denominator it used - Dashboard AG
+    or the calendar fallback
+    the deficit, positive or negative
+
+  TAB 3  COVERAGE GAP
+    retailers never visited this FY, ranked by priority score
+    dormant retailers - the 63-per-member figure the Deep Dive already
+    shows
+    retailers excluded for having no distributor, with the count
+
+    This tab is where /ai-plan meets /ai-schemes. A retailer with no
+    distributor cannot be scheduled and cannot receive a scheme. Same
+    population, two consequences.
+
+  TAB 4  PLAN VS ACTUAL - after Section D
+    planned targets, visited, not visited
+    of those visited, how many produced an order
+    by member, by priority type
+
+  TAB 5  AI TRAVEL PLAN
+    the existing narrative endpoint, per member per month
+    clearly labelled guidance, not a route
+
+EVERY FIGURE names its source. "Visits" alone is ambiguous - see Section E.
+```
+
+---
+
+## Section D — completion tracking
+
+```
+Code change. After B and C. This is the piece that makes the rest worth
+having.
+
+D1. When a plan is approved, its targets are status planned.
+
+D2. On the next sheet sync, match completed visits back to planned
+    targets. A planned retailer whose totalVisit increased is visited.
+
+D3. Record order_value_after - did the visit produce business?
+
+    This is the feedback loop. Today nobody can answer "did the visits we
+    planned produce orders" for any member, any month.
+
+D4. Report, per member and per priority type:
+      planned, visited, not visited
+      visited-with-order, visited-no-order
+      value produced per visit
+
+    The Deep Dive already shows "VISITED - NO BUSINESS" as a count. This
+    turns it into a plan-level measure.
+
+D5. HONESTY REQUIREMENT. Matching by "totalVisit increased" is inference,
+    not evidence. A member may have visited a retailer not on the plan, or
+    the sheet may be updated late.
+
+    Label it inferred. Do not present it as confirmed attendance.
+```
+
+---
+
+## Section E — record the source-authority finding
+
+```
+Not code. Operating rules, and one register entry.
+
+E1. RECORD IN THE OPERATING RULES, verbatim from the analysis:
+
+    "There is no single visit authority. Dashboard Data owns aggregate
+     headline visits, visited-retailer coverage and working days. Member
+     sheets own retailer-level visits, required visits and VisitPlan
+     analytics. HR/SFA owns only its separately labelled field-activity
+     counters.
+
+     Any published figure labelled only 'Visits' is ambiguous unless it
+     also identifies aggregate visits, unique visited retailers, or
+     retailer-row visits."
+
+E2. RESOLVE P41 in the Resolution register - "which is authoritative for
+    visits" - as ANSWERED, with the matrix from the analysis as its
+    resolution note. It is not a conflict; it is three sources owning three
+    things.
+
+E3. ADD a PENDING entry:
+
+    P45  VISIT FIGURES LABELLED ONLY "VISITS"
+         reason  Aggregate visits, unique visited retailers and
+                 retailer-row visits are three different measures shown
+                 under one word in several places.
+         action  Audit every surface showing a visit figure and label
+                 which measure it is.
+         owner   internal
+         priority medium
+```
+
+---
+
+## Notes
+
+- **Section A before Section B, without exception.** Persisting a plan built on
+  coerced defaults would write the defect into the database and make it look
+  authoritative. A priority of 2,500 from a ₹50,000 default over a 20 km default
+  is a manufactured rank.
+- **B2 is what makes the page worth building.** Without supersession there is no
+  way to ask what was planned last month, and therefore no way to learn.
+- **Section D is the feedback loop that both other AI pages lack.** `/ai-targets`
+  proposes and never learns; `/ai-schemes` will do the same. This is the first
+  place the app could measure whether its own suggestion worked.
+- **D5 matters because the inference is weak.** "totalVisit increased" is not
+  attendance. Labelling it inferred is the difference between a measure and a
+  claim.
+- **Tab 3 is where the three AI pages meet.** A retailer with no distributor cannot
+  be scheduled and cannot receive a scheme. Same population, two consequences, and
+  currently counted in neither place.

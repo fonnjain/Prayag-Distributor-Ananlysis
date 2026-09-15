@@ -1,0 +1,238 @@
+# Replit Prompt 93 — AI Schemes E2 and E3, and the geography gap
+
+**Date:** 14 September 2026
+**Follows:** the Section A feasibility report, accepted in full.
+**Scope:** A is a register entry. B is E2. C is E3. D answers the four open
+design decisions.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Three corrections to my design, accepted
+
+**₹4,568 is not supported.** The measured median positive pair is **₹3,468**
+(FY2025-26) and **₹3,503** (FY2026-27). The distribution matters more than any
+point value — P10 ₹683, P90 ₹20,397, top decile ₹55,835 against a bottom decile
+of ₹407.
+
+My breadth figures were about 30% optimistic. **+2 SKUs per retailer is ₹6.17 Cr,
+not ₹8.29 Cr.**
+
+**The dormant count was wrong.** I used 10,445 legacy codes. The authoritative
+current catalogue is **6,109**, giving **2,033 never sold**.
+
+**The pair matrix was understated** — 238,005 against my estimated 126,480.
+
+**And the premise is confirmed more strongly than I claimed:** 223× retailer-reach
+spread in FY2025-26, 175× in FY2026-27, against my estimated 122×.
+
+The medians are the sharper fact. **FY2025-26 SCARCE has a median of 0 retailers**
+— more than half of scarce codes appear in no secondary transaction at all —
+against 557 for VERY HIGH.
+
+---
+
+## Section A — the geography gap belongs in the register
+
+```
+Add to resolution_item. This blocks a build, which is what the register is
+for.
+
+  H4  CANONICAL RETAILER GEOGRAPHY INCOMPLETE
+      type        HOLD
+      category    master data
+      scope       retailer state attribution; peer-set construction
+      reason      Retailer canonical state is directly known for 33.28% of
+                  FY2025-26 active retailers and 26.12% of FY2026-27. An
+                  unambiguous distributor bridge lifts this to 58.17% and
+                  46.27%.
+      evidence    8,898 FY2025-26 active retailers, 2,961 with direct
+                  state, 5,176 after bridge. 6,194 FY2026-27 active, 1,618
+                  direct, 2,866 after bridge. Among directly known
+                  FY2025-26 state x size-quintile cells, 32 of 45 hold at
+                  least 30 retailers - so peers are statistically credible
+                  WHERE geography is known.
+      blocks      AI Schemes E4 peer-set targeting for the majority of
+                  retailers
+      owner       internal, then Prayag for source attribution
+      priority    high
+
+Also record the related finding, as PENDING not HOLD:
+
+  P44 RET# COVERAGE UNEVEN ACROSS YEARS
+      reason      52,515 of 379,439 FY2025-26 secondary rows carry RET#,
+                  against complete RET# on all 123,326 FY2026-27 rows.
+                  Retailer identity falls back to normalised name for the
+                  remainder, which is weaker.
+      owner       internal
+      priority    medium
+```
+
+---
+
+## Section B — E2: pair matrix and SKU bands
+
+```
+Code change. New page /ai-schemes. Tabs 1 and 3 only. No proposals.
+
+This ships alone and is useful alone. Nobody can currently see that a
+scarce SKU is scarce because 1.56 retailers buy it.
+
+TAB 1 - BREADTH OPPORTUNITY
+
+  The pair matrix, per FY:
+    distinct positive retailer x item pairs
+    active retailers, SKUs, pair density
+    the FULL VALUE DISTRIBUTION - P10, P25, median, P75, P90, and the top
+    and bottom decile averages
+
+    Measured: FY2025-26 238,005 pairs, 8,898 retailers, 4,053 SKUs,
+    0.66% density, median Rs 3,468.
+    FY2026-27 98,138 pairs, 6,194 retailers, 3,274 SKUs, 0.4839% density,
+    median Rs 3,503.
+
+  Breadth arithmetic - what +1, +2, +3 SKUs per active retailer is worth.
+
+    SHOW IT AS A RANGE FROM THE DISTRIBUTION, not a single number. A new
+    pair could be a P10 pair at Rs 683 or a median pair at Rs 3,468.
+
+    Label it arithmetic, not forecast. "+2 SKUs per retailer would be
+    worth Rs 6.17 Cr at the median pair value" - not "this will generate
+    Rs 6.17 Cr".
+
+  State coverage on every figure: FY, loaded months, and that August 2026
+  is held under H2.
+
+TAB 3 - SKU BANDS
+
+  Five bands on cumulative primary revenue, plus DORMANT.
+
+    Band boundaries: first 50% cumulative = VERY HIGH, next 30% = HIGH,
+    next 15% = MEDIUM, next 4% = LOW, final 1% = SCARCE. A code crossing a
+    boundary stays in the band it begins.
+
+    Per band: codes, primary value, share, sales per code, AND retailers
+    per SKU with both mean and median.
+
+    The median is the important column. FY2025-26 SCARCE median is 0.
+
+  DORMANT uses mrp_current_catalogue - 6,109 codes - NOT the 11,368-code
+  legacy item_master. State the sales period:
+    never sold in any loaded FY          2,033
+    zero FY2025-26 primary sales         2,576
+    zero FY2026-27 primary sales to date 2,950
+
+  Keep primary revenue bands and secondary retailer breadth SEPARATELY
+  SOURCED and say so on the page. One is dispatch, the other is order
+  booking.
+
+DO NOT compute proposals, peer sets or scheme depth in this phase.
+```
+
+---
+
+## Section C — E3: margin headroom
+
+```
+Code change. Tab 4. After B.
+
+  By category: gross margin, margin tier, maximum scheme depth, and
+  coverage.
+
+  MANDATORY SUPPRESSION RULES
+
+  1. Aggregate margin_fact by FY and item_code BEFORE joining. Do not join
+     row-level.
+
+  2. Suppress every code with unknown margin. FY2026-27 usable-margin
+     coverage is 69.43% of SKUs and 83.20% of secondary value. The
+     remainder is suppressed, not estimated.
+
+  3. Apply Resolution-register holds DURING CALCULATION, not at display.
+     H1 excludes PTMT January-April 2026. EXCLUDE those months - do not
+     average through them.
+
+  4. State coverage on every figure: which months margin_fact covers,
+     which categories are held, and what share of value is represented.
+
+     margin_fact covers 12 months for FY2025-26 and April-June 2026 only
+     for FY2026-27.
+
+  5. TERMINOLOGY. Gross contribution, never profit. margin_fact is average
+     sale less BOM cost - no freight, overhead or SG&A.
+
+  MARGIN TIERS, from measured category margins:
+    RICH  >=55%   PTMT 68.5, Connection 59.3, Water tank 56.9   max 8%
+    MID   40-55%  CPVC ft 49.5, Cistern 48.7, AGRI ft 42.0      max 6%
+    THIN  27-40%  CP 40.0, UPVC ft 39.7, SWR ft 34.3, Sink 30.6 max 4%
+    BARE  <27%    Garden pipe 14.3, CPVC pipe 18.6, AGRI pipe 18.3
+                                                     NO CASH SCHEME
+
+  Show max scheme depth as BOTH a percentage and as a share of that
+  category's gross margin. 3% is 4.4% of PTMT's margin and 21% of Garden
+  Pipe's.
+
+  Note the pipe/fitting split explicitly on the page. CPVC fittings 49.5%
+  against CPVC pipe 18.6% is the same product family with different
+  economics, and anyone reading a CPVC scheme proposal needs to see it.
+```
+
+---
+
+## Section D — the four open decisions, answered
+
+```
+Confirm these before E4 is scoped.
+
+D1. MARGINAL PAIR DEFINITION.
+    Use the DISTRIBUTION, not a point value. Show any breadth figure as a
+    range with the median labelled. Rs 3,468 is a reference, not a
+    forecast.
+
+    Never present breadth arithmetic as a prediction. It states what a
+    given number of new pairs would be worth at observed pair values, and
+    nothing about whether they will occur.
+
+D2. UNRESOLVED GEOGRAPHY.
+    FAIL CLOSED. A retailer without an unambiguous canonical state gets no
+    peer set and no proposal. Never fall back to a national or
+    distributor-wide peer group - that would produce confident offers on
+    the weakest evidence.
+
+    Report the excluded population on the page: "peer targeting available
+    for 2,866 of 6,194 active retailers - 46.27%."
+
+D3. HELD-MARGIN SUPPRESSION.
+    At CALCULATION time, per Section C rule 3. A proposal must never be
+    generated from held data and then filtered at display - the cost of a
+    near-miss is a scheme built on a figure known to be 21 points wrong.
+
+D4. SUBSTITUTION.
+    A DISCLOSED RISK, not a solved question. Every proposal names the
+    nearest same-group SKUs and shows their recent movement.
+
+    The report is right that the database cannot causally distinguish an
+    addition from a switch. Do not build a model that implies it can.
+
+E4 stays unscoped until H4 improves geography coverage materially above
+46.27%.
+```
+
+---
+
+## Notes
+
+- **Section B ships value on its own.** The median retailer count per band is the
+  single most useful new fact here — FY2025-26 SCARCE at **0**, VERY HIGH at 557.
+  That is not a distribution difference, it is presence against absence, and it
+  changes what you would do about it.
+- **D2 is the one I would hold hardest.** A peer set built on incomplete geography
+  would generate confident offers from the weakest evidence, and those offers cost
+  money.
+- **C rule 3 matters because of where the failure lands.** Filtering held data at
+  display means the proposal was computed, ranked and possibly cached from a
+  figure we know is wrong. Suppress at calculation.
+- **H4 is a good test of the register.** It is the first entry that blocks a build
+  rather than a figure, and if the register handles that cleanly it is doing its
+  job.
