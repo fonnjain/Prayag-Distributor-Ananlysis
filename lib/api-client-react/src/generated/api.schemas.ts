@@ -2675,6 +2675,211 @@ export interface AiReportResponse {
   corruptTestMode?: boolean | null;
 }
 
+export interface AiPlanInput {
+  /** @minLength 1 */
+  member: string;
+  /** @nullable */
+  stateHead?: string | null;
+  /** @pattern ^\d{4}-\d{2}$ */
+  fy?: string;
+  /** @nullable */
+  month?: string | null;
+}
+
+export type AiPlanStatus = typeof AiPlanStatus[keyof typeof AiPlanStatus];
+
+
+export const AiPlanStatus = {
+  proposed: 'proposed',
+  approved: 'approved',
+  superseded: 'superseded',
+} as const;
+
+export type AiPlanTargetPriorityType = typeof AiPlanTargetPriorityType[keyof typeof AiPlanTargetPriorityType];
+
+
+export const AiPlanTargetPriorityType = {
+  maintain: 'maintain',
+  develop: 'develop',
+  reduce: 'reduce',
+} as const;
+
+export type AiPlanTargetStatus = typeof AiPlanTargetStatus[keyof typeof AiPlanTargetStatus];
+
+
+export const AiPlanTargetStatus = {
+  proposed: 'proposed',
+  planned: 'planned',
+  visited: 'visited',
+  not_visited: 'not_visited',
+  superseded: 'superseded',
+} as const;
+
+/**
+ * @nullable
+ */
+export type AiPlanTargetCompletionBasis = typeof AiPlanTargetCompletionBasis[keyof typeof AiPlanTargetCompletionBasis] | null;
+
+
+export const AiPlanTargetCompletionBasis = {
+  inferred_total_visit_increase: 'inferred_total_visit_increase',
+} as const;
+
+export interface AiPlanTarget {
+  id: number;
+  retailerIdentity: string;
+  retailerName?: string;
+  priorityType: AiPlanTargetPriorityType;
+  status: AiPlanTargetStatus;
+  defaultedInputs: string[];
+  /** @nullable */
+  baselineTotalVisit?: number | null;
+  /** @nullable */
+  currentTotalVisit?: number | null;
+  /** @nullable */
+  baselineOrderBooking?: number | null;
+  /** @nullable */
+  currentOrderBooking?: number | null;
+  /** @nullable */
+  orderValueAfter?: number | null;
+  /** @nullable */
+  completionBasis?: AiPlanTargetCompletionBasis;
+}
+
+export interface AiPlan {
+  id: number;
+  member: string;
+  /** @nullable */
+  stateHead?: string | null;
+  fy: string;
+  month: string;
+  status: AiPlanStatus;
+  sourceSnapshotHash: string;
+  generatedAt?: string;
+  /** @nullable */
+  supersedesPlanId?: number | null;
+  /** @nullable */
+  supersededBy?: number | null;
+  targets?: AiPlanTarget[];
+}
+
+export interface AiPlanListResponse {
+  fy: string;
+  /** @nullable */
+  member?: string | null;
+  /** @nullable */
+  month?: string | null;
+  plans: AiPlan[];
+  revisionHistory: AiPlan[];
+  /** @nullable */
+  currentPlanId: number | null;
+}
+
+export interface AiPlanGenerationResponse {
+  plan: AiPlan;
+  targetCount: number;
+  sourceSnapshotHash: string;
+}
+
+export type AiPlanAnalyticsResponseFiguresItemDemonstratedRateDenominatorAuthority = typeof AiPlanAnalyticsResponseFiguresItemDemonstratedRateDenominatorAuthority[keyof typeof AiPlanAnalyticsResponseFiguresItemDemonstratedRateDenominatorAuthority];
+
+
+export const AiPlanAnalyticsResponseFiguresItemDemonstratedRateDenominatorAuthority = {
+  Dashboard_AG: 'Dashboard AG',
+  calendar_fallback: 'calendar fallback',
+} as const;
+
+export type AiPlanAnalyticsResponseFiguresItemCoverageNeverVisitedRankingItem = { [key: string]: unknown };
+
+export type AiPlanAnalyticsResponseFiguresItemDormantRetailersItem = { [key: string]: unknown };
+
+export type AiPlanAnalyticsResponseFiguresItemExcludedRetailersItem = { [key: string]: unknown };
+
+export type AiPlanAnalyticsResponseFiguresItem = {
+  /** @nullable */
+  paceVisitsDone?: number | null;
+  /** @nullable */
+  paceProRatedRequired?: number | null;
+  /** @nullable */
+  paceDeficit?: number | null;
+  /** @nullable */
+  capacityGap?: number | null;
+  /** @nullable */
+  demonstratedRate?: number | null;
+  /** @nullable */
+  demonstratedRateNumerator?: number | null;
+  /** @nullable */
+  demonstratedRateDenominator?: number | null;
+  demonstratedRateDenominatorAuthority?: AiPlanAnalyticsResponseFiguresItemDemonstratedRateDenominatorAuthority;
+  coverageNeverVisitedCount?: number;
+  coverageNeverVisitedRanking?: AiPlanAnalyticsResponseFiguresItemCoverageNeverVisitedRankingItem[];
+  dormantCount?: number;
+  dormantRetailers?: AiPlanAnalyticsResponseFiguresItemDormantRetailersItem[];
+  excludedRetailerCount?: number;
+  excludedRetailers?: AiPlanAnalyticsResponseFiguresItemExcludedRetailersItem[];
+  [key: string]: unknown;
+ };
+
+export type AiPlanAnalyticsResponseStateHeadsItemDemonstratedRateAuthority = typeof AiPlanAnalyticsResponseStateHeadsItemDemonstratedRateAuthority[keyof typeof AiPlanAnalyticsResponseStateHeadsItemDemonstratedRateAuthority];
+
+
+export const AiPlanAnalyticsResponseStateHeadsItemDemonstratedRateAuthority = {
+  Dashboard_AG: 'Dashboard AG',
+  calendar_fallback: 'calendar fallback',
+  'mixed:_Dashboard_AG_+_calendar_fallback': 'mixed: Dashboard AG + calendar fallback',
+} as const;
+
+export type AiPlanAnalyticsResponseStateHeadsItemSourceSnapshotDisclosure = {
+  mixed: boolean;
+  sourceSnapshotHashes: string[];
+  cutoffDates: string[];
+};
+
+export type AiPlanAnalyticsResponseStateHeadsItem = {
+  stateHead: string;
+  month: string;
+  paceVisitsDone: number;
+  paceProRatedRequired: number;
+  paceDeficit: number;
+  capacityGap: number;
+  demonstratedRateNumerator: number;
+  demonstratedRateDenominator: number;
+  /** @nullable */
+  demonstratedRate: number | null;
+  demonstratedRateAuthority: AiPlanAnalyticsResponseStateHeadsItemDemonstratedRateAuthority;
+  authorityMix: string[];
+  sourceSnapshotDisclosure: AiPlanAnalyticsResponseStateHeadsItemSourceSnapshotDisclosure;
+};
+
+export interface AiPlanAnalyticsResponse {
+  fy: string;
+  figures: AiPlanAnalyticsResponseFiguresItem[];
+  stateHeads: AiPlanAnalyticsResponseStateHeadsItem[];
+  note: string;
+}
+
+export interface AiPlanReconcileResponse {
+  planId: number;
+  visited: number;
+  considered: number;
+  inference: string;
+}
+
+export type AiPlanVsActualResponseRowsItem = { [key: string]: unknown };
+
+export interface AiPlanVsActualResponse {
+  planId: number;
+  /** @nullable */
+  member?: string | null;
+  /** @nullable */
+  fy?: string | null;
+  /** @nullable */
+  month?: string | null;
+  rows: AiPlanVsActualResponseRowsItem[];
+  orderValueDelta?: number;
+  source: string;
+}
+
 export type ListDriveFilesParams = {
 /**
  * Optional search text matched against file names.
@@ -3038,5 +3243,39 @@ confidence?: string;
 
 export type ListCustomerMismatchesParams = {
 pending?: boolean;
+};
+
+export type GetAiPlanParams = {
+/**
+ * @pattern ^\d{4}-\d{2}$
+ */
+fy?: string;
+member?: string;
+month?: string;
+/**
+ * Include superseded revisions in plans; revisionHistory is always returned.
+ */
+history?: boolean;
+};
+
+export type GetAiPlanAnalyticsParams = {
+/**
+ * @pattern ^\d{4}-\d{2}$
+ */
+fy?: string;
+};
+
+export type GetAiPlanMonthsParams = {
+/**
+ * @pattern ^\d{4}-\d{2}$
+ */
+fy?: string;
+};
+
+export type GetAiPlanMonths200 = {
+  fy: string;
+  months: string[];
+  canonicalFormat: string;
+  acceptedFormats: string[];
 };
 

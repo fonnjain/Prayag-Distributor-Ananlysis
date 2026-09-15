@@ -926,3 +926,17 @@ mtime_ms = 1789389378212
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/359080f3-cac0-4662-9d52-80fdb57dac6b/4c2dfdad-f78f-406b-b4af-d5b89b09fa0c"
 storage_version_token = "1789389385378614"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "Y11nw1CwuKKzpCn2QVibR"
+uri = "file://deliverables/Prayag_Visit_Planning_and_Source_Authority_Analysis.docx"
+type = "word_document"
+title = "Visit Planning and Source Authority Analysis"
+description = "Word document covering all visit-related fields and calculations, Prompt 87 A6 proportional logic, PJP/route-plan findings, and the P41 source-authority matrix."
+logical_id = "0b320094-e068-4a39-b684-bc4c0e4cd20d"
+content_hash = "sha256:df2dc7b9e93f5e622fedd03bf0ba5f4f00a417863a55b414ef08cc138a69976b"
+size = 43479
+mtime_ms = 1789393282462
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/0b320094-e068-4a39-b684-bc4c0e4cd20d/fe1b1e46-ba91-4ef8-b356-7f25d1937e9c"
+storage_version_token = "1789393289019206"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

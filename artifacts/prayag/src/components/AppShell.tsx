@@ -78,11 +78,12 @@ const NAV: NavGroup[] = [
       { id: "momentum",        label: "Momentum",        path: "/momentum",        icon: TrendingUp },
       { id: "growth",          label: "Growth",          path: "/growth",          icon: LineChart },
       { id: "analyst",         label: "AI Analyst",      path: "/analyst",         icon: Bot },
-      { id: "ai-reports",     label: "AI Reports",      path: "/ai-reports",      icon: FileSpreadsheet },
+      { id: "ai-reports",      label: "AI Reports",      path: "/ai-reports",      icon: FileSpreadsheet },
       { id: "reports",         label: "Reports",         path: "/reports",         icon: FileSpreadsheet },
       { id: "company-reports", label: "Company Reports", path: "/company-reports", icon: BarChartIcon },
       { id: "comparison",      label: "Comparison",      path: "/comparison",      icon: LineChart },
       { id: "ai-targets",      label: "AI Targets",      path: "/ai-targets",      icon: Bot },
+      { id: "ai-plan",         label: "AI Plan",         path: "/ai-plan",         icon: Map },
       { id: "ai-schemes",      label: "AI Schemes",      path: "/ai-schemes",      icon: Database },
       { id: "targets",         label: "Targets",         path: "/targets",         icon: Target },
       { id: "pending",         label: "Pending Orders",  path: "/pending",         icon: ClipboardList },
@@ -235,6 +236,9 @@ function activeIds(location: string, nav: NavGroup[]): { groupId: string; itemId
     return { groupId: "settings", itemId: "resolution" };
   }
   // Dashboard
+  if (location.startsWith("/ai-plan")) {
+    return { groupId: "dashboard", itemId: "ai-plan" };
+  }
   if (location.startsWith("/ai-schemes")) {
     return { groupId: "dashboard", itemId: "ai-schemes" };
   }

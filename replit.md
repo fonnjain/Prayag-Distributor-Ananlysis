@@ -48,6 +48,9 @@ A mobile-first dashboard over live Google Sheets sales data: sales trends, growt
 - **Dashboard is the sole source of headline order booking and sales figures** for all secondary (distributor→retailer) reporting. The State Head Dashboard (aggregated plan/ordered/received per head per month) drives all KPIs shown to users.
 - **Register is drill-down only.** The line-level `secondary_register_line` table is for customer/SKU/month analysis — it must never be surfaced as a top-line number.
 - **Register-to-dashboard reconciliation runs monthly**, not annually. Run a dry-run Gate 1 after each month closes to verify gross totals are consistent with dashboard figures.
+- **Visit source-authority rule:** There is no single visit authority. Dashboard Data owns aggregate headline visits, visited-retailer coverage and working days. Member sheets own retailer-level visits, required visits and VisitPlan analytics. HR/SFA owns only its separately labelled field-activity counters.
+
+  Any published figure labelled only 'Visits' is ambiguous unless it also identifies aggregate visits, unique visited retailers, or retailer-row visits.
 - **Gross vs net.** Each register row stores `gross_amount` (Order Value before trade discount) and `net_amount` (after discount). The sum of `net_amount` across a month/head should match the dashboard's `ordered_amount` for that period. Use `gross_amount` for market-size analysis; use `net_amount` (or dashboard) for achievement reporting.
 
 ## Architecture decisions

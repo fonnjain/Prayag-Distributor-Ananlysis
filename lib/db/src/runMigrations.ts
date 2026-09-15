@@ -5598,6 +5598,251 @@ const MIGRATIONS: Migration[] = [
       $do$;
     `,
   },
+  {
+    id: "116_prompt94_visit_plan_persistence",
+    sql: `
+      -- Prompt 94 Sections B/D.  Plans are append-only proposals: a new
+      -- generation inserts a row and supersedes the prior row; it never
+      -- mutates the historical target list.
+      CREATE TABLE IF NOT EXISTS visit_plan (
+        id                    BIGSERIAL PRIMARY KEY,
+        member                TEXT NOT NULL,
+        member_norm           TEXT NOT NULL,
+        state_head            TEXT,
+        fy                    TEXT NOT NULL,
+        month                 TEXT NOT NULL,
+        generated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+        generated_from        TEXT NOT NULL,
+        source_snapshot_hash  TEXT NOT NULL,
+        source_snapshot_at    TIMESTAMPTZ NOT NULL,
+        source_snapshot        JSONB NOT NULL DEFAULT '{}'::jsonb,
+        capacity              INTEGER NOT NULL DEFAULT 0,
+        working_days          INTEGER NOT NULL DEFAULT 0,
+        maintenance_budget    INTEGER NOT NULL DEFAULT 0,
+        development_budget    INTEGER NOT NULL DEFAULT 0,
+        status                TEXT NOT NULL DEFAULT 'proposed',
+        approved_by           TEXT,
+        approved_at           TIMESTAMPTZ,
+        pool_exhausted         BOOLEAN NOT NULL DEFAULT FALSE,
+        excluded_count         INTEGER NOT NULL DEFAULT 0,
+        excluded_reason        TEXT,
+        superseded_by          BIGINT,
+        created_by             TEXT,
+        CONSTRAINT visit_plan_status_ck CHECK (status IN ('proposed','approved','superseded'))
+      );
+      CREATE INDEX IF NOT EXISTS visit_plan_member_period_idx
+        ON visit_plan (member, fy, month, generated_at DESC);
+      CREATE INDEX IF NOT EXISTS visit_plan_status_idx ON visit_plan (status);
+
+      CREATE TABLE IF NOT EXISTS visit_plan_target (
+        id                    BIGSERIAL PRIMARY KEY,
+        plan_id               BIGINT NOT NULL REFERENCES visit_plan(id),
+        retailer_identity     TEXT NOT NULL,
+        retailer_name         TEXT NOT NULL,
+        district               TEXT,
+        distance_km           NUMERIC,
+        priority_type         TEXT NOT NULL,
+        priority_score        NUMERIC,
+        defaulted_inputs      JSONB NOT NULL DEFAULT '[]'::jsonb,
+        input_states           JSONB NOT NULL DEFAULT '{}'::jsonb,
+        input_reasons          JSONB NOT NULL DEFAULT '{}'::jsonb,
+        business_plan         NUMERIC,
+        order_booking         NUMERIC NOT NULL DEFAULT 0,
+        visits_done           INTEGER,
+        visits_required       INTEGER,
+        reason                TEXT NOT NULL,
+        status                TEXT NOT NULL DEFAULT 'proposed',
+        visited_on            DATE,
+        order_value_after     NUMERIC,
+        completion_basis      TEXT,
+        baseline_total_visit  INTEGER,
+        current_total_visit   INTEGER,
+        baseline_observed_at   TIMESTAMPTZ,
+        current_observed_at    TIMESTAMPTZ,
+        evidence              JSONB NOT NULL DEFAULT '{}'::jsonb,
+        CONSTRAINT visit_plan_target_priority_ck CHECK (priority_type IN ('maintain','develop','reduce')),
+        CONSTRAINT visit_plan_target_status_ck CHECK (status IN ('planned','visited','not_visited','superseded'))
+      );
+      CREATE INDEX IF NOT EXISTS visit_plan_target_plan_idx ON visit_plan_target(plan_id);
+      CREATE INDEX IF NOT EXISTS visit_plan_target_identity_idx ON visit_plan_target(retailer_identity);
+
+      CREATE TABLE IF NOT EXISTS visit_plan_audit (
+        id BIGSERIAL PRIMARY KEY,
+        plan_id BIGINT NOT NULL REFERENCES visit_plan(id),
+        event TEXT NOT NULL,
+        actor_id TEXT,
+        occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        before_state JSONB,
+        after_state JSONB,
+        evidence JSONB NOT NULL DEFAULT '{}'::jsonb
+      );
+      CREATE INDEX IF NOT EXISTS visit_plan_audit_plan_idx ON visit_plan_audit(plan_id, occurred_at);
+
+      -- The operating-rules surface is durable and versioned, rather than
+      -- relying on a file that may not be deployed with the API.
+      CREATE TABLE IF NOT EXISTS operating_rule (
+        rule_key TEXT PRIMARY KEY,
+        rule_text TEXT NOT NULL,
+        source TEXT NOT NULL,
+        recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `,
+  },
+  {
+    id: "117_prompt94_source_authority_register",
+    sql: `
+      INSERT INTO operating_rule (rule_key, rule_text, source)
+      VALUES (
+        'visit-source-authority',
+        'There is no single visit authority. Dashboard Data owns aggregate headline visits, visited-retailer coverage and working days. Member sheets own retailer-level visits, required visits and VisitPlan analytics. HR/SFA owns only its separately labelled field-activity counters.
+
+Any published figure labelled only ''Visits'' is ambiguous unless it also identifies aggregate visits, unique visited retailers, or retailer-row visits.',
+        'Replit Prompt 94 Section E, 14 September 2026'
+      )
+      ON CONFLICT (rule_key) DO NOTHING;
+
+      -- P41 is a three-source authority distinction, not a single-source
+      -- conflict. Only an open row is transitioned, preserving administrator
+      -- edits and making reruns harmless.
+      UPDATE resolution_item
+         SET status = 'answered',
+             resolved_on = COALESCE(resolved_on, DATE '2026-09-14'),
+             resolved_by = COALESCE(resolved_by, 'Prompt 94'),
+             resolution_note = COALESCE(resolution_note,
+               'Dashboard Data: aggregate headline visits, visited-retailer coverage, and working days. Member sheets: retailer-level visits, required visits, and VisitPlan analytics. HR/SFA: separately labelled field-activity counters. There is no single visit authority; a figure labelled only Visits is ambiguous unless it identifies aggregate visits, unique visited retailers, or retailer-row visits.'),
+             updated_at = now()
+       WHERE code = 'P41' AND status = 'open';
+
+      -- Seed only if absent: never overwrite a local P45 investigation.
+      INSERT INTO resolution_item
+        (code, type, title, category, reason, evidence,
+         raised_on, raised_by, owner, priority, status, blocks_api)
+      VALUES
+        ('P45', 'PENDING', 'VISIT FIGURES LABELLED ONLY ''VISITS''',
+         'data quality',
+         'Aggregate visits, unique visited retailers and retailer-row visits are three different measures shown under one word in several places.',
+         '[Source: Replit Prompt 94 Section E, 14 September 2026] Audit every surface showing a visit figure and label which measure it is.',
+         DATE '2026-09-14', 'Prompt 94 Section E', 'internal', 'medium', 'open', FALSE)
+      ON CONFLICT (code) DO NOTHING;
+    `,
+  },
+  {
+    id: "118_prompt94_revision_and_target_proposal_links",
+    sql: `
+      -- Proposed targets are not operational until their parent is approved.
+      ALTER TABLE visit_plan_target
+        DROP CONSTRAINT IF EXISTS visit_plan_target_status_ck;
+      ALTER TABLE visit_plan_target
+        ADD CONSTRAINT visit_plan_target_status_ck
+        CHECK (status IN ('proposed','planned','visited','not_visited','superseded'));
+      ALTER TABLE visit_plan_target
+        ALTER COLUMN status SET DEFAULT 'proposed';
+      UPDATE visit_plan_target t
+         SET status = 'proposed'
+        FROM visit_plan p
+       WHERE t.plan_id = p.id
+         AND p.status = 'proposed'
+         AND t.status = 'planned';
+
+      ALTER TABLE visit_plan
+        ADD COLUMN IF NOT EXISTS supersedes_plan_id BIGINT REFERENCES visit_plan(id);
+      ALTER TABLE visit_plan_target
+        ADD COLUMN IF NOT EXISTS supersedes_target_id BIGINT REFERENCES visit_plan_target(id),
+        ADD COLUMN IF NOT EXISTS superseded_by_target_id BIGINT REFERENCES visit_plan_target(id),
+        ADD COLUMN IF NOT EXISTS baseline_order_booking NUMERIC,
+        ADD COLUMN IF NOT EXISTS current_order_booking NUMERIC;
+      CREATE INDEX IF NOT EXISTS visit_plan_supersedes_idx ON visit_plan(supersedes_plan_id);
+      CREATE INDEX IF NOT EXISTS visit_plan_target_supersedes_idx
+        ON visit_plan_target(supersedes_target_id, superseded_by_target_id);
+    `,
+  },
+  {
+    id: "119_prompt94_current_revision_uniqueness",
+    sql: `
+      -- Repair legacy duplicate current revisions before enforcing the
+      -- invariant. Newest generated_at wins; id breaks exact timestamp ties.
+      CREATE TEMP TABLE prompt94_duplicate_revisions ON COMMIT DROP AS
+      WITH ranked AS (
+        SELECT id, member, fy, month,
+               ROW_NUMBER() OVER (
+                 PARTITION BY lower(regexp_replace(member, '[^a-zA-Z0-9]', '', 'g')), fy, month
+                 ORDER BY generated_at DESC, id DESC
+               ) AS revision_rank
+          FROM visit_plan
+         WHERE status <> 'superseded'
+      ), duplicate_map AS (
+        SELECT old.id AS old_id, keep.id AS keep_id
+          FROM ranked old
+          JOIN ranked keep
+            ON lower(regexp_replace(keep.member, '[^a-zA-Z0-9]', '', 'g')) =
+               lower(regexp_replace(old.member, '[^a-zA-Z0-9]', '', 'g'))
+           AND keep.fy = old.fy
+           AND keep.month = old.month
+           AND keep.revision_rank = 1
+         WHERE old.revision_rank > 1
+      )
+      SELECT old_id, keep_id FROM duplicate_map;
+
+      -- Link pending duplicate targets to matching pending targets on the
+      -- retained revision. Completed outcomes are intentionally untouched.
+      UPDATE visit_plan_target old_target
+         SET status = 'superseded',
+             superseded_by_target_id = new_target.id
+         FROM prompt94_duplicate_revisions duplicate_map,
+              visit_plan_target new_target
+       WHERE old_target.plan_id = duplicate_map.old_id
+          AND new_target.plan_id = duplicate_map.keep_id
+          AND new_target.retailer_identity = old_target.retailer_identity
+          AND new_target.status IN ('proposed','planned')
+         AND old_target.status IN ('proposed','planned');
+
+      UPDATE visit_plan_target old_target
+         SET status = 'superseded'
+        FROM prompt94_duplicate_revisions duplicate_map
+       WHERE old_target.plan_id = duplicate_map.old_id
+         AND old_target.status IN ('proposed','planned');
+
+      UPDATE visit_plan old
+         SET status = 'superseded',
+             superseded_by = duplicate_map.keep_id
+        FROM prompt94_duplicate_revisions duplicate_map
+       WHERE old.id = duplicate_map.old_id
+         AND old.status <> 'superseded';
+
+      UPDATE visit_plan keep
+         SET supersedes_plan_id = links.old_id
+        FROM (
+          SELECT keep_id, MAX(old_id) AS old_id
+            FROM prompt94_duplicate_revisions
+           GROUP BY keep_id
+        ) links
+       WHERE keep.id = links.keep_id
+         AND keep.supersedes_plan_id IS NULL;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS visit_plan_current_revision_normalized_uidx
+        ON visit_plan (member_norm, fy, month)
+        WHERE status <> 'superseded';
+    `,
+  },
+  {
+    id: "120_prompt94_publish_safe_member_norm_index",
+    sql: `
+      -- Replit Publish cannot safely serialize the prior regexp_replace
+      -- expression index. Store the normalized key explicitly so the
+      -- development-to-production schema diff remains valid PostgreSQL.
+      ALTER TABLE visit_plan
+        ADD COLUMN IF NOT EXISTS member_norm TEXT;
+      UPDATE visit_plan
+         SET member_norm = lower(regexp_replace(member, '[^a-zA-Z0-9]', '', 'g'))
+       WHERE member_norm IS NULL;
+      ALTER TABLE visit_plan
+        ALTER COLUMN member_norm SET NOT NULL;
+      DROP INDEX IF EXISTS visit_plan_current_revision_normalized_uidx;
+      CREATE UNIQUE INDEX visit_plan_current_revision_normalized_uidx
+        ON visit_plan (member_norm, fy, month)
+        WHERE status <> 'superseded';
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

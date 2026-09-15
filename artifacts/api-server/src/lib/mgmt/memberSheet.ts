@@ -51,6 +51,7 @@ import {
   listSheetTabs,
   type SheetCellValue,
 } from "../registers/sheetsApi.js";
+import { reconcileApprovedPlansForMember } from "./visitPlanPersistence.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -248,6 +249,8 @@ export type MemberSheetResult = {
   visitPlan: VisitPlan;
   months: MonthActual[];     // Per-month actuals from the FY tab (may be empty)
   rowsRead: number;
+  /** Timestamp captured after the authoritative sheet read, not request time. */
+  sourceObservedAt: string;
 };
 
 export type MemberSheetData =
@@ -945,6 +948,7 @@ async function loadMemberSheetUncached(
     visitPlan,
     months: fyMonthData.months,
     rowsRead: allRows.length,
+    sourceObservedAt: new Date().toISOString(),
   };
 }
 
@@ -1051,8 +1055,19 @@ export async function loadMemberSheet(
       : { status: "error", error: "Sheet read failed." };
   }
 
-  const p = loadMemberSheetUncached(memberKey, memberName, fy).then((result) => {
-    if (result) _cache.set(cacheKey, { data: result, loadedAt: Date.now() });
+  const p = loadMemberSheetUncached(memberKey, memberName, fy).then(async (result) => {
+    if (result) {
+      // This is the real member-sheet refresh path. Reconcile approved plans
+      // after a fresh source read; the helper keeps too-early/unavailable
+      // observations planned and labels any completion as inferred.
+      await reconcileApprovedPlansForMember(
+        memberName,
+        fy,
+        result.rows,
+        result.sourceObservedAt,
+      );
+      _cache.set(cacheKey, { data: result, loadedAt: Date.now() });
+    }
     return result;
   }).finally(() => _inFlight.delete(cacheKey));
 

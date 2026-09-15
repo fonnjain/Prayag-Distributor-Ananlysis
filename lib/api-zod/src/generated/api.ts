@@ -2440,3 +2440,322 @@ export const UpdateCustomerMasterRecordResponse = zod.object({
 })
 
 
+/**
+ * @summary Read persisted visit plans
+ */
+export const getAiPlanQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+export const getAiPlanQueryHistoryDefault = false;
+
+export const GetAiPlanQueryParams = zod.object({
+  "fy": zod.coerce.string().regex(getAiPlanQueryFyRegExp).optional(),
+  "member": zod.coerce.string().optional(),
+  "month": zod.coerce.string().optional(),
+  "history": zod.coerce.boolean().default(getAiPlanQueryHistoryDefault).describe('Include superseded revisions in plans; revisionHistory is always returned.')
+})
+
+export const GetAiPlanResponse = zod.object({
+  "fy": zod.string(),
+  "member": zod.string().nullish(),
+  "month": zod.string().nullish(),
+  "plans": zod.array(zod.object({
+  "id": zod.number(),
+  "member": zod.string(),
+  "stateHead": zod.string().nullish(),
+  "fy": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['proposed', 'approved', 'superseded']),
+  "sourceSnapshotHash": zod.string(),
+  "generatedAt": zod.coerce.date().optional(),
+  "supersedesPlanId": zod.number().nullish(),
+  "supersededBy": zod.number().nullish(),
+  "targets": zod.array(zod.object({
+  "id": zod.number(),
+  "retailerIdentity": zod.string(),
+  "retailerName": zod.string().optional(),
+  "priorityType": zod.enum(['maintain', 'develop', 'reduce']),
+  "status": zod.enum(['proposed', 'planned', 'visited', 'not_visited', 'superseded']),
+  "defaultedInputs": zod.array(zod.string()),
+  "baselineTotalVisit": zod.number().nullish(),
+  "currentTotalVisit": zod.number().nullish(),
+  "baselineOrderBooking": zod.number().nullish(),
+  "currentOrderBooking": zod.number().nullish(),
+  "orderValueAfter": zod.number().nullish(),
+  "completionBasis": zod.union([zod.literal('inferred_total_visit_increase'),zod.literal(null)]).nullish()
+})).optional()
+})),
+  "revisionHistory": zod.array(zod.object({
+  "id": zod.number(),
+  "member": zod.string(),
+  "stateHead": zod.string().nullish(),
+  "fy": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['proposed', 'approved', 'superseded']),
+  "sourceSnapshotHash": zod.string(),
+  "generatedAt": zod.coerce.date().optional(),
+  "supersedesPlanId": zod.number().nullish(),
+  "supersededBy": zod.number().nullish(),
+  "targets": zod.array(zod.object({
+  "id": zod.number(),
+  "retailerIdentity": zod.string(),
+  "retailerName": zod.string().optional(),
+  "priorityType": zod.enum(['maintain', 'develop', 'reduce']),
+  "status": zod.enum(['proposed', 'planned', 'visited', 'not_visited', 'superseded']),
+  "defaultedInputs": zod.array(zod.string()),
+  "baselineTotalVisit": zod.number().nullish(),
+  "currentTotalVisit": zod.number().nullish(),
+  "baselineOrderBooking": zod.number().nullish(),
+  "currentOrderBooking": zod.number().nullish(),
+  "orderValueAfter": zod.number().nullish(),
+  "completionBasis": zod.union([zod.literal('inferred_total_visit_increase'),zod.literal(null)]).nullish()
+})).optional()
+})),
+  "currentPlanId": zod.number().nullable()
+})
+
+
+/**
+ * @summary Visit plan pace and default-input analytics
+ */
+export const getAiPlanAnalyticsQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const GetAiPlanAnalyticsQueryParams = zod.object({
+  "fy": zod.coerce.string().regex(getAiPlanAnalyticsQueryFyRegExp).optional()
+})
+
+export const GetAiPlanAnalyticsResponse = zod.object({
+  "fy": zod.string(),
+  "figures": zod.array(zod.object({
+  "paceVisitsDone": zod.number().nullish(),
+  "paceProRatedRequired": zod.number().nullish(),
+  "paceDeficit": zod.number().nullish(),
+  "capacityGap": zod.number().nullish(),
+  "demonstratedRate": zod.number().nullish(),
+  "demonstratedRateNumerator": zod.number().nullish(),
+  "demonstratedRateDenominator": zod.number().nullish(),
+  "demonstratedRateDenominatorAuthority": zod.enum(['Dashboard AG', 'calendar fallback']).optional(),
+  "coverageNeverVisitedCount": zod.number().optional(),
+  "coverageNeverVisitedRanking": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  "dormantCount": zod.number().optional(),
+  "dormantRetailers": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  "excludedRetailerCount": zod.number().optional(),
+  "excludedRetailers": zod.array(zod.record(zod.string(), zod.unknown())).optional()
+})),
+  "stateHeads": zod.array(zod.object({
+  "stateHead": zod.string(),
+  "month": zod.string(),
+  "paceVisitsDone": zod.number(),
+  "paceProRatedRequired": zod.number(),
+  "paceDeficit": zod.number(),
+  "capacityGap": zod.number(),
+  "demonstratedRateNumerator": zod.number(),
+  "demonstratedRateDenominator": zod.number(),
+  "demonstratedRate": zod.number().nullable(),
+  "demonstratedRateAuthority": zod.enum(['Dashboard AG', 'calendar fallback', 'mixed: Dashboard AG + calendar fallback']),
+  "authorityMix": zod.array(zod.string()),
+  "sourceSnapshotDisclosure": zod.object({
+  "mixed": zod.boolean(),
+  "sourceSnapshotHashes": zod.array(zod.string()),
+  "cutoffDates": zod.array(zod.string())
+})
+})),
+  "note": zod.string()
+})
+
+
+/**
+ * @summary List canonical forward fiscal months for visit plans
+ */
+export const getAiPlanMonthsQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const GetAiPlanMonthsQueryParams = zod.object({
+  "fy": zod.coerce.string().regex(getAiPlanMonthsQueryFyRegExp).optional()
+})
+
+export const GetAiPlanMonthsResponse = zod.object({
+  "fy": zod.string(),
+  "months": zod.array(zod.string()),
+  "canonicalFormat": zod.string(),
+  "acceptedFormats": zod.array(zod.string())
+})
+
+
+/**
+ * @summary Generate and persist a proposed visit plan
+ */
+
+export const generateAiPlanBodyFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const GenerateAiPlanBody = zod.object({
+  "member": zod.string().min(1),
+  "stateHead": zod.string().nullish(),
+  "fy": zod.string().regex(generateAiPlanBodyFyRegExp).optional(),
+  "month": zod.string().nullish()
+})
+
+export const GenerateAiPlanResponse = zod.object({
+  "plan": zod.object({
+  "id": zod.number(),
+  "member": zod.string(),
+  "stateHead": zod.string().nullish(),
+  "fy": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['proposed', 'approved', 'superseded']),
+  "sourceSnapshotHash": zod.string(),
+  "generatedAt": zod.coerce.date().optional(),
+  "supersedesPlanId": zod.number().nullish(),
+  "supersededBy": zod.number().nullish(),
+  "targets": zod.array(zod.object({
+  "id": zod.number(),
+  "retailerIdentity": zod.string(),
+  "retailerName": zod.string().optional(),
+  "priorityType": zod.enum(['maintain', 'develop', 'reduce']),
+  "status": zod.enum(['proposed', 'planned', 'visited', 'not_visited', 'superseded']),
+  "defaultedInputs": zod.array(zod.string()),
+  "baselineTotalVisit": zod.number().nullish(),
+  "currentTotalVisit": zod.number().nullish(),
+  "baselineOrderBooking": zod.number().nullish(),
+  "currentOrderBooking": zod.number().nullish(),
+  "orderValueAfter": zod.number().nullish(),
+  "completionBasis": zod.union([zod.literal('inferred_total_visit_increase'),zod.literal(null)]).nullish()
+})).optional()
+}),
+  "targetCount": zod.number(),
+  "sourceSnapshotHash": zod.string()
+})
+
+
+/**
+ * @summary Approve a proposed visit plan
+ */
+export const ApproveAiPlanParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ApproveAiPlanResponse = zod.object({
+  "plan": zod.object({
+  "id": zod.number(),
+  "member": zod.string(),
+  "stateHead": zod.string().nullish(),
+  "fy": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['proposed', 'approved', 'superseded']),
+  "sourceSnapshotHash": zod.string(),
+  "generatedAt": zod.coerce.date().optional(),
+  "supersedesPlanId": zod.number().nullish(),
+  "supersededBy": zod.number().nullish(),
+  "targets": zod.array(zod.object({
+  "id": zod.number(),
+  "retailerIdentity": zod.string(),
+  "retailerName": zod.string().optional(),
+  "priorityType": zod.enum(['maintain', 'develop', 'reduce']),
+  "status": zod.enum(['proposed', 'planned', 'visited', 'not_visited', 'superseded']),
+  "defaultedInputs": zod.array(zod.string()),
+  "baselineTotalVisit": zod.number().nullish(),
+  "currentTotalVisit": zod.number().nullish(),
+  "baselineOrderBooking": zod.number().nullish(),
+  "currentOrderBooking": zod.number().nullish(),
+  "orderValueAfter": zod.number().nullish(),
+  "completionBasis": zod.union([zod.literal('inferred_total_visit_increase'),zod.literal(null)]).nullish()
+})).optional()
+}),
+  "targetCount": zod.number(),
+  "sourceSnapshotHash": zod.string()
+})
+
+
+/**
+ * @summary Regenerate a plan, superseding the prior proposal
+ */
+export const RegenerateAiPlanParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+export const regenerateAiPlanBodyFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const RegenerateAiPlanBody = zod.object({
+  "member": zod.string().min(1),
+  "stateHead": zod.string().nullish(),
+  "fy": zod.string().regex(regenerateAiPlanBodyFyRegExp).optional(),
+  "month": zod.string().nullish()
+})
+
+export const RegenerateAiPlanResponse = zod.object({
+  "plan": zod.object({
+  "id": zod.number(),
+  "member": zod.string(),
+  "stateHead": zod.string().nullish(),
+  "fy": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['proposed', 'approved', 'superseded']),
+  "sourceSnapshotHash": zod.string(),
+  "generatedAt": zod.coerce.date().optional(),
+  "supersedesPlanId": zod.number().nullish(),
+  "supersededBy": zod.number().nullish(),
+  "targets": zod.array(zod.object({
+  "id": zod.number(),
+  "retailerIdentity": zod.string(),
+  "retailerName": zod.string().optional(),
+  "priorityType": zod.enum(['maintain', 'develop', 'reduce']),
+  "status": zod.enum(['proposed', 'planned', 'visited', 'not_visited', 'superseded']),
+  "defaultedInputs": zod.array(zod.string()),
+  "baselineTotalVisit": zod.number().nullish(),
+  "currentTotalVisit": zod.number().nullish(),
+  "baselineOrderBooking": zod.number().nullish(),
+  "currentOrderBooking": zod.number().nullish(),
+  "orderValueAfter": zod.number().nullish(),
+  "completionBasis": zod.union([zod.literal('inferred_total_visit_increase'),zod.literal(null)]).nullish()
+})).optional()
+}),
+  "targetCount": zod.number(),
+  "sourceSnapshotHash": zod.string()
+})
+
+
+/**
+ * @summary Infer completion from the latest member sheet snapshot
+ */
+export const ReconcileAiPlanParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ReconcileAiPlanResponse = zod.object({
+  "planId": zod.number(),
+  "visited": zod.number(),
+  "considered": zod.number(),
+  "inference": zod.string()
+})
+
+
+/**
+ * @summary Compare planned and inferred completed targets
+ */
+export const GetAiPlanVsActualParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetAiPlanVsActualResponse = zod.object({
+  "planId": zod.number(),
+  "member": zod.string().nullish(),
+  "fy": zod.string().nullish(),
+  "month": zod.string().nullish(),
+  "rows": zod.array(zod.record(zod.string(), zod.unknown())),
+  "orderValueDelta": zod.number().optional(),
+  "source": zod.string()
+})
+
+
+/**
+ * @summary Export a persisted visit plan as CSV
+ */
+export const ExportAiPlanParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ExportAiPlanResponse = zod.unknown()
+
+

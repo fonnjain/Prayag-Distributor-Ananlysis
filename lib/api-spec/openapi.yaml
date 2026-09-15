@@ -1678,6 +1678,123 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /ai-plan:
+    get:
+      operationId: getAiPlan
+      tags: [ai]
+      summary: Read persisted visit plans
+      parameters:
+        - { name: fy, in: query, required: false, schema: { type: string, pattern: "^\\d{4}-\\d{2}$" } }
+        - { name: member, in: query, required: false, schema: { type: string } }
+        - { name: month, in: query, required: false, schema: { type: string } }
+        - name: history
+          in: query
+          required: false
+          description: Include superseded revisions in plans; revisionHistory is always returned.
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Persisted plans and targets
+          content: { application/json: { schema: { $ref: "#/components/schemas/AiPlanListResponse" } } }
+        "400": { description: Invalid filters, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /ai-plan/analytics:
+    get:
+      operationId: getAiPlanAnalytics
+      tags: [ai]
+      summary: Visit plan pace and default-input analytics
+      parameters:
+        - { name: fy, in: query, required: false, schema: { type: string, pattern: "^\\d{4}-\\d{2}$" } }
+      responses:
+        "200":
+          description: Plan analytics
+          content: { application/json: { schema: { $ref: "#/components/schemas/AiPlanAnalyticsResponse" } } }
+  /ai-plan/months:
+    get:
+      operationId: getAiPlanMonths
+      tags: [ai]
+      summary: List canonical forward fiscal months for visit plans
+      parameters:
+        - { name: fy, in: query, required: false, schema: { type: string, pattern: "^\\d{4}-\\d{2}$" } }
+      responses:
+        "200":
+          description: Canonical forward month choices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fy, months, canonicalFormat, acceptedFormats]
+                properties:
+                  fy: { type: string }
+                  months: { type: array, items: { type: string } }
+                  canonicalFormat: { type: string }
+                  acceptedFormats: { type: array, items: { type: string } }
+  /ai-plan/generate:
+    post:
+      operationId: generateAiPlan
+      tags: [ai]
+      summary: Generate and persist a proposed visit plan
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AiPlanInput" } } }
+      responses:
+        "201":
+          description: Proposed plan
+          content: { application/json: { schema: { $ref: "#/components/schemas/AiPlanGenerationResponse" } } }
+        "400": { description: Invalid request, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /ai-plan/{id}/approve:
+    post:
+      operationId: approveAiPlan
+      tags: [ai]
+      summary: Approve a proposed visit plan
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200":
+          description: Approved plan
+          content: { application/json: { schema: { $ref: "#/components/schemas/AiPlanGenerationResponse" } } }
+  /ai-plan/{id}/regenerate:
+    post:
+      operationId: regenerateAiPlan
+      tags: [ai]
+      summary: Regenerate a plan, superseding the prior proposal
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: "#/components/schemas/AiPlanInput" } } }
+      responses:
+        "201":
+          description: New proposed plan
+          content: { application/json: { schema: { $ref: "#/components/schemas/AiPlanGenerationResponse" } } }
+  /ai-plan/{id}/reconcile:
+    post:
+      operationId: reconcileAiPlan
+      tags: [ai]
+      summary: Infer completion from the latest member sheet snapshot
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200":
+          description: Reconciliation result
+          content: { application/json: { schema: { $ref: "#/components/schemas/AiPlanReconcileResponse" } } }
+  /ai-plan/{id}/plan-vs-actual:
+    get:
+      operationId: getAiPlanVsActual
+      tags: [ai]
+      summary: Compare planned and inferred completed targets
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200":
+          description: Plan versus actual
+          content: { application/json: { schema: { $ref: "#/components/schemas/AiPlanVsActualResponse" } } }
+  /ai-plan/{id}/export:
+    get:
+      operationId: exportAiPlan
+      tags: [ai]
+      summary: Export a persisted visit plan as CSV
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200":
+          description: CSV export
+          content: { text/csv: { schema: { type: string } } }
+
 components:
   schemas:
     SapUploadUrl:
@@ -5124,3 +5241,128 @@ components:
         corruptTestMode:
           type: boolean
           nullable: true
+    AiPlanInput:
+      type: object
+      required: [member]
+      properties:
+        member: { type: string, minLength: 1 }
+        stateHead: { type: ["string", "null"] }
+        fy: { type: string, pattern: "^\\d{4}-\\d{2}$" }
+        month: { type: ["string", "null"] }
+    AiPlan:
+      type: object
+      required: [id, member, fy, month, status, sourceSnapshotHash]
+      properties:
+        id: { type: integer }
+        member: { type: string }
+        stateHead: { type: ["string", "null"] }
+        fy: { type: string }
+        month: { type: string }
+        status: { type: string, enum: [proposed, approved, superseded] }
+        sourceSnapshotHash: { type: string }
+        generatedAt: { type: string, format: date-time }
+        supersedesPlanId: { type: ["integer", "null"] }
+        supersededBy: { type: ["integer", "null"] }
+        targets: { type: array, items: { $ref: "#/components/schemas/AiPlanTarget" } }
+    AiPlanTarget:
+      type: object
+      required: [id, retailerIdentity, priorityType, status, defaultedInputs]
+      properties:
+        id: { type: integer }
+        retailerIdentity: { type: string }
+        retailerName: { type: string }
+        priorityType: { type: string, enum: [maintain, develop, reduce] }
+        status: { type: string, enum: [proposed, planned, visited, not_visited, superseded] }
+        defaultedInputs: { type: array, items: { type: string } }
+        baselineTotalVisit: { type: ["integer", "null"] }
+        currentTotalVisit: { type: ["integer", "null"] }
+        baselineOrderBooking: { type: ["number", "null"] }
+        currentOrderBooking: { type: ["number", "null"] }
+        orderValueAfter: { type: ["number", "null"] }
+        completionBasis: { type: ["string", "null"], enum: [inferred_total_visit_increase, null] }
+    AiPlanListResponse:
+      type: object
+      required: [fy, plans, revisionHistory, currentPlanId]
+      properties:
+        fy: { type: string }
+        member: { type: ["string", "null"] }
+        month: { type: ["string", "null"] }
+        plans: { type: array, items: { $ref: "#/components/schemas/AiPlan" } }
+        revisionHistory: { type: array, items: { $ref: "#/components/schemas/AiPlan" } }
+        currentPlanId: { type: ["integer", "null"] }
+    AiPlanGenerationResponse:
+      type: object
+      required: [plan, targetCount, sourceSnapshotHash]
+      properties:
+        plan: { $ref: "#/components/schemas/AiPlan" }
+        targetCount: { type: integer }
+        sourceSnapshotHash: { type: string }
+    AiPlanAnalyticsResponse:
+      type: object
+      required: [fy, figures, stateHeads, note]
+      properties:
+        fy: { type: string }
+        figures:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              paceVisitsDone: { type: ["number", "null"] }
+              paceProRatedRequired: { type: ["number", "null"] }
+              paceDeficit: { type: ["number", "null"] }
+              capacityGap: { type: ["number", "null"] }
+              demonstratedRate: { type: ["number", "null"] }
+              demonstratedRateNumerator: { type: ["number", "null"] }
+              demonstratedRateDenominator: { type: ["number", "null"] }
+              demonstratedRateDenominatorAuthority: { type: string, enum: ["Dashboard AG", "calendar fallback"] }
+              coverageNeverVisitedCount: { type: integer }
+              coverageNeverVisitedRanking: { type: array, items: { type: object, additionalProperties: true } }
+              dormantCount: { type: integer }
+              dormantRetailers: { type: array, items: { type: object, additionalProperties: true } }
+              excludedRetailerCount: { type: integer }
+              excludedRetailers: { type: array, items: { type: object, additionalProperties: true } }
+        stateHeads:
+          type: array
+          items:
+            type: object
+            required: [stateHead, month, paceVisitsDone, paceProRatedRequired, paceDeficit, capacityGap, demonstratedRateNumerator, demonstratedRateDenominator, demonstratedRate, demonstratedRateAuthority, authorityMix, sourceSnapshotDisclosure]
+            properties:
+              stateHead: { type: string }
+              month: { type: string }
+              paceVisitsDone: { type: number }
+              paceProRatedRequired: { type: number }
+              paceDeficit: { type: number }
+              capacityGap: { type: number }
+              demonstratedRateNumerator: { type: number }
+              demonstratedRateDenominator: { type: number }
+              demonstratedRate: { type: ["number", "null"] }
+              demonstratedRateAuthority: { type: string, enum: ["Dashboard AG", "calendar fallback", "mixed: Dashboard AG + calendar fallback"] }
+              authorityMix: { type: array, items: { type: string } }
+              sourceSnapshotDisclosure:
+                type: object
+                required: [mixed, sourceSnapshotHashes, cutoffDates]
+                properties:
+                  mixed: { type: boolean }
+                  sourceSnapshotHashes: { type: array, items: { type: string } }
+                  cutoffDates: { type: array, items: { type: string } }
+        note: { type: string }
+    AiPlanReconcileResponse:
+      type: object
+      required: [planId, visited, considered, inference]
+      properties:
+        planId: { type: integer }
+        visited: { type: integer }
+        considered: { type: integer }
+        inference: { type: string }
+    AiPlanVsActualResponse:
+      type: object
+      required: [planId, rows, source]
+      properties:
+        planId: { type: integer }
+        member: { type: ["string", "null"] }
+        fy: { type: ["string", "null"] }
+        month: { type: ["string", "null"] }
+        rows: { type: array, items: { type: object, additionalProperties: true } }
+        orderValueDelta: { type: number }
+        source: { type: string }

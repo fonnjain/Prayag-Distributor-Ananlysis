@@ -114,6 +114,7 @@
 - [People relationship resolutions](people-relationship-resolutions.md) — manual registry→People links are effective-dated, hash-bound, audit-only changes; HR source text and historical fact tables stay immutable.
 - [Publish/schema replay](publish-schema-ledger-replay.md) — Publish may create schema objects before custom migration ledger entries; migration constraints must be replay-safe.
 - [Publish CHECK serialization](publish-check-serialization.md) — validate new development CHECK constraints before Publish; NOT VALID definitions can be malformed by schema-diff serialization.
+- [Publish expression-index serialization](publish-expression-index-serialization.md) — avoid multi-argument function expressions in persisted indexes; use an explicit normalized key column.
 - [Audit status constraint fan-out](audit-status-constraint-fanout.md) — new reconciliation statuses must be allowed by every linked audit-table CHECK before production use.
 - [Seasonal curve baseline reconciliation](seasonal-curve-baseline-reconciliation.md) — never activate a rebuilt curve when frozen FY2025–26 monthly shape materially conflicts with the approved baseline.
 - [User activity telemetry](user-activity-telemetry.md) — daily user time must union concurrent tabs under a per-user transaction lock; retention follows India calendar days.
@@ -137,3 +138,4 @@
 - [External-read route authorization](external-read-route-authorization.md) — authorize immutable terminal route names; Express strips mount prefixes before nested middleware.
 - [Pre-gate router scoping](pre-gate-router-scoping.md) — routers mounted before session auth must path-scope every router-level guard or they can intercept all protected application routes.
 - [AI Schemes E2/E3 arithmetic](ai-schemes-e2-e3.md) — breadth, bands, and margin headroom stay source-separated; holds alter calculation inputs and category economics use ERP pipe/fitting groups.
+- [AI visit-plan lifecycle](ai-visit-plan-lifecycle.md) — defaults stay visible; revisions are immutable; completion requires newer changed evidence and month-close rules.

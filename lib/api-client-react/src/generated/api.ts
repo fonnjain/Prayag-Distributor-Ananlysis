@@ -21,6 +21,12 @@ import type {
 
 import type {
   AiPayload,
+  AiPlanAnalyticsResponse,
+  AiPlanGenerationResponse,
+  AiPlanInput,
+  AiPlanListResponse,
+  AiPlanReconcileResponse,
+  AiPlanVsActualResponse,
   AiReportRequest,
   AiReportResponse,
   AiSchemesAnalyticsResponse,
@@ -49,6 +55,10 @@ import type {
   ErrorResponse,
   ExportCustomerMasterParams,
   GetAiPayloadParams,
+  GetAiPlanAnalyticsParams,
+  GetAiPlanMonths200,
+  GetAiPlanMonthsParams,
+  GetAiPlanParams,
   GetAiSchemesAnalyticsParams,
   GetAnalyticsParams,
   GetMgmtDeepDiveParams,
@@ -4001,4 +4011,685 @@ export const useUpdateCustomerMasterRecord = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getUpdateCustomerMasterRecordMutationOptions(options));
     }
+
+export const getGetAiPlanUrl = (params?: GetAiPlanParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/ai-plan?${stringifiedParams}` : `/api/ai-plan`
+}
+
+/**
+ * @summary Read persisted visit plans
+ */
+export const getAiPlan = async (params?: GetAiPlanParams, options?: RequestInit): Promise<AiPlanListResponse> => {
+
+  return customFetch<AiPlanListResponse>(getGetAiPlanUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAiPlanQueryKey = (params?: GetAiPlanParams,) => {
+    return [
+    `/api/ai-plan`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAiPlanQueryOptions = <TData = Awaited<ReturnType<typeof getAiPlan>>, TError = ErrorType<ErrorResponse>>(params?: GetAiPlanParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAiPlanQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAiPlan>>> = ({ signal }) => getAiPlan(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAiPlan>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAiPlanQueryResult = NonNullable<Awaited<ReturnType<typeof getAiPlan>>>
+export type GetAiPlanQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Read persisted visit plans
+ */
+
+export function useGetAiPlan<TData = Awaited<ReturnType<typeof getAiPlan>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetAiPlanParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAiPlanQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAiPlanAnalyticsUrl = (params?: GetAiPlanAnalyticsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/ai-plan/analytics?${stringifiedParams}` : `/api/ai-plan/analytics`
+}
+
+/**
+ * @summary Visit plan pace and default-input analytics
+ */
+export const getAiPlanAnalytics = async (params?: GetAiPlanAnalyticsParams, options?: RequestInit): Promise<AiPlanAnalyticsResponse> => {
+
+  return customFetch<AiPlanAnalyticsResponse>(getGetAiPlanAnalyticsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAiPlanAnalyticsQueryKey = (params?: GetAiPlanAnalyticsParams,) => {
+    return [
+    `/api/ai-plan/analytics`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAiPlanAnalyticsQueryOptions = <TData = Awaited<ReturnType<typeof getAiPlanAnalytics>>, TError = ErrorType<unknown>>(params?: GetAiPlanAnalyticsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiPlanAnalytics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAiPlanAnalyticsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAiPlanAnalytics>>> = ({ signal }) => getAiPlanAnalytics(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAiPlanAnalytics>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAiPlanAnalyticsQueryResult = NonNullable<Awaited<ReturnType<typeof getAiPlanAnalytics>>>
+export type GetAiPlanAnalyticsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Visit plan pace and default-input analytics
+ */
+
+export function useGetAiPlanAnalytics<TData = Awaited<ReturnType<typeof getAiPlanAnalytics>>, TError = ErrorType<unknown>>(
+ params?: GetAiPlanAnalyticsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiPlanAnalytics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAiPlanAnalyticsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAiPlanMonthsUrl = (params?: GetAiPlanMonthsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/ai-plan/months?${stringifiedParams}` : `/api/ai-plan/months`
+}
+
+/**
+ * @summary List canonical forward fiscal months for visit plans
+ */
+export const getAiPlanMonths = async (params?: GetAiPlanMonthsParams, options?: RequestInit): Promise<GetAiPlanMonths200> => {
+
+  return customFetch<GetAiPlanMonths200>(getGetAiPlanMonthsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAiPlanMonthsQueryKey = (params?: GetAiPlanMonthsParams,) => {
+    return [
+    `/api/ai-plan/months`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAiPlanMonthsQueryOptions = <TData = Awaited<ReturnType<typeof getAiPlanMonths>>, TError = ErrorType<unknown>>(params?: GetAiPlanMonthsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiPlanMonths>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAiPlanMonthsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAiPlanMonths>>> = ({ signal }) => getAiPlanMonths(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAiPlanMonths>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAiPlanMonthsQueryResult = NonNullable<Awaited<ReturnType<typeof getAiPlanMonths>>>
+export type GetAiPlanMonthsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List canonical forward fiscal months for visit plans
+ */
+
+export function useGetAiPlanMonths<TData = Awaited<ReturnType<typeof getAiPlanMonths>>, TError = ErrorType<unknown>>(
+ params?: GetAiPlanMonthsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiPlanMonths>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAiPlanMonthsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGenerateAiPlanUrl = () => {
+
+
+
+
+  return `/api/ai-plan/generate`
+}
+
+/**
+ * @summary Generate and persist a proposed visit plan
+ */
+export const generateAiPlan = async (aiPlanInput: AiPlanInput, options?: RequestInit): Promise<AiPlanGenerationResponse> => {
+
+  return customFetch<AiPlanGenerationResponse>(getGenerateAiPlanUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(aiPlanInput)
+  }
+);}
+
+
+
+
+export const getGenerateAiPlanMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateAiPlan>>, TError,{data: BodyType<AiPlanInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof generateAiPlan>>, TError,{data: BodyType<AiPlanInput>}, TContext> => {
+
+const mutationKey = ['generateAiPlan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateAiPlan>>, {data: BodyType<AiPlanInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  generateAiPlan(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GenerateAiPlanMutationResult = NonNullable<Awaited<ReturnType<typeof generateAiPlan>>>
+    export type GenerateAiPlanMutationBody = BodyType<AiPlanInput>
+    export type GenerateAiPlanMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Generate and persist a proposed visit plan
+ */
+export const useGenerateAiPlan = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateAiPlan>>, TError,{data: BodyType<AiPlanInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof generateAiPlan>>,
+        TError,
+        {data: BodyType<AiPlanInput>},
+        TContext
+      > => {
+      return useMutation(getGenerateAiPlanMutationOptions(options));
+    }
+
+export const getApproveAiPlanUrl = (id: number,) => {
+
+
+
+
+  return `/api/ai-plan/${id}/approve`
+}
+
+/**
+ * @summary Approve a proposed visit plan
+ */
+export const approveAiPlan = async (id: number, options?: RequestInit): Promise<AiPlanGenerationResponse> => {
+
+  return customFetch<AiPlanGenerationResponse>(getApproveAiPlanUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getApproveAiPlanMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveAiPlan>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approveAiPlan>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['approveAiPlan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveAiPlan>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  approveAiPlan(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveAiPlanMutationResult = NonNullable<Awaited<ReturnType<typeof approveAiPlan>>>
+
+    export type ApproveAiPlanMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Approve a proposed visit plan
+ */
+export const useApproveAiPlan = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveAiPlan>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approveAiPlan>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getApproveAiPlanMutationOptions(options));
+    }
+
+export const getRegenerateAiPlanUrl = (id: number,) => {
+
+
+
+
+  return `/api/ai-plan/${id}/regenerate`
+}
+
+/**
+ * @summary Regenerate a plan, superseding the prior proposal
+ */
+export const regenerateAiPlan = async (id: number,
+    aiPlanInput?: AiPlanInput, options?: RequestInit): Promise<AiPlanGenerationResponse> => {
+
+  return customFetch<AiPlanGenerationResponse>(getRegenerateAiPlanUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(aiPlanInput)
+  }
+);}
+
+
+
+
+export const getRegenerateAiPlanMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof regenerateAiPlan>>, TError,{id: number;data?: BodyType<AiPlanInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof regenerateAiPlan>>, TError,{id: number;data?: BodyType<AiPlanInput>}, TContext> => {
+
+const mutationKey = ['regenerateAiPlan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof regenerateAiPlan>>, {id: number;data?: BodyType<AiPlanInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  regenerateAiPlan(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RegenerateAiPlanMutationResult = NonNullable<Awaited<ReturnType<typeof regenerateAiPlan>>>
+    export type RegenerateAiPlanMutationBody = BodyType<AiPlanInput> | undefined
+    export type RegenerateAiPlanMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Regenerate a plan, superseding the prior proposal
+ */
+export const useRegenerateAiPlan = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof regenerateAiPlan>>, TError,{id: number;data?: BodyType<AiPlanInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof regenerateAiPlan>>,
+        TError,
+        {id: number;data?: BodyType<AiPlanInput>},
+        TContext
+      > => {
+      return useMutation(getRegenerateAiPlanMutationOptions(options));
+    }
+
+export const getReconcileAiPlanUrl = (id: number,) => {
+
+
+
+
+  return `/api/ai-plan/${id}/reconcile`
+}
+
+/**
+ * @summary Infer completion from the latest member sheet snapshot
+ */
+export const reconcileAiPlan = async (id: number, options?: RequestInit): Promise<AiPlanReconcileResponse> => {
+
+  return customFetch<AiPlanReconcileResponse>(getReconcileAiPlanUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getReconcileAiPlanMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reconcileAiPlan>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reconcileAiPlan>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['reconcileAiPlan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reconcileAiPlan>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  reconcileAiPlan(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReconcileAiPlanMutationResult = NonNullable<Awaited<ReturnType<typeof reconcileAiPlan>>>
+
+    export type ReconcileAiPlanMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Infer completion from the latest member sheet snapshot
+ */
+export const useReconcileAiPlan = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reconcileAiPlan>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reconcileAiPlan>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getReconcileAiPlanMutationOptions(options));
+    }
+
+export const getGetAiPlanVsActualUrl = (id: number,) => {
+
+
+
+
+  return `/api/ai-plan/${id}/plan-vs-actual`
+}
+
+/**
+ * @summary Compare planned and inferred completed targets
+ */
+export const getAiPlanVsActual = async (id: number, options?: RequestInit): Promise<AiPlanVsActualResponse> => {
+
+  return customFetch<AiPlanVsActualResponse>(getGetAiPlanVsActualUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAiPlanVsActualQueryKey = (id: number,) => {
+    return [
+    `/api/ai-plan/${id}/plan-vs-actual`
+    ] as const;
+    }
+
+
+export const getGetAiPlanVsActualQueryOptions = <TData = Awaited<ReturnType<typeof getAiPlanVsActual>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiPlanVsActual>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAiPlanVsActualQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAiPlanVsActual>>> = ({ signal }) => getAiPlanVsActual(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAiPlanVsActual>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAiPlanVsActualQueryResult = NonNullable<Awaited<ReturnType<typeof getAiPlanVsActual>>>
+export type GetAiPlanVsActualQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Compare planned and inferred completed targets
+ */
+
+export function useGetAiPlanVsActual<TData = Awaited<ReturnType<typeof getAiPlanVsActual>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiPlanVsActual>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAiPlanVsActualQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportAiPlanUrl = (id: number,) => {
+
+
+
+
+  return `/api/ai-plan/${id}/export`
+}
+
+/**
+ * @summary Export a persisted visit plan as CSV
+ */
+export const exportAiPlan = async (id: number, options?: RequestInit): Promise<string> => {
+
+  return customFetch<string>(getExportAiPlanUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportAiPlanQueryKey = (id: number,) => {
+    return [
+    `/api/ai-plan/${id}/export`
+    ] as const;
+    }
+
+
+export const getExportAiPlanQueryOptions = <TData = Awaited<ReturnType<typeof exportAiPlan>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportAiPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportAiPlanQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportAiPlan>>> = ({ signal }) => exportAiPlan(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportAiPlan>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ExportAiPlanQueryResult = NonNullable<Awaited<ReturnType<typeof exportAiPlan>>>
+export type ExportAiPlanQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Export a persisted visit plan as CSV
+ */
+
+export function useExportAiPlan<TData = Awaited<ReturnType<typeof exportAiPlan>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportAiPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getExportAiPlanQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
 

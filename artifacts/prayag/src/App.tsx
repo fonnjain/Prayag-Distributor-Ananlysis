@@ -12,7 +12,6 @@ import SkuPage from "@/pages/SkuPage";
 import MrpPage from "@/pages/MrpPage";
 import MarginPage from "@/pages/MarginPage";
 import MarketSurveyPage from "@/pages/MarketSurveyPage";
-import CompetitionPricePage from "@/pages/CompetitionPricePage";
 import DevPortalPage from "@/pages/DevPortalPage";
 import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import DevMastersPage from "@/pages/DevMastersPage";
@@ -31,10 +30,12 @@ import ChangePasswordPage from "@/pages/ChangePasswordPage";
 import ResolutionPage from "@/pages/ResolutionPage";
 import NotFound from "@/pages/not-found";
 import AiSchemesPage from "@/pages/AiSchemesPage";
+import AiPlanPage from "@/pages/AiPlanPage";
 import { DashboardProvider } from "@/data/dashboard-context";
 import { GlobalFilterProvider } from "@/data/global-filter-context";
 import { AuthProvider, useAuth } from "@/data/auth-context";
 import ActivityTelemetry from "@/components/ActivityTelemetry";
+import CompetitionPricePage from "./pages/CompetitionPricePage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -77,7 +78,8 @@ function ProtectedRoutes() {
         <Route path="/secondary-orders" component={SecondaryOrdersPage} />
         {/* SKU Deep Dive */}
         <Route path="/sku" component={SkuPage} />
-        {/* AI Schemes */}
+        {/* AI Plan & Schemes */}
+        <Route path="/ai-plan" component={AiPlanPage} />
         <Route path="/ai-schemes" component={AiSchemesPage} />
         {/* MRP section */}
         <Route path="/mrp/competition" component={CompetitionPricePage} />
