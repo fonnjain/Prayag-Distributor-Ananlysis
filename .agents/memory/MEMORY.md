@@ -140,3 +140,4 @@
 - [AI Schemes E2/E3 arithmetic](ai-schemes-e2-e3.md) — breadth, bands, and margin headroom stay source-separated; holds alter calculation inputs and category economics use ERP pipe/fitting groups.
 - [AI Schemes historical basis](ai-schemes-historical-basis.md) — scheme tables establish grammar only; outcomes stay unavailable, while proposals require modeled cost and numeric breakeven.
 - [AI visit-plan lifecycle](ai-visit-plan-lifecycle.md) — defaults stay visible; revisions are immutable; completion requires newer changed evidence and month-close rules.
+- [Pending attribution availability](pending-attribution-availability.md) — assignment and conflict evidence are one atomic basis; if either fails, preserve source quantities but withhold coverage and attributed export.

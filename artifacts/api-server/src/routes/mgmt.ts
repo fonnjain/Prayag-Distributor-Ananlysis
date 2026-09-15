@@ -30,7 +30,7 @@ import {
   loadPrimaryPeriodData,
   fiscalMonthsToLabels,
 } from "../lib/mgmt/primaryPeriod.js";
-import { loadFactoryPending } from "../lib/mgmt/factoryPending.js";
+import { buildFactoryPendingWorkbook, loadFactoryPending } from "../lib/mgmt/factoryPending.js";
 import {
   getDistributorTmMapIfReady,
   loadDistributorTmMap,
@@ -1421,6 +1421,37 @@ router.get("/mgmt/pending-orders", async (req: Request, res: Response): Promise<
     if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "pending-orders: loadFactoryPending threw");
     res.status(500).json({ error: "Could not load factory pending data." });
+  }
+});
+
+// XLSX audit export uses exactly the same response builder as the JSON route.
+// Keeping the workbook construction downstream of loadFactoryPending prevents
+// the export and the page from silently reconciling different source rows.
+router.get("/mgmt/pending-orders/export", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await loadFactoryPending();
+    if (!result.attributionAvailable) {
+      res.status(503).json({
+        error: "Factory pending attribution data is unavailable; export was not generated.",
+        attributionAvailable: false,
+      });
+      return;
+    }
+    const workbook = buildFactoryPendingWorkbook(result);
+    const bytes = await workbook.xlsx.writeBuffer();
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="FactoryPendingAudit_${new Date().toISOString().slice(0, 10)}.xlsx"`,
+    );
+    res.send(Buffer.from(bytes));
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err }, "pending-orders export failed");
+    res.status(500).json({ error: "Could not build the factory pending audit export." });
   }
 });
 

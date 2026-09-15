@@ -5879,6 +5879,48 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
       ON CONFLICT (source_code, target_code, relation) DO NOTHING;
     `,
   },
+  {
+    id: "122_prompt96_pending_order_audit",
+    sql: `
+      -- Prompt 96: the factory pending-order audit is additive and must retain
+      -- the source quantity while making customer attribution explainable.
+      -- The two customer counts are deliberately retained as dated evidence:
+      -- the Customers page was read on 31 August, while the later count uses
+      -- the current customer table plus open, non-voided assignments.
+      INSERT INTO resolution_item
+        (code, type, title, category, reason, evidence, value_at_stake,
+         raised_on, raised_by, owner, priority, status, blocks_api)
+      VALUES
+        ('P47', 'PENDING',
+         'Who owns the 88 factory-pending parties with no team-member assignment?',
+         'master data',
+         'Confirm and assign ownership for factory-pending parties that cannot
+          currently be linked to a team member, without hiding disputed or
+          unassigned quantities.',
+         '[Source: Replit Prompt 96, 15 September 2026] Customer-count evidence is preserved by method and date: 3,376 on the Customers page at 2026-08-31; 3,388 from current customer plus open customer_assignment at 2026-09-15. The small movement is expected because the methods and observation dates differ; it is not a correction to Q6. Pending subset evidence: 132,491 pieces across 88 parties, 44.36% of company factory pending (298,679 pieces). Sandeep corrected audit assertions: named 67,718; unassigned 58,839; disputed 41,888; total 168,445; difference 0; candidate coverage 42.82%; safe coverage 40.20%; conflict cost 2.62 percentage points. The backend preserves grandTotal/byHead/derived additively, deduplicates attribution by distinct person_id, and exposes parent/children/difference/exact checks at company, head, bucket/member and party product-group levels. Cross-reference external Q6 where that item exists; no relationship row is created when Q6 is absent.',
+         132491,
+         '2026-09-15', 'Prompt 96', 'Prayag', 'high', 'open', FALSE)
+       ON CONFLICT (code) DO NOTHING;
+
+      INSERT INTO resolution_item_relationship (source_code, target_code, relation)
+      SELECT 'P47', 'Q6', 'ask-supported-by'::resolution_relation_type
+       WHERE EXISTS (SELECT 1 FROM resolution_item WHERE code = 'Q6')
+      ON CONFLICT (source_code, target_code, relation) DO NOTHING;
+    `,
+  },
+  {
+    id: "123_prompt96_p47_unassigned_scope",
+    sql: `
+      UPDATE resolution_item
+         SET title = 'Who owns the 88 factory-pending parties with no team-member assignment?',
+             category = 'master data',
+             reason = 'Confirm and assign ownership for factory-pending parties that cannot currently be linked to a team member, without hiding disputed or unassigned quantities.',
+              evidence = '[Source: Replit Prompt 96, 15 September 2026] Customer-count evidence is preserved by method and date: 3,376 on the Customers page at 2026-08-31; 3,388 from current customer plus open customer_assignment at 2026-09-15. The small movement is expected because the methods and observation dates differ; it is not a correction to Q6. Pending subset evidence: 132,491 pieces across 88 parties, 44.36% of company factory pending (298,679 pieces). Sandeep corrected audit assertions: named 67,718; unassigned 58,839; disputed 41,888; total 168,445; difference 0; candidate coverage 42.82%; safe coverage 40.20%; conflict cost 2.62 percentage points. The backend preserves grandTotal/byHead/derived additively, deduplicates attribution by distinct person_id, and exposes parent/children/difference/exact checks at company, head, bucket/member and party product-group levels. Cross-reference external Q6 where that item exists; no relationship row is created when Q6 is absent.'
+        WHERE code = 'P47'
+          AND status = 'open'
+          AND raised_by = 'Prompt 96';
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
