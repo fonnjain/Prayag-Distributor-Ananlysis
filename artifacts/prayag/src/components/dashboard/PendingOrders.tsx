@@ -159,7 +159,9 @@ export const RELATED_MEASURES_DESCRIPTION =
 export const NON_TERRITORY_HEADS = "Project/GOVT/GEM/JJM/Other";
 export const PENDING_EXPORT_LABEL = "Download both measures";
 export function formatNonTerritoryPending(value: number | null): string {
-  return value == null ? "—" : fmtCr(value);
+  return value == null
+    ? "—"
+    : `₹${(value / 1e7).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Cr`;
 }
 export function formatPprCaveat(
   rate: number | null | undefined,

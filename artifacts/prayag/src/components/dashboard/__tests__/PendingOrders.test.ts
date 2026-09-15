@@ -77,6 +77,7 @@ describe("Pending Orders zero-coverage heads", () => {
     expect(formatPprCaveat(null, null, 5898)).toBeNull();
     expect(PENDING_EXPORT_LABEL).toBe("Download both measures");
     expect(formatNonTerritoryPending(29300000)).toContain("2.93 Cr");
+    expect(formatNonTerritoryPending(29276869.05)).toBe("₹2.93 Cr");
     expect(formatNonTerritoryPending(null)).toBe("—");
   });
 
