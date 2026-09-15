@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 import {
   HeadSection,
   ReconText,
+  RELATED_MEASURES_DESCRIPTION,
+  formatPprCaveat,
+  PENDING_EXPORT_LABEL,
+  formatNonTerritoryPending,
   SourceOnlyHeadSection,
   type PendingHead,
 } from "../PendingOrders";
@@ -63,6 +67,19 @@ function zeroCoverageHead(head: string): PendingHead {
 }
 
 describe("Pending Orders zero-coverage heads", () => {
+  it("uses corrected operational-measure wording and dynamic caveat values", () => {
+    expect(RELATED_MEASURES_DESCRIPTION).toContain("no common order key");
+    expect(RELATED_MEASURES_DESCRIPTION).toContain("not directly comparable");
+    expect(RELATED_MEASURES_DESCRIPTION).not.toContain("expected to agree in magnitude");
+    expect(formatPprCaveat(225.95, 59426, 5898)).toContain("₹225.95");
+    expect(formatPprCaveat(225.95, 59426, 5898)).toContain("₹59,426.00");
+    expect(formatPprCaveat(225.95, 59426, 5898)).toContain("5,898 pending pieces");
+    expect(formatPprCaveat(null, null, 5898)).toBeNull();
+    expect(PENDING_EXPORT_LABEL).toBe("Download both measures");
+    expect(formatNonTerritoryPending(29300000)).toContain("2.93 Cr");
+    expect(formatNonTerritoryPending(null)).toBe("—");
+  });
+
   it("formats amount reconciliation in rupees rather than quantity units", () => {
     const markup = renderToStaticMarkup(createElement(ReconText, {
       measure: "amount",

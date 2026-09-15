@@ -102,6 +102,9 @@ type DerivedPending = {
   ob: number | null;
   sale: number | null;
   pending: number | null;
+  nonTerritoryOb: number | null;
+  nonTerritorySale: number | null;
+  nonTerritoryPending: number | null;
   obError: string | null;
   saleError: string | null;
 };
@@ -126,6 +129,9 @@ type PendingOrdersData = {
     basis: string;
     byGroup: Record<string, {
       averageRealisedRate: number | null;
+      canonicalGroup?: string;
+      contributingSalesAmount: number | null;
+      contributingCodeCount: number;
       amount: number | null;
       unpriceableQty: number;
       unpriceableReason: string | null;
@@ -146,6 +152,23 @@ function fmtCr(n: number): string {
 
 function fmtAmount(n: number): string {
   return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+export const RELATED_MEASURES_DESCRIPTION =
+  "These are related operational measures with no common order key and are not directly comparable. Derived pending includes non-territory OB-minus-Sale balances that REPORT 2 cannot identify or order-match.";
+export const NON_TERRITORY_HEADS = "Project/GOVT/GEM/JJM/Other";
+export const PENDING_EXPORT_LABEL = "Download both measures";
+export function formatNonTerritoryPending(value: number | null): string {
+  return value == null ? "—" : fmtCr(value);
+}
+export function formatPprCaveat(
+  rate: number | null | undefined,
+  sales: number | null | undefined,
+  pendingPieces: number,
+): string | null {
+  return rate != null && sales != null && pendingPieces > 0
+    ? `PPR rate ${fmtAmount(rate)} is based on only ${fmtAmount(sales)} FY sales and applied to ${fmtQty(pendingPieces)} pending pieces.`
+    : null;
 }
 
 function AmountCell({
@@ -665,6 +688,26 @@ export default function PendingOrders() {
   if (!data) return null;
 
   const d = data.derived;
+  const pprEntry = data.pricing?.byGroup
+    ? Object.values(data.pricing.byGroup).find((entry) => entry.canonicalGroup === "PPR")
+    : undefined;
+  const pprGroups = data.pricing?.byGroup
+    ? Object.entries(data.pricing.byGroup)
+      .filter(([, entry]) => entry.canonicalGroup === "PPR")
+      .map(([group]) => group)
+    : ["PPR"];
+  const pprPendingPieces = data.byHead.reduce(
+    (sum, head) => sum + head.parties.reduce(
+      (partySum, party) => partySum + pprGroups.reduce((groupSum, group) => groupSum + (party.byGroup[group] ?? 0), 0),
+      0,
+    ),
+    0,
+  );
+  const pprCaveat = formatPprCaveat(
+    pprEntry?.averageRealisedRate,
+    pprEntry?.contributingSalesAmount,
+    pprPendingPieces,
+  );
 
   return (
     <div className="flex flex-col gap-4 p-4 pb-8">
@@ -706,6 +749,7 @@ export default function PendingOrders() {
               <p className="mt-1">
                 Partial coverage is disclosed: product-group quantities without a usable positive realised rate, and REPORT 2 total-minus-group residuals, remain unpriceable. Water tank pricing is per tank; REPORT 2 water-tank quantities are pieces, with mapped tank denominators resolved from the canonical per-tank litre map.
               </p>
+              {pprCaveat && <p className="mt-1">{pprCaveat}</p>}
             </div>
           )}
         </div>
@@ -716,7 +760,7 @@ export default function PendingOrders() {
             download
           >
             <Download className="h-4 w-4" />
-            Download Hierarchy
+             {PENDING_EXPORT_LABEL}
           </a>
         ) : (
           <span className="flex items-center gap-1.5 px-3 py-1.5 bg-muted text-muted-foreground text-sm font-medium rounded-md shrink-0">
@@ -839,7 +883,7 @@ export default function PendingOrders() {
         <div className="flex items-center gap-2 mb-3">
           <Info className="h-4 w-4 text-muted-foreground shrink-0" />
           <span className="text-sm font-medium">
-            Cross-check: Derived pending vs factory pending
+           Related operational measures
           </span>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 text-sm">
@@ -868,8 +912,8 @@ export default function PendingOrders() {
               <span className="text-xs text-destructive">{d.saleError}</span>
             )}
           </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs text-muted-foreground">Derived Pending (OB minus Sale)</span>
+           <div className="flex flex-col gap-0.5">
+             <span className="text-xs text-muted-foreground">Derived Pending (OB minus Sale)</span>
             <span
               className={cn(
                 "font-semibold tabular-nums",
@@ -879,12 +923,15 @@ export default function PendingOrders() {
               {d.pending != null ? fmtCr(d.pending) : "—"}
             </span>
           </div>
+           <div className="flex flex-col gap-0.5">
+             <span className="text-xs text-muted-foreground">Non-territory OB − Sale ({NON_TERRITORY_HEADS})</span>
+             <span className="font-semibold tabular-nums">
+               {formatNonTerritoryPending(d.nonTerritoryPending)}
+             </span>
+           </div>
         </div>
         <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
-           The priced factory pending and derived pending are independent measures.
-           They are expected to agree in magnitude as a cross-check, but are not fully
-           comparable: derived pending is OB minus Sale while factory pending is priced
-           REPORT 2 quantity.
+            {RELATED_MEASURES_DESCRIPTION}
         </p>
       </div>}
 

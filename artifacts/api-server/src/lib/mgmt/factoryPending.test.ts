@@ -435,6 +435,7 @@ describe("factory pending attribution audit", () => {
             p10RealisedRate: 10,
             p90RealisedRate: 10,
             contributingCodeCount: 1,
+            contributingSalesAmount: 100,
             amount: null,
             unpriceableQty: 0,
             unpriceableReason: null,
@@ -478,7 +479,7 @@ describe("factory pending attribution audit", () => {
           "CP (Chrome-Plated)": {
             canonicalGroup: "CP (Chrome-Plated)", averageRealisedRate: 10,
             medianCodeLevelRealisedRate: 10, p10RealisedRate: 10, p90RealisedRate: 10,
-            contributingCodeCount: 2, amount: null, unpriceableQty: 0, unpriceableReason: null,
+            contributingCodeCount: 2, contributingSalesAmount: 100, amount: null, unpriceableQty: 0, unpriceableReason: null,
           },
         },
       }),
@@ -491,9 +492,19 @@ describe("factory pending attribution audit", () => {
     expect(result.byHead[0].parties[0].amountReconciliation?.difference).toBe(0);
     expect(result.amountReconciliation?.parties.every((row) => row.difference === 0)).toBe(true);
     const workbook = buildFactoryPendingWorkbook(result);
-    expect(workbook.worksheets.map((sheet) => sheet.name)).toContain("Info");
-    expect(workbook.getWorksheet("Pending Detail")?.getRow(1).values).toEqual(
-      expect.arrayContaining(["Priced Amount (₹)", "Unpriceable Qty", "C P Amount (₹)"]),
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(
+      ["Summary", "Hierarchy", "Group Rates", "Unpriceable", "Info"],
+    );
+    expect(workbook.worksheets.find((sheet) => sheet.name === "Group Rates")?.rowCount ?? 0).toBe(result.groups.length + 1);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).not.toEqual(
+      expect.arrayContaining(["Audit Summary", "Pending Detail", "Attribution Evidence", "Reconciliation"]),
+    );
+    expect(workbook.getWorksheet("Group Rates")?.getRow(1).values).toEqual(
+      expect.arrayContaining(["Source Group", "Contributing FY Sales Value", "Robustness Flag/Note"]),
+    );
+    const hierarchy = workbook.getWorksheet("Hierarchy");
+    expect(hierarchy?.getRow(2).values).toEqual(
+      expect.arrayContaining(["Company", 5, 5, 5, 0, 50, 50, 50, 0, "Company total"]),
     );
   });
 

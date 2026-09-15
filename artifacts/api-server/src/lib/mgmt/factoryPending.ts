@@ -124,6 +124,9 @@ export type DerivedPending = {
   ob: number | null;
   sale: number | null;
   pending: number | null;
+  nonTerritoryOb: number | null;
+  nonTerritorySale: number | null;
+  nonTerritoryPending: number | null;
   obError: string | null;
   saleError: string | null;
 };
@@ -161,6 +164,7 @@ export type PendingPriceMetadata = {
   p10RealisedRate: number | null;
   p90RealisedRate: number | null;
   contributingCodeCount: number;
+  contributingSalesAmount: number | null;
   amount: number | null;
   unpriceableQty: number;
   unpriceableReason: string | null;
@@ -785,6 +789,7 @@ export function buildPendingPricingFromRows(rows: PendingPricingSaleRow[]): Pend
       p10RealisedRate: percentile(rates, 0.1),
       p90RealisedRate: percentile(rates, 0.9),
       contributingCodeCount: rates.length,
+      contributingSalesAmount: stat.amount,
       amount: null,
       unpriceableQty: 0,
       unpriceableReason: null,
@@ -832,6 +837,7 @@ function addAmountPricing(
   // an invented zero.
   const canonicalByGroup = result.byGroup;
   const sourceGroups = new Set<string>();
+  for (const sourceGroup of sheet.groups ?? []) sourceGroups.add(sourceGroup);
   for (const head of sheet.byHead) {
     for (const party of head.parties) {
       for (const sourceGroup of Object.keys(party.byGroup)) {
@@ -852,6 +858,7 @@ function addAmountPricing(
             p10RealisedRate: null,
             p90RealisedRate: null,
             contributingCodeCount: 0,
+            contributingSalesAmount: null,
             amount: null,
             unpriceableQty: 0,
             unpriceableReason: "No FY2026-27 sale_line_current rows with a usable rate",
@@ -1134,11 +1141,19 @@ export async function buildFactoryPending(
   const saleTotal = sale && !sale.error ? sale.total : null;
   const pendingTotal =
     obTotal != null && saleTotal != null ? obTotal - saleTotal : null;
+  const nonTerritoryOb = ob && !ob.error && ob.byHead instanceof Map ? (ob.byHead.get("Non-territory") ?? null) : null;
+  const nonTerritorySale = sale && !sale.error && sale.byHead instanceof Map ? (sale.byHead.get("Non-territory") ?? null) : null;
 
   const derived: DerivedPending = {
     ob: obTotal,
     sale: saleTotal,
     pending: pendingTotal,
+    nonTerritoryOb,
+    nonTerritorySale,
+    nonTerritoryPending:
+      nonTerritoryOb != null && nonTerritorySale != null
+        ? nonTerritoryOb - nonTerritorySale
+        : null,
     obError: ob?.error ?? (obResult.status === "rejected" ? String(obResult.reason) : null),
     saleError:
       sale?.error ?? (saleResult.status === "rejected" ? String(saleResult.reason) : null),
@@ -1158,7 +1173,7 @@ export async function buildFactoryPending(
           parties: [],
         },
       };
-  const amountPricing = addAmountPricing(enriched, pricing);
+  const amountPricing = addAmountPricing({ ...enriched, groups: sheet?.groups ?? [] }, pricing);
   const result: FactoryPendingResult = {
     groups: sheet?.groups ?? [],
     grandTotal: sheet?.grandTotal ?? 0,
@@ -1327,230 +1342,166 @@ async function readReport2(): Promise<SheetData> {
   return { groups, grandTotal, byHead };
 }
 
-/**
- * Build the XLSX used by the pending-order audit route.  The detail sheet is
- * deliberately denormalised: a reviewer can trace company → head → bucket →
- * party → product group without relying on formulas or hidden workbook tabs.
- */
+function fmtInr(value: number | null | undefined): string {
+  return value == null ? "" : `₹${value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Five-sheet audit export: Summary, Hierarchy, Group Rates, Unpriceable, Info. */
 export function buildFactoryPendingWorkbook(result: FactoryPendingResult): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
-  const summary = workbook.addWorksheet("Audit Summary");
+  const amountAvailable = result.pricingAvailable === true;
+  const INR = "₹#,##0.00";
+  const QTY = "#,##0";
+  const PCT = "0.00%";
+  const format = (sheet: ExcelJS.Worksheet, widths: number[]) => {
+    sheet.getRow(1).font = { bold: true };
+    sheet.views = [{ state: "frozen", ySplit: 1 }];
+    sheet.autoFilter = { from: "A1", to: `${String.fromCharCode(64 + Math.min(widths.length, 26))}1` };
+    sheet.columns.forEach((column, index) => { column.width = widths[index] ?? 18; });
+  };
+  const summary = workbook.addWorksheet("Summary");
   summary.columns = [
-    { header: "Measure", key: "measure", width: 34 },
-    { header: "Value", key: "value", width: 18 },
-    { header: "Basis", key: "basis", width: 72 },
+    { header: "Measure / Fact", key: "fact", width: 34 },
+    { header: "Value", key: "value", width: 22 },
+    { header: "Basis / Note", key: "note", width: 110 },
   ];
   summary.addRows([
-    ["Grand total", result.grandTotal, "REPORT 2 source quantity"],
-    ["Candidate coverage %", result.candidateCoveragePct, "Unique active or LEFT/departed candidate quantity ÷ company total"],
-    ["Safe coverage %", result.safeCoveragePct, "Unique active member quantity ÷ company total"],
-    ["Conflict cost (percentage points)", result.conflictCostPp, "Candidate coverage less safe coverage"],
-    ["Unassigned quantity", result.coverage.unassignedQty, "No current customer assignment candidate"],
-    ["Disputed quantity", result.coverage.disputedQty, "Attribution Conflicts or Multiple Candidates"],
-    ["Company reconciliation difference", result.reconciliation.company.difference, "Parent less sum of head children; must be zero"],
+    ["Factory pending quantity", result.grandTotal, "REPORT 2 balance quantity (pieces)"],
+    ["Priced pending", amountAvailable ? (result.pricedAmount ?? null) : null, PRICE_BASIS],
+    ["Unpriceable pieces", amountAvailable ? (result.unpriceableQty ?? null) : null, "Residual plus missing-rate product groups"],
+    ["Derived pending (OB minus Sale)", result.derived.pending, "Related operational measure; no common order key"],
+    ["Non-territory derived pending", result.derived.nonTerritoryPending, "Project/GOVT/GEM/JJM/Other; OB minus Sale"],
+    ["Comparability statement", null, "These are related operational measures with no common order key and are not directly comparable. Derived pending includes non-territory OB-minus-Sale balances that REPORT 2 cannot identify or order-match."],
+    ["Pricing error", result.pricingError ?? null, "Quantity remains available when pricing is unavailable"],
   ]);
-  summary.getRow(1).font = { bold: true };
-  summary.addRow([]);
-  summary.addRow(["Derived", "Order book", ""]);
-  summary.addRow(["Derived", result.derived.ob, "Order-book total"]);
-  summary.addRow(["Derived", result.derived.sale, "Sale total"]);
-  summary.addRow(["Derived", result.derived.pending, "Order book less sale"]);
+  format(summary, [34, 22, 110]);
+  summary.getColumn(2).numFmt = INR;
+  summary.getCell("B2").numFmt = QTY;
+  summary.getCell("B4").numFmt = QTY;
+  summary.getCell("B5").numFmt = INR;
+  summary.getCell("B6").numFmt = INR;
 
-  summary.addRow(["Priced amount", result.pricedAmount, PRICE_BASIS]);
-  summary.addRow(["Unpriceable quantity", result.unpriceableQty ?? null, "REPORT 2 residual plus groups without a usable positive rate"]);
-  summary.addRow(["Pricing error", result.pricingError ?? null, "Quantity and attribution remain available when pricing is unavailable"]);
-
-  const detail = workbook.addWorksheet("Pending Detail");
-  detail.columns = [
-    { header: "State Head", key: "head", width: 24 },
-    { header: "Bucket / Member", key: "bucket", width: 28 },
-    { header: "Party", key: "party", width: 34 },
-    { header: "Source Qty", key: "total", width: 14 },
-    { header: "Priced Amount (₹)", key: "pricedAmount", width: 18 },
-    { header: "Unpriceable Qty", key: "unpriceableQty", width: 16 },
-    { header: "Classification", key: "classification", width: 25 },
-    ...result.groups.flatMap((group) => [
-      { header: `${group} Qty`, key: group, width: 14 },
-      { header: `${group} Amount (₹)`, key: `${group}__amount`, width: 18 },
-      { header: `${group} Unpriceable`, key: `${group}__unpriceable`, width: 16 },
-    ]),
-    { header: "Party Difference", key: "difference", width: 16 },
-    { header: "Exact", key: "exact", width: 10 },
-    { header: "Amount Difference", key: "amountDifference", width: 18 },
-    { header: "Amount Exact", key: "amountExact", width: 12 },
+  const hierarchy = workbook.addWorksheet("Hierarchy");
+  hierarchy.columns = [
+    { header: "Level", key: "level", width: 16 }, { header: "State Head", key: "head", width: 22 },
+    { header: "Bucket/Member", key: "bucket", width: 30 }, { header: "Party", key: "party", width: 34 },
+    { header: "Product Group", key: "group", width: 24 }, { header: "Quantity", key: "quantity", width: 14 },
+    { header: "Quantity Parent", key: "quantityParent", width: 16 }, { header: "Quantity Children", key: "quantityChildren", width: 17 },
+    { header: "Quantity Difference", key: "quantityDifference", width: 18 }, { header: "Priced Amount", key: "amount", width: 18 },
+    { header: "Amount Parent", key: "amountParent", width: 16 }, { header: "Amount Children", key: "amountChildren", width: 17 },
+    { header: "Amount Difference", key: "amountDifference", width: 17 }, { header: "Unpriceable Pieces", key: "unpriceable", width: 18 },
+    { header: "Classification", key: "classification", width: 28 },
   ];
-  const exportGroupCells = (parties: PendingParty[]): Record<string, number | null> => {
-    const cells: Record<string, number | null> = {};
-    for (const group of result.groups) {
-      const qty = parties.reduce((sum, party) => sum + (party.byGroup[group] ?? 0), 0);
-      const amounts = parties
-        .map((party) => party.byGroupAmount?.[group] ?? null)
-        .filter((amount): amount is number => amount != null);
-      cells[group] = qty > 0 ? qty : null;
-      cells[`${group}__amount`] = result.pricingAvailable === true && amounts.length
-        ? amounts.reduce((sum, amount) => sum + amount, 0)
-        : null;
-      cells[`${group}__unpriceable`] = result.pricingAvailable === true
-        ? parties.reduce((sum, party) => sum + (
-            party.byGroup[group] != null && party.byGroupAmount?.[group] == null
-              ? party.byGroup[group]
-              : 0
-          ), 0)
-        : null;
-    }
-    return cells;
-  };
-  for (const head of result.byHead) {
-    detail.addRow({
-      head: head.head,
-      bucket: "TOTAL",
-      party: "",
-      total: head.total,
-      pricedAmount: head.pricedAmount ?? null,
-      unpriceableQty: head.unpriceableQty ?? null,
-      classification: "State Head total",
-      amountDifference: head.amountReconciliation?.difference ?? null,
-      amountExact: head.amountReconciliation?.exact ?? null,
-      ...exportGroupCells(head.parties),
-    });
-    for (const bucket of head.buckets) {
-      detail.addRow({
-        head: head.head,
-        bucket: bucket.bucket,
-        party: "",
-        total: bucket.total,
-        pricedAmount: bucket.pricedAmount ?? null,
-        unpriceableQty: bucket.unpriceableQty ?? null,
-        classification: "Bucket total",
-        amountDifference: bucket.amountReconciliation?.difference ?? null,
-        amountExact: bucket.amountReconciliation?.exact ?? null,
-        ...exportGroupCells(bucket.parties),
-      });
-      for (const party of bucket.parties) {
-        detail.addRow({
-          head: head.head,
-          bucket: bucket.bucket,
-          party: party.party,
-          total: party.total,
-          pricedAmount: party.pricedAmount ?? null,
-          unpriceableQty: party.unpriceableQty ?? 0,
-          classification: party.attribution.classification,
-          ...exportGroupCells([party]),
-          difference: party.reconciliation.difference,
-          exact: party.reconciliation.exact,
-          amountDifference: party.amountReconciliation?.difference ?? null,
-          amountExact: party.amountReconciliation?.exact ?? null,
-        });
-      }
-    }
-  }
-  detail.getRow(1).font = { bold: true };
-
-  const evidence = workbook.addWorksheet("Attribution Evidence");
-  evidence.columns = [
-    { header: "State Head", key: "head", width: 24 },
-    { header: "Bucket", key: "bucket", width: 28 },
-    { header: "Party", key: "party", width: 34 },
-    { header: "Classification", key: "classification", width: 25 },
-    { header: "Candidate person IDs", key: "personIds", width: 22 },
-    { header: "Candidates", key: "candidates", width: 48 },
-    { header: "Conflict evidence", key: "evidence", width: 72 },
-    { header: "Review link", key: "link", width: 32 },
-  ];
-  for (const head of result.byHead) {
-    for (const bucket of head.buckets) {
-      for (const party of bucket.parties) {
-        const attribution = party.attribution;
-        evidence.addRow({
-          head: head.head,
-          bucket: bucket.bucket,
-          party: party.party,
-          classification: attribution.classification,
-          personIds: attribution.candidates.map((candidate) => candidate.personId).join(", "),
-          candidates: attribution.candidates.map((candidate) => `${candidate.member} (${candidate.active ? "active" : "LEFT/departed"})`).join("; "),
-          evidence: attribution.conflictEvidence.join("; "),
-          link: attribution.conflictLink ?? "",
-        });
-      }
-    }
-  }
-  evidence.getRow(1).font = { bold: true };
-  const reconciliation = workbook.addWorksheet("Reconciliation");
-  reconciliation.columns = [
-    { header: "Level", key: "level", width: 14 },
-    { header: "State Head", key: "head", width: 24 },
-    { header: "Bucket", key: "bucket", width: 28 },
-    { header: "Party / Product Group", key: "party", width: 34 },
-    { header: "Parent (₹)", key: "parent", width: 16 },
-    { header: "Children (₹)", key: "children", width: 16 },
-    { header: "Difference (₹)", key: "difference", width: 16 },
-    { header: "Exact", key: "exact", width: 10 },
-    { header: "Measure", key: "measure", width: 12 },
-    { header: "Source", key: "source", width: 42 },
-  ];
-  const amountSource = PRICE_BASIS;
-  reconciliation.addRow({
+  const addHierarchy = (row: Record<string, unknown>) => hierarchy.addRow(row);
+  addHierarchy({
     level: "Company",
-    parent: result.amountReconciliation?.company.parent ?? null,
-    children: result.amountReconciliation?.company.children ?? null,
-    difference: result.amountReconciliation?.company.difference ?? null,
-    exact: result.amountReconciliation?.company.exact ?? null,
-    measure: "Amount",
-    source: amountSource,
+    quantity: result.grandTotal,
+    quantityParent: result.reconciliation.company.parent,
+    quantityChildren: result.reconciliation.company.children,
+    quantityDifference: result.reconciliation.company.difference,
+    amount: amountAvailable ? (result.pricedAmount ?? null) : null,
+    amountParent: amountAvailable ? (result.amountReconciliation?.company.parent ?? null) : null,
+    amountChildren: amountAvailable ? (result.amountReconciliation?.company.children ?? null) : null,
+    amountDifference: amountAvailable ? (result.amountReconciliation?.company.difference ?? null) : null,
+    unpriceable: amountAvailable ? (result.unpriceableQty ?? null) : null,
+    classification: "Company total",
   });
-  for (const row of result.amountReconciliation?.heads ?? []) {
-    reconciliation.addRow({ level: "State Head", ...row, measure: "Amount", source: amountSource });
-  }
-  for (const row of result.amountReconciliation?.buckets ?? []) {
-    reconciliation.addRow({ level: "Bucket", ...row, measure: "Amount", source: amountSource });
-  }
-  for (const row of result.amountReconciliation?.parties ?? []) {
-    reconciliation.addRow({ level: "Party", ...row, measure: "Amount", source: amountSource });
-  }
-  if (!result.amountReconciliation) {
-    for (const head of result.byHead) {
-      reconciliation.addRow({ level: "State Head", head: head.head, parent: null, children: null, difference: null, exact: null, measure: "Amount", source: amountSource });
-      for (const bucket of head.buckets) {
-        reconciliation.addRow({ level: "Bucket", head: head.head, bucket: bucket.bucket, parent: null, children: null, difference: null, exact: null, measure: "Amount", source: amountSource });
-        for (const party of bucket.parties) {
-          reconciliation.addRow({ level: "Party", head: head.head, bucket: bucket.bucket, party: party.party, parent: null, children: null, difference: null, exact: null, measure: "Amount", source: amountSource });
+  for (const head of result.byHead) {
+    addHierarchy({ level: "Head", head: head.head, quantity: head.total, quantityParent: head.reconciliation.parent,
+      quantityChildren: head.reconciliation.children, quantityDifference: head.reconciliation.difference,
+      amount: amountAvailable ? (head.pricedAmount ?? null) : null, amountParent: amountAvailable ? (head.amountReconciliation?.parent ?? null) : null,
+      amountChildren: amountAvailable ? (head.amountReconciliation?.children ?? null) : null, amountDifference: amountAvailable ? (head.amountReconciliation?.difference ?? null) : null,
+      unpriceable: amountAvailable ? (head.unpriceableQty ?? null) : null, classification: "State Head total" });
+    for (const bucket of head.buckets) {
+      const label = bucket.bucket === "Attribution Conflicts" ? "Disputed (Attribution Conflicts)" : bucket.bucket === "Unassigned" ? "Unassigned" : bucket.member ?? bucket.bucket;
+      addHierarchy({ level: "Bucket/Member", head: head.head, bucket: label, quantity: bucket.total, quantityParent: bucket.reconciliation.parent,
+        quantityChildren: bucket.reconciliation.children, quantityDifference: bucket.reconciliation.difference,
+        amount: amountAvailable ? (bucket.pricedAmount ?? null) : null, amountParent: amountAvailable ? (bucket.amountReconciliation?.parent ?? null) : null,
+        amountChildren: amountAvailable ? (bucket.amountReconciliation?.children ?? null) : null, amountDifference: amountAvailable ? (bucket.amountReconciliation?.difference ?? null) : null,
+        unpriceable: amountAvailable ? (bucket.unpriceableQty ?? null) : null, classification: bucket.specialBucket ? bucket.bucket : "Named member bucket" });
+      for (const party of bucket.parties) {
+        addHierarchy({ level: "Party", head: head.head, bucket: label, party: party.party, quantity: party.total,
+          quantityParent: party.reconciliation.parent, quantityChildren: party.reconciliation.children, quantityDifference: party.reconciliation.difference,
+          amount: amountAvailable ? (party.pricedAmount ?? null) : null, amountParent: amountAvailable ? (party.amountReconciliation?.parent ?? null) : null,
+          amountChildren: amountAvailable ? (party.amountReconciliation?.children ?? null) : null, amountDifference: amountAvailable ? (party.amountReconciliation?.difference ?? null) : null,
+          unpriceable: amountAvailable ? (party.unpriceableQty ?? null) : null, classification: party.attribution.classification });
+        for (const group of result.groups) {
+          const quantity = party.byGroup[group] ?? 0;
+          const amount = party.byGroupAmount?.[group] ?? null;
+          if (quantity <= 0 && amount == null) continue;
+          addHierarchy({ level: "Product Group", head: head.head, bucket: label, party: party.party, group,
+            quantity: quantity || null, quantityParent: quantity || null, quantityChildren: quantity || null, quantityDifference: quantity ? 0 : null,
+            amount: amountAvailable ? amount : null, amountParent: amountAvailable ? amount : null, amountChildren: amountAvailable ? amount : null,
+            amountDifference: amountAvailable && amount != null ? 0 : null, unpriceable: amountAvailable && quantity > 0 && amount == null ? quantity : null,
+            classification: party.attribution.classification });
         }
       }
     }
   }
-  for (const group of result.groups) {
-    const values = result.byHead.flatMap((head) =>
-      head.parties
-        .map((party) => party.byGroupAmount?.[group] ?? null)
-        .filter((amount): amount is number => amount != null),
-    );
-    const groupAmount = values.reduce((sum, value) => sum + value, 0);
-    reconciliation.addRow({
-      level: "Product Group",
-      party: group,
-      parent: values.length ? groupAmount : null,
-      children: values.length ? groupAmount : null,
-      difference: values.length ? 0 : null,
-      exact: values.length ? true : null,
-      measure: "Amount",
-      source: amountSource,
-    });
-  }
-  reconciliation.getRow(1).font = { bold: true };
-  const info = workbook.addWorksheet("Info");
-  info.columns = [
-    { header: "Field", key: "field", width: 34 },
-    { header: "Value", key: "value", width: 110 },
+  format(hierarchy, [16, 22, 30, 34, 24, 14, 16, 17, 18, 18, 16, 17, 17, 18, 28]);
+  for (const column of [6, 7, 8, 9, 14]) hierarchy.getColumn(column).numFmt = QTY;
+  for (const column of [10, 11, 12, 13]) hierarchy.getColumn(column).numFmt = INR;
+
+  const rates = workbook.addWorksheet("Group Rates");
+  rates.columns = [
+    { header: "Source Group", key: "sourceGroup", width: 24 }, { header: "Canonical Group", key: "canonicalGroup", width: 28 },
+    { header: "Pending Pieces", key: "pending", width: 16 }, { header: "Share of Factory Pending %", key: "factoryShare", width: 24 },
+    { header: "Share of Allocated Pending %", key: "allocatedShare", width: 25 }, { header: "Realised Rate Used", key: "rate", width: 20 },
+    { header: "Contributing FY Sales Value", key: "sales", width: 26 }, { header: "Contributing Code Count", key: "codes", width: 24 },
+    { header: "Source Period", key: "period", width: 16 }, { header: "Source", key: "source", width: 30 }, { header: "Robustness Flag/Note", key: "note", width: 90 },
   ];
+  const pendingByGroup = new Map(result.groups.map((group) => [group, result.byHead.reduce((sum, head) => sum + head.parties.reduce((s, party) => s + (party.byGroup[group] ?? 0), 0), 0)]));
+  const allocatedTotal = result.groups.reduce((sum, group) => sum + (result.pricing?.byGroup[group]?.averageRealisedRate != null ? (pendingByGroup.get(group) ?? 0) : 0), 0);
+  for (const group of result.groups) {
+    const metadata = result.pricing?.byGroup[group];
+    const pending = pendingByGroup.get(group) ?? 0;
+    const rate = amountAvailable ? (metadata?.averageRealisedRate ?? null) : null;
+    const sales = amountAvailable ? (metadata?.contributingSalesAmount ?? null) : null;
+    const thin = metadata?.contributingSalesAmount != null && metadata.contributingSalesAmount < 100000;
+    const pprNote = metadata?.canonicalGroup === "PPR" && rate != null && sales != null
+      ? `PPR rate ${fmtInr(rate)} is based on ${fmtInr(sales)} FY sales and applied to ${pending.toLocaleString("en-IN")} pending pieces.`
+      : "";
+    rates.addRow({ sourceGroup: group, canonicalGroup: metadata?.canonicalGroup ?? null, pending: pending || 0,
+      factoryShare: result.grandTotal > 0 ? pending / result.grandTotal : null, allocatedShare: allocatedTotal > 0 && rate != null ? pending / allocatedTotal : null,
+      rate, sales, codes: metadata?.contributingCodeCount ?? null, period: "FY2026-27", source: "sale_line_current (current)",
+      note: thin ? `Thin sales (< ₹100,000): ${fmtInr(sales)} FY sales. ${pprNote}` : pprNote || (metadata?.averageRealisedRate == null ? "No usable realised rate; amount unavailable" : "") });
+  }
+  format(rates, [24, 28, 16, 24, 25, 20, 26, 24, 16, 30, 90]);
+  rates.getColumn(3).numFmt = QTY; rates.getColumn(4).numFmt = PCT; rates.getColumn(5).numFmt = PCT; rates.getColumn(6).numFmt = INR; rates.getColumn(7).numFmt = INR;
+
+  const unpriceable = workbook.addWorksheet("Unpriceable");
+  unpriceable.columns = [
+    { header: "State Head", key: "head", width: 24 }, { header: "Bucket/Member", key: "bucket", width: 30 }, { header: "Party", key: "party", width: 34 },
+    { header: "Source Total Pieces", key: "source", width: 20 }, { header: "Allocated Group Pieces", key: "allocated", width: 22 },
+    { header: "Unallocated Residual Pieces", key: "residual", width: 26 }, { header: "Missing-Rate Pieces", key: "missing", width: 22 },
+    { header: "Total Unpriceable Pieces", key: "total", width: 25 }, { header: "Reason", key: "reason", width: 90 },
+  ];
+  if (amountAvailable) for (const head of result.byHead) for (const bucket of head.buckets) for (const party of bucket.parties) {
+    const allocated = Object.values(party.byGroup).reduce((sum, qty) => sum + qty, 0);
+    const residual = Math.max(0, party.total - allocated);
+    const missing = Object.entries(party.byGroup).reduce((sum, [group, qty]) => sum + (qty > 0 && party.byGroupAmount?.[group] == null ? qty : 0), 0);
+    const total = residual + missing;
+    if (total > 0) unpriceable.addRow({ head: head.head, bucket: bucket.bucket === "Attribution Conflicts" ? "Disputed (Attribution Conflicts)" : bucket.bucket, party: party.party, source: party.total, allocated, residual, missing, total, reason: party.unpriceableReason });
+  }
+  format(unpriceable, [24, 30, 34, 20, 22, 26, 22, 25, 90]);
+  for (const column of [4, 5, 6, 7, 8]) unpriceable.getColumn(column).numFmt = QTY;
+
+  const info = workbook.addWorksheet("Info");
+  info.columns = [{ header: "Field", key: "field", width: 34 }, { header: "Value", key: "value", width: 120 }];
   info.addRows([
     ["Price basis", PRICE_BASIS],
-    ["Amount interpretation", "Pending value = pending quantity x average realised price per product group, FY2026-27. Estimated worth of outstanding orders, not an invoiced amount. The source carries product groups, not item codes, so this is a group-level estimate."],
-    ["Source", "sale_line_current (current rows only; version_status=current)"],
-    ["Fiscal year", "FY2026-27"],
-    ["Grain", "Coarse product-group weighted realised rate; not SKU-level pending allocation"],
-    ["Water tank denominator", "REPORT 2 is pieces. For mapped WT/WCT suffixes, use qty when qty_ltr is present, otherwise qty / canonical per-tank litres; unmapped accessories use qty. Confirm price is per tank."],
-    ["Partial/unpriceable disclosure", "Amount is blank when fully unpriceable. Unpriceable quantity includes REPORT 2 total-minus-product-group residuals and any product group without a usable positive rate. Missing rates are null, never zero."],
+    ["Amount is", "Pending quantity × average realised price per product group, FY2026-27; estimated worth of outstanding orders."],
+    ["Amount is NOT", "Not total pending stock, not financial order-book pending, not an amount to invoice, not the same orders as OB-minus-Sale, and not a reconciliation to derived pending."],
+    ["Population scope", "REPORT 2 carries product groups, not item codes; there is no common order key to match REPORT 2 rows to OB-minus-Sale."],
+    ["Derived pending note", `Non-territory (Project/GOVT/GEM/JJM/Other) OB-minus-Sale is ${result.derived.nonTerritoryPending == null ? "unavailable" : fmtInr(result.derived.nonTerritoryPending)} and REPORT 2 cannot identify/order-match those balances.`],
+    ["Attribution coverage", `Candidate ${result.candidateCoveragePct ?? "unavailable"}%; safe ${result.safeCoveragePct ?? "unavailable"}%; disputed ${result.coverage.disputedQty ?? "unavailable"} pieces.`],
+    ["Allocation/unpriceable", "Product-group quantities are allocated only with a usable positive realised rate. Total-minus-group residuals and missing-rate groups are unpriceable; missing rates are null, never zero."],
+    ["Units", "REPORT 2 quantities are pieces. Water tank realised pricing is per tank; mapped denominators use qty when qty_ltr exists, otherwise qty / canonical litres."],
+    ["PPR robustness", "Thin sales means contributing FY sales value below ₹100,000; Group Rates reports the current rate, sales value, and pending pieces dynamically."],
+    ["Source period/source", "FY2026-27 sale_line_current, version_status=current"],
+    ["Computed at / data read", result.computedAt],
+    ["Pricing error", result.pricingError ?? null],
   ]);
-  info.getRow(1).font = { bold: true };
+  format(info, [34, 120]);
   return workbook;
 }
