@@ -425,6 +425,89 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /ai-schemes/history:
+    get:
+      operationId: getAiSchemesHistory
+      tags: [ai]
+      summary: Read-only historical-basis AI Schemes analytics
+      description: >
+        Lists observed scheme definitions and the honest limits of the available
+        historical basis. The source is the scheme definition tables; historical
+        qualification, payout, exact cost, order linkage, and measured lift are
+        not represented as outcomes.
+      parameters:
+        - name: itemGroup
+          in: query
+          required: false
+          schema: { type: string }
+        - name: skuBand
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [VERY HIGH, HIGH, MEDIUM, LOW, SCARCE, DORMANT]
+        - name: territory
+          in: query
+          required: false
+          schema: { type: string }
+        - name: year
+          in: query
+          required: false
+          description: Calendar year intersecting the observed scheme period.
+          schema: { type: string, pattern: "^\\d{4}$" }
+        - name: fy
+          in: query
+          required: false
+          description: Alias for year, retained for fiscal-year filter callers.
+          schema: { type: string, pattern: "^\\d{4}-\\d{2}$" }
+      responses:
+        "200":
+          description: Historical scheme basis and coverage honesty
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiSchemesHistoryResponse" }
+        "400":
+          description: Invalid history filter
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Historical basis could not be read
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /ai-schemes/history/generate:
+    post:
+      operationId: generateAiSchemesHistory
+      tags: [ai]
+      summary: Generate a read-only historical-basis scheme proposal
+      description: >
+        Copies an observed precedent structure without writing scheme tables.
+        The supplied margin cap is a hard ceiling. Proposals always include an
+        explicitly modeled cost, cost share of category gross margin, and
+        breakeven lift. Exact historical spend and outcomes remain unavailable.
+        Held or unknown-margin inputs are rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GenerateAiSchemesHistoryRequest" }
+      responses:
+        "200":
+          description: Historical-basis proposal (never persisted)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenerateAiSchemesHistoryResponse" }
+        "400":
+          description: Held/unknown margin or invalid proposal input
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Proposal could not be generated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /ai/report:
     post:
       operationId: generateAiReport
@@ -5175,6 +5258,188 @@ components:
           items: { $ref: "#/components/schemas/AiSchemesFyReport" }
         readOnly: { type: boolean }
         source: { type: string }
+    AiSchemesHistoryScheme:
+      type: object
+      required: [schemeId, name, source, qualificationBasis, settlement, audience, territoryGroup, productScope, periodFrom, periodTo, periodNote, itemGroups, slabs, observedStructure]
+      properties:
+        schemeId: { type: string }
+        name: { type: string }
+        source: { type: string }
+        qualificationBasis: { type: string }
+        settlement: { type: string }
+        audience: { type: array, items: { type: string } }
+        territoryGroup: { type: ["string", "null"] }
+        productScope: { type: ["string", "null"] }
+        periodFrom: { type: string }
+        periodTo: { type: ["string", "null"] }
+        periodNote: { type: ["string", "null"] }
+        itemGroups: { type: array, items: { type: string } }
+        slabs:
+          type: array
+          items:
+            type: object
+            required: [slabOrder, thresholdFrom, thresholdTo, unit, ratePct, altReward, freeGoods, rewardStatus, rawText]
+            properties:
+              slabOrder: { type: integer }
+              thresholdFrom: { type: number }
+              thresholdTo: { type: ["number", "null"] }
+              unit: { type: string }
+              ratePct: { type: ["number", "null"] }
+              altReward: { type: ["string", "null"] }
+              freeGoods: { type: ["string", "null"] }
+              rewardStatus: { type: string }
+              rawText: { type: ["string", "null"] }
+        observedStructure:
+          type: object
+          required: [slabCount, thresholdUnit, hasAlternativeReward, hasFreeGoods]
+          properties:
+            slabCount: { type: integer }
+            thresholdUnit: { type: ["string", "null"] }
+            hasAlternativeReward: { type: boolean }
+            hasFreeGoods: { type: boolean }
+    AiSchemesHistoryResponse:
+      type: object
+      required: [readOnly, source, sourceLabels, schemes, filters, timeline, observedGrammar, coverage, historySummary, outcomeEvidence, controlAndLift, itemGroupCoverage, outcomeAvailability, precedentBounds]
+      properties:
+        readOnly: { type: boolean }
+        source: { type: string }
+        sourceLabels: { type: object, additionalProperties: { type: string } }
+        schemes:
+          type: array
+          items: { $ref: "#/components/schemas/AiSchemesHistoryScheme" }
+        filters:
+          type: object
+          required: [applied, metadata]
+          properties:
+            applied:
+              type: object
+              required: [itemGroup, skuBand, territory, year]
+              properties:
+                itemGroup: { type: ["string", "null"] }
+                skuBand: { type: ["string", "null"] }
+                territory: { type: ["string", "null"] }
+                year: { type: ["string", "null"] }
+            metadata:
+              type: object
+              required: [itemGroups, skuBands, territories]
+              properties:
+                itemGroups: { type: array, items: { type: string } }
+                skuBands: { type: array, items: { type: string } }
+                territories:
+                  type: array
+                  items:
+                    type: object
+                    required: [raw, label, states]
+                    properties:
+                      raw: { type: string }
+                      label: { type: string }
+                      states: { type: array, items: { type: string } }
+        timeline:
+          type: object
+          required: [observedPeriods, gaps, gapQuarters, statement]
+          properties:
+            observedPeriods: { type: array, items: { type: string } }
+            gaps: { type: array, items: { type: string } }
+            gapQuarters: { type: array, items: { type: string } }
+            statement: { type: string }
+        observedGrammar:
+          type: object
+          required: [qualificationBases, settlementModes, thresholdUnits, rewardForms, statement]
+          properties:
+            qualificationBases: { type: array, items: { type: string } }
+            settlementModes: { type: array, items: { type: string } }
+            thresholdUnits: { type: array, items: { type: string } }
+            rewardForms: { type: object, additionalProperties: { type: boolean } }
+            typicalSlabCount: { type: ["integer", "null"] }
+            thresholdSpacing: { type: object, additionalProperties: true }
+            rateLadder: { type: object, additionalProperties: true }
+            duration: { type: array, items: { type: string } }
+            itemGroupsPerScheme: { type: object, additionalProperties: true }
+            territoryScope: { type: object, additionalProperties: true }
+            statement: { type: string }
+        historySummary: { type: object, additionalProperties: true }
+        outcomeEvidence: { type: object, additionalProperties: true }
+        controlAndLift: { type: object, additionalProperties: true }
+        itemGroupCoverage: { type: object, additionalProperties: true }
+        coverage:
+          type: object
+          required: [raw, canonical, statement]
+          properties:
+            raw: { type: object, additionalProperties: true }
+            canonical: { type: object, additionalProperties: true }
+            statement: { type: string }
+        outcomeAvailability:
+          type: object
+          required: [available, statement, evidenceBasis]
+          properties:
+            available: { type: boolean }
+            statement: { type: string }
+            evidenceBasis: { type: string }
+        precedentBounds:
+          type: object
+          required: [slabCount, ratePct, threshold, breadth, spend, statement]
+          properties:
+            slabCount: { type: object, additionalProperties: { type: ["number", "null"] } }
+            ratePct: { type: object, additionalProperties: { type: ["number", "null"] } }
+            threshold: { type: object, additionalProperties: { type: ["number", "null"] } }
+            breadth: { type: object, additionalProperties: true }
+            spend: { type: object, additionalProperties: true }
+            statement: { type: string }
+    GenerateAiSchemesHistoryRequest:
+      type: object
+      required: [territory, marginCapPct, breadthOpportunityRetailers, categoryGrossMarginInr, grossMarginRatePct]
+      properties:
+        itemGroup: { type: string }
+        skuBand:
+          type: string
+          enum: [VERY HIGH, HIGH, MEDIUM, LOW, SCARCE, DORMANT]
+        territory: { type: string }
+        marginCapPct: { type: number, exclusiveMinimum: 0, description: "Maximum permitted scheme depth, in percentage points." }
+        breadthOpportunityRetailers:
+          type: integer
+          exclusiveMinimum: 0
+          multipleOf: 1
+          description: "Positive retailer count from the Tab 1 breadth opportunity."
+        categoryGrossMarginInr:
+          type: number
+          exclusiveMinimum: 0
+          description: "Positive category gross-margin amount from Tab 4, in INR."
+        grossMarginRatePct:
+          type: number
+          exclusiveMinimum: 0
+          description: "Positive category gross-margin rate from Tab 4, in percentage points."
+        marginCap: { type: number, minimum: 0 }
+        maximumSchemeDepthPct: { type: number, minimum: 0 }
+        marginStatus: { type: string, enum: [known, held, unknown, unavailable] }
+        held: { type: boolean }
+        marginUnknown: { type: boolean }
+        marginHeld: { type: boolean }
+        additionalSkusPerRetailer: { type: number, minimum: 0 }
+        breadth: { type: number, minimum: 0 }
+        breadthInput: { type: number, minimum: 0 }
+        breadthInputs: { type: object, additionalProperties: true }
+        margin: { type: object, additionalProperties: true }
+        marginInput: { type: object, additionalProperties: true }
+        marginInputs: { type: object, additionalProperties: true }
+      additionalProperties: false
+    GenerateAiSchemesHistoryResponse:
+      type: object
+      required: [readOnly, persisted, writes, source, input, closestPrecedent, proposal, margin, breakeven, breakevenLiftRequired, flags, controlLift, evidenceBasis, guardrails]
+      properties:
+        readOnly: { type: boolean }
+        persisted: { type: boolean }
+        writes: { type: array, items: { type: string } }
+        source: { type: string }
+        input: { type: object, additionalProperties: true }
+        closestPrecedent: { type: object, additionalProperties: true }
+        proposal: { type: object, additionalProperties: true }
+        margin: { type: object, additionalProperties: true }
+        breakeven: { type: object, additionalProperties: true }
+        breakevenLiftRequired: { type: object, additionalProperties: true }
+        flags: { type: object, additionalProperties: true }
+        controlLift: { type: object, additionalProperties: true }
+        evidenceBasis: { type: array, items: { type: string } }
+        guardrails: { type: object, additionalProperties: true }
     ReportSection:
       type: object
       required: [title, body]

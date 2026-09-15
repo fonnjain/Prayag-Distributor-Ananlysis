@@ -4,6 +4,7 @@ import {
 } from "@workspace/api-client-react";
 import { AlertCircle, FileWarning, SearchX, Clock, MapPin, Database, Factory, PackageOpen, Boxes, CheckCircle2, FileX, Info, BookOpen, BarChart3 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { HistoricalBasisTab } from "@/components/ai-schemes/HistoricalBasisTab";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -217,10 +218,11 @@ export default function AiSchemesPage() {
         </div>
 
         <Tabs defaultValue="breadth" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 max-w-2xl mb-8">
+          <TabsList className="grid w-full grid-cols-4 max-w-3xl mb-8">
             <TabsTrigger value="breadth">Breadth Opportunity</TabsTrigger>
             <TabsTrigger value="sku-bands">SKU Bands</TabsTrigger>
             <TabsTrigger value="margin">Margin Headroom</TabsTrigger>
+            <TabsTrigger value="history">Historical Basis</TabsTrigger>
           </TabsList>
 
           <TabsContent value="breadth" className="space-y-6 animate-in fade-in-50 duration-500">
@@ -597,6 +599,10 @@ export default function AiSchemesPage() {
               </CardContent>
             </Card>
 
+          </TabsContent>
+
+          <TabsContent value="history" className="space-y-6 animate-in fade-in-50 duration-500">
+            <HistoricalBasisTab />
           </TabsContent>
         </Tabs>
       </div>

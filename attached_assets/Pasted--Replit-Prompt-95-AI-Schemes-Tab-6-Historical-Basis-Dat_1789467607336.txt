@@ -1,0 +1,210 @@
+# Replit Prompt 95 — AI Schemes, Tab 6: Historical Basis
+
+**Date:** 14 September 2026
+**Extends:** Prompt 92 (`/ai-schemes` design) and Prompt 93 (E2/E3 build).
+**Scope:** A is read-only and decides whether this is buildable. B is the design.
+C is the generator.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Why this tab matters more than it sounds
+
+Every AI page so far **proposes and never learns**. `/ai-targets` suggests a
+target and never finds out. `/ai-schemes` would do the same.
+
+A historical basis closes that, and it does something else that may matter more:
+it lets the engine propose in **Prayag's own scheme grammar** rather than in an
+invented one.
+
+A scheme structured like the schemes Prayag already run — their threshold
+spacing, their rate ladders, their durations, their item-group sizes — is far
+more likely to be accepted than a mathematically optimal structure nobody
+recognises.
+
+**Learning the grammar is achievable even if outcome measurement is not.**
+
+---
+
+## Section A — read-only. What history exists?
+
+```
+Read-only. Change nothing. This decides what Tab 6 can honestly do.
+
+A1. WHAT SCHEMES HAVE RUN? From scheme, scheme_item_group and
+    scheme_reward_slab:
+
+      how many schemes, over what period range
+      for each: name, code, start and end date, territory scope,
+        item groups, number of slabs, threshold values, rate values,
+        and whether it is clarification-only
+      how many are historical versus currently live
+
+A2. THE STRUCTURAL GRAMMAR. Across all schemes:
+
+      typical number of slabs
+      threshold spacing - are they round numbers, multiples, geometric?
+      rate ladders - what step between slabs?
+      duration - month, quarter, season?
+      item groups per scheme - one, several, all?
+      territory scope - national, state, head?
+
+    This is the most valuable output even if nothing else is available.
+
+A3. IS THERE ANY OUTCOME DATA?
+
+      Did any table record who qualified for a scheme?
+      Was payout ever recorded?
+      Is there any link between a scheme and the orders placed under it?
+
+    If the answer is no to all three, say so plainly. Outcome measurement
+    is then unavailable and the tab must not imply otherwise.
+
+A4. WITHOUT PAYOUT DATA, can before-and-during sales still be compared?
+
+      For each historical scheme: sales in its item groups and territories
+      during the scheme period, against the same months a year earlier
+
+      AND against a control - the same item groups in territories the
+      scheme did NOT cover, over the same months
+
+    The control is what separates scheme effect from seasonality. Without
+    it, a scheme running through a strong quarter looks successful because
+    the quarter was strong.
+
+    Confirm whether a control group can be constructed. If every scheme was
+    national, there is no control and lift cannot be isolated.
+
+A5. COVERAGE. Which of the 22 scheme_item_group values have EVER had a
+    scheme, and which never have?
+
+    A group that has never had a scheme is either deliberately excluded or
+    an untried opportunity. That list is immediately useful.
+
+A6. SPEND. What was the largest scheme ever run, by estimated cost?
+    Any proposal larger than anything previously attempted should be
+    flagged as outside precedent.
+
+Report before any design is fixed. If A3 and A4 both come back empty, Tab 6
+becomes a grammar-and-coverage tab, which is still worth building.
+```
+
+---
+
+## Section B — the tab
+
+```
+Design. Build after A.
+
+TAB 6 - HISTORICAL BASIS
+
+  SECTION 1: WHAT HAS BEEN RUN
+    every scheme, with period, scope, item groups, slab structure
+    filterable by year, territory, item group
+    a timeline so gaps are visible - which quarters had no scheme at all
+
+  SECTION 2: THE GRAMMAR
+    the observed patterns from A2, stated plainly:
+      "Schemes typically run one quarter, carry 3 slabs, with thresholds
+       at round lakh values and rate steps of 0.5%."
+    This is what the generator will copy.
+
+  SECTION 3: COVERAGE
+    the 22 item groups, showing how many schemes each has had and when
+    groups never covered, listed - the untried opportunity
+
+  SECTION 4: OUTCOMES - only if A3 or A4 allow
+    per scheme: sales during, prior-year same months, control territories
+    the lift, and the honest caveat on each
+
+    IF NO CONTROL EXISTS, say so on every row. Do not show a lift figure
+    without stating what it is measured against.
+
+    IF NO OUTCOME DATA EXISTS AT ALL, this section shows a single clear
+    statement of that rather than being omitted. A missing section reads as
+    an oversight; a stated absence reads as a fact.
+
+  SECTION 5: GENERATE FROM HISTORY - the button
+```
+
+---
+
+## Section C — the generator
+
+```
+The button. What it must and must not do.
+
+WHEN PRESSED, it proposes a scheme for a selected target - an item group,
+a band, a territory - structured in the observed grammar.
+
+INPUTS
+  the target: which item group or SKU band, which territory
+  the breadth opportunity from Tab 1 - how many retailers lack these SKUs
+  the margin cap from Tab 4 - what depth the category can afford
+  THE GRAMMAR from Section 2 - the structure to copy
+
+OUTPUT, a proposal containing
+  slab structure in the observed pattern - same number of slabs, same
+    threshold spacing style, same rate steps
+  duration matching observed practice
+  item groups and territory scope
+  estimated cost, and cost as a percentage of the category's gross margin
+  breakeven lift required
+  the closest historical precedent, named - "structured like Q2 2025-26
+    CPVC scheme"
+  and where that precedent's outcome is known, what happened
+
+HARD RULES
+
+1. NEVER PROPOSE A STRUCTURE NEVER USED. If every historical scheme has
+   3 slabs, do not propose 5. If thresholds are always round lakhs, do not
+   propose Rs 3,47,500. The point of this tab is to propose in their
+   language.
+
+   If the optimal structure differs from the observed grammar, SAY SO as a
+   note - do not silently override it.
+
+2. FLAG ANYTHING OUTSIDE PRECEDENT. A proposal costing more than the
+   largest scheme ever run, or covering more item groups than any previous
+   one, is marked as beyond precedent. Not blocked - flagged.
+
+3. EVERY GUARDRAIL FROM PROMPT 92 SECTION C STILL APPLIES.
+   Never on held data - H1 PTMT January to April.
+   Never where margin is unknown - 780 codes, Rs 9.36 Cr.
+   Never above the margin cap.
+   Never without a breakeven.
+   A proposal is not a scheme until a person accepts it.
+   scheme_item_group is read-only to this engine.
+
+4. STATE THE EVIDENCE BASIS ON EVERY PROPOSAL.
+
+     "Structured on 14 historical schemes. Outcome data available for 3 of
+      them. No control group exists, so lift is not isolated."
+
+   A proposal built on grammar alone is legitimate. A proposal implying it
+   was built on measured outcomes when it was not is not.
+
+5. IF NO HISTORY EXISTS FOR THE TARGET GROUP, say so and propose from the
+   nearest comparable group, naming which. Do not silently borrow.
+```
+
+---
+
+## Notes
+
+- **A3 and A4 decide what this tab honestly is.** If no outcome data exists, it
+  becomes a grammar-and-coverage tab — which is still worth building, because
+  proposing in Prayag's own structure is most of the value.
+- **A4's control-group point is the one that gets skipped.** A scheme running
+  through a strong quarter looks successful because the quarter was strong.
+  Without territories the scheme did not cover, lift cannot be separated from
+  seasonality — and this business has a 34.56% Q4.
+- **Rule 1 is the heart of the tab.** An optimal structure nobody recognises gets
+  rejected; a familiar structure aimed at a better target gets used.
+- **A5 is immediately actionable regardless.** Item groups that have never had a
+  scheme are either deliberately excluded or untried, and nobody currently has
+  that list.
+- **Rule 4 protects the engine from itself.** A proposal built on structure alone
+  is legitimate and should say so. The failure would be implying measured evidence
+  that does not exist.

@@ -2620,6 +2620,283 @@ export interface AiSchemesAnalyticsResponse {
   source: string;
 }
 
+export type AiSchemesHistorySchemeSlabsItem = {
+  slabOrder: number;
+  thresholdFrom: number;
+  /** @nullable */
+  thresholdTo: number | null;
+  unit: string;
+  /** @nullable */
+  ratePct: number | null;
+  /** @nullable */
+  altReward: string | null;
+  /** @nullable */
+  freeGoods: string | null;
+  rewardStatus: string;
+  /** @nullable */
+  rawText: string | null;
+};
+
+export type AiSchemesHistorySchemeObservedStructure = {
+  slabCount: number;
+  /** @nullable */
+  thresholdUnit: string | null;
+  hasAlternativeReward: boolean;
+  hasFreeGoods: boolean;
+};
+
+export interface AiSchemesHistoryScheme {
+  schemeId: string;
+  name: string;
+  source: string;
+  qualificationBasis: string;
+  settlement: string;
+  audience: string[];
+  /** @nullable */
+  territoryGroup: string | null;
+  /** @nullable */
+  productScope: string | null;
+  periodFrom: string;
+  /** @nullable */
+  periodTo: string | null;
+  /** @nullable */
+  periodNote: string | null;
+  itemGroups: string[];
+  slabs: AiSchemesHistorySchemeSlabsItem[];
+  observedStructure: AiSchemesHistorySchemeObservedStructure;
+}
+
+export type AiSchemesHistoryResponseSourceLabels = {[key: string]: string};
+
+export type AiSchemesHistoryResponseFiltersApplied = {
+  /** @nullable */
+  itemGroup: string | null;
+  /** @nullable */
+  skuBand: string | null;
+  /** @nullable */
+  territory: string | null;
+  /** @nullable */
+  year: string | null;
+};
+
+export type AiSchemesHistoryResponseFiltersMetadataTerritoriesItem = {
+  raw: string;
+  label: string;
+  states: string[];
+};
+
+export type AiSchemesHistoryResponseFiltersMetadata = {
+  itemGroups: string[];
+  skuBands: string[];
+  territories: AiSchemesHistoryResponseFiltersMetadataTerritoriesItem[];
+};
+
+export type AiSchemesHistoryResponseFilters = {
+  applied: AiSchemesHistoryResponseFiltersApplied;
+  metadata: AiSchemesHistoryResponseFiltersMetadata;
+};
+
+export type AiSchemesHistoryResponseTimeline = {
+  observedPeriods: string[];
+  gaps: string[];
+  gapQuarters: string[];
+  statement: string;
+};
+
+export type AiSchemesHistoryResponseObservedGrammarRewardForms = {[key: string]: boolean};
+
+export type AiSchemesHistoryResponseObservedGrammarThresholdSpacing = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponseObservedGrammarRateLadder = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponseObservedGrammarItemGroupsPerScheme = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponseObservedGrammarTerritoryScope = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponseObservedGrammar = {
+  qualificationBases: string[];
+  settlementModes: string[];
+  thresholdUnits: string[];
+  rewardForms: AiSchemesHistoryResponseObservedGrammarRewardForms;
+  /** @nullable */
+  typicalSlabCount?: number | null;
+  thresholdSpacing?: AiSchemesHistoryResponseObservedGrammarThresholdSpacing;
+  rateLadder?: AiSchemesHistoryResponseObservedGrammarRateLadder;
+  duration?: string[];
+  itemGroupsPerScheme?: AiSchemesHistoryResponseObservedGrammarItemGroupsPerScheme;
+  territoryScope?: AiSchemesHistoryResponseObservedGrammarTerritoryScope;
+  statement: string;
+};
+
+export type AiSchemesHistoryResponseHistorySummary = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponseOutcomeEvidence = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponseControlAndLift = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponseItemGroupCoverage = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponseCoverageRaw = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponseCoverageCanonical = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponseCoverage = {
+  raw: AiSchemesHistoryResponseCoverageRaw;
+  canonical: AiSchemesHistoryResponseCoverageCanonical;
+  statement: string;
+};
+
+export type AiSchemesHistoryResponseOutcomeAvailability = {
+  available: boolean;
+  statement: string;
+  evidenceBasis: string;
+};
+
+export type AiSchemesHistoryResponsePrecedentBoundsSlabCount = {[key: string]: number | null};
+
+export type AiSchemesHistoryResponsePrecedentBoundsRatePct = {[key: string]: number | null};
+
+export type AiSchemesHistoryResponsePrecedentBoundsThreshold = {[key: string]: number | null};
+
+export type AiSchemesHistoryResponsePrecedentBoundsBreadth = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponsePrecedentBoundsSpend = { [key: string]: unknown };
+
+export type AiSchemesHistoryResponsePrecedentBounds = {
+  slabCount: AiSchemesHistoryResponsePrecedentBoundsSlabCount;
+  ratePct: AiSchemesHistoryResponsePrecedentBoundsRatePct;
+  threshold: AiSchemesHistoryResponsePrecedentBoundsThreshold;
+  breadth: AiSchemesHistoryResponsePrecedentBoundsBreadth;
+  spend: AiSchemesHistoryResponsePrecedentBoundsSpend;
+  statement: string;
+};
+
+export interface AiSchemesHistoryResponse {
+  readOnly: boolean;
+  source: string;
+  sourceLabels: AiSchemesHistoryResponseSourceLabels;
+  schemes: AiSchemesHistoryScheme[];
+  filters: AiSchemesHistoryResponseFilters;
+  timeline: AiSchemesHistoryResponseTimeline;
+  observedGrammar: AiSchemesHistoryResponseObservedGrammar;
+  historySummary: AiSchemesHistoryResponseHistorySummary;
+  outcomeEvidence: AiSchemesHistoryResponseOutcomeEvidence;
+  controlAndLift: AiSchemesHistoryResponseControlAndLift;
+  itemGroupCoverage: AiSchemesHistoryResponseItemGroupCoverage;
+  coverage: AiSchemesHistoryResponseCoverage;
+  outcomeAvailability: AiSchemesHistoryResponseOutcomeAvailability;
+  precedentBounds: AiSchemesHistoryResponsePrecedentBounds;
+}
+
+export type GenerateAiSchemesHistoryRequestSkuBand = typeof GenerateAiSchemesHistoryRequestSkuBand[keyof typeof GenerateAiSchemesHistoryRequestSkuBand];
+
+
+export const GenerateAiSchemesHistoryRequestSkuBand = {
+  VERY_HIGH: 'VERY HIGH',
+  HIGH: 'HIGH',
+  MEDIUM: 'MEDIUM',
+  LOW: 'LOW',
+  SCARCE: 'SCARCE',
+  DORMANT: 'DORMANT',
+} as const;
+
+export type GenerateAiSchemesHistoryRequestMarginStatus = typeof GenerateAiSchemesHistoryRequestMarginStatus[keyof typeof GenerateAiSchemesHistoryRequestMarginStatus];
+
+
+export const GenerateAiSchemesHistoryRequestMarginStatus = {
+  known: 'known',
+  held: 'held',
+  unknown: 'unknown',
+  unavailable: 'unavailable',
+} as const;
+
+export type GenerateAiSchemesHistoryRequestBreadthInputs = { [key: string]: unknown };
+
+export type GenerateAiSchemesHistoryRequestMargin = { [key: string]: unknown };
+
+export type GenerateAiSchemesHistoryRequestMarginInput = { [key: string]: unknown };
+
+export type GenerateAiSchemesHistoryRequestMarginInputs = { [key: string]: unknown };
+
+export interface GenerateAiSchemesHistoryRequest {
+  itemGroup?: string;
+  skuBand?: GenerateAiSchemesHistoryRequestSkuBand;
+  territory: string;
+  /**
+     * Maximum permitted scheme depth, in percentage points.
+     * @exclusiveMinimum 0
+     */
+  marginCapPct: number;
+  /**
+     * Positive retailer count from the Tab 1 breadth opportunity.
+     * @exclusiveMinimum 0
+     */
+  breadthOpportunityRetailers: number;
+  /**
+     * Positive category gross-margin amount from Tab 4, in INR.
+     * @exclusiveMinimum 0
+     */
+  categoryGrossMarginInr: number;
+  /**
+     * Positive category gross-margin rate from Tab 4, in percentage points.
+     * @exclusiveMinimum 0
+     */
+  grossMarginRatePct: number;
+  /** @minimum 0 */
+  marginCap?: number;
+  /** @minimum 0 */
+  maximumSchemeDepthPct?: number;
+  marginStatus?: GenerateAiSchemesHistoryRequestMarginStatus;
+  held?: boolean;
+  marginUnknown?: boolean;
+  marginHeld?: boolean;
+  /** @minimum 0 */
+  additionalSkusPerRetailer?: number;
+  /** @minimum 0 */
+  breadth?: number;
+  /** @minimum 0 */
+  breadthInput?: number;
+  breadthInputs?: GenerateAiSchemesHistoryRequestBreadthInputs;
+  margin?: GenerateAiSchemesHistoryRequestMargin;
+  marginInput?: GenerateAiSchemesHistoryRequestMarginInput;
+  marginInputs?: GenerateAiSchemesHistoryRequestMarginInputs;
+}
+
+export type GenerateAiSchemesHistoryResponseInput = { [key: string]: unknown };
+
+export type GenerateAiSchemesHistoryResponseClosestPrecedent = { [key: string]: unknown };
+
+export type GenerateAiSchemesHistoryResponseProposal = { [key: string]: unknown };
+
+export type GenerateAiSchemesHistoryResponseMargin = { [key: string]: unknown };
+
+export type GenerateAiSchemesHistoryResponseBreakeven = { [key: string]: unknown };
+
+export type GenerateAiSchemesHistoryResponseBreakevenLiftRequired = { [key: string]: unknown };
+
+export type GenerateAiSchemesHistoryResponseFlags = { [key: string]: unknown };
+
+export type GenerateAiSchemesHistoryResponseControlLift = { [key: string]: unknown };
+
+export type GenerateAiSchemesHistoryResponseGuardrails = { [key: string]: unknown };
+
+export interface GenerateAiSchemesHistoryResponse {
+  readOnly: boolean;
+  persisted: boolean;
+  writes: string[];
+  source: string;
+  input: GenerateAiSchemesHistoryResponseInput;
+  closestPrecedent: GenerateAiSchemesHistoryResponseClosestPrecedent;
+  proposal: GenerateAiSchemesHistoryResponseProposal;
+  margin: GenerateAiSchemesHistoryResponseMargin;
+  breakeven: GenerateAiSchemesHistoryResponseBreakeven;
+  breakevenLiftRequired: GenerateAiSchemesHistoryResponseBreakevenLiftRequired;
+  flags: GenerateAiSchemesHistoryResponseFlags;
+  controlLift: GenerateAiSchemesHistoryResponseControlLift;
+  evidenceBasis: string[];
+  guardrails: GenerateAiSchemesHistoryResponseGuardrails;
+}
+
 export interface ReportSection {
   title: string;
   body: string;
@@ -2981,6 +3258,34 @@ export type GetAiSchemesAnalyticsParams = {
  */
 fy?: string;
 };
+
+export type GetAiSchemesHistoryParams = {
+itemGroup?: string;
+skuBand?: GetAiSchemesHistorySkuBand;
+territory?: string;
+/**
+ * Calendar year intersecting the observed scheme period.
+ * @pattern ^\d{4}$
+ */
+year?: string;
+/**
+ * Alias for year, retained for fiscal-year filter callers.
+ * @pattern ^\d{4}-\d{2}$
+ */
+fy?: string;
+};
+
+export type GetAiSchemesHistorySkuBand = typeof GetAiSchemesHistorySkuBand[keyof typeof GetAiSchemesHistorySkuBand];
+
+
+export const GetAiSchemesHistorySkuBand = {
+  VERY_HIGH: 'VERY HIGH',
+  HIGH: 'HIGH',
+  MEDIUM: 'MEDIUM',
+  LOW: 'LOW',
+  SCARCE: 'SCARCE',
+  DORMANT: 'DORMANT',
+} as const;
 
 export type GetMgmtDeepDiveParams = {
 /**

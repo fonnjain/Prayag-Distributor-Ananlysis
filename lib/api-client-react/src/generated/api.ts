@@ -30,6 +30,7 @@ import type {
   AiReportRequest,
   AiReportResponse,
   AiSchemesAnalyticsResponse,
+  AiSchemesHistoryResponse,
   AnalyticsReport,
   AnalyzeRequest,
   AnalyzeResponse,
@@ -54,12 +55,15 @@ import type {
   DriveFileList,
   ErrorResponse,
   ExportCustomerMasterParams,
+  GenerateAiSchemesHistoryRequest,
+  GenerateAiSchemesHistoryResponse,
   GetAiPayloadParams,
   GetAiPlanAnalyticsParams,
   GetAiPlanMonths200,
   GetAiPlanMonthsParams,
   GetAiPlanParams,
   GetAiSchemesAnalyticsParams,
+  GetAiSchemesHistoryParams,
   GetAnalyticsParams,
   GetMgmtDeepDiveParams,
   GetMgmtDistributorDeepDiveParams,
@@ -1105,6 +1109,162 @@ export function useGetAiSchemesAnalytics<TData = Awaited<ReturnType<typeof getAi
 
 
 
+
+export const getGetAiSchemesHistoryUrl = (params?: GetAiSchemesHistoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/ai-schemes/history?${stringifiedParams}` : `/api/ai-schemes/history`
+}
+
+/**
+ * Lists observed scheme definitions and the honest limits of the available historical basis. The source is the scheme definition tables; historical qualification, payout, exact cost, order linkage, and measured lift are not represented as outcomes.
+ * @summary Read-only historical-basis AI Schemes analytics
+ */
+export const getAiSchemesHistory = async (params?: GetAiSchemesHistoryParams, options?: RequestInit): Promise<AiSchemesHistoryResponse> => {
+
+  return customFetch<AiSchemesHistoryResponse>(getGetAiSchemesHistoryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAiSchemesHistoryQueryKey = (params?: GetAiSchemesHistoryParams,) => {
+    return [
+    `/api/ai-schemes/history`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAiSchemesHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getAiSchemesHistory>>, TError = ErrorType<ErrorResponse>>(params?: GetAiSchemesHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiSchemesHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAiSchemesHistoryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAiSchemesHistory>>> = ({ signal }) => getAiSchemesHistory(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAiSchemesHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAiSchemesHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getAiSchemesHistory>>>
+export type GetAiSchemesHistoryQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Read-only historical-basis AI Schemes analytics
+ */
+
+export function useGetAiSchemesHistory<TData = Awaited<ReturnType<typeof getAiSchemesHistory>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetAiSchemesHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiSchemesHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAiSchemesHistoryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGenerateAiSchemesHistoryUrl = () => {
+
+
+
+
+  return `/api/ai-schemes/history/generate`
+}
+
+/**
+ * Copies an observed precedent structure without writing scheme tables. The supplied margin cap is a hard ceiling. Proposals always include an explicitly modeled cost, cost share of category gross margin, and breakeven lift. Exact historical spend and outcomes remain unavailable. Held or unknown-margin inputs are rejected.
+ * @summary Generate a read-only historical-basis scheme proposal
+ */
+export const generateAiSchemesHistory = async (generateAiSchemesHistoryRequest: GenerateAiSchemesHistoryRequest, options?: RequestInit): Promise<GenerateAiSchemesHistoryResponse> => {
+
+  return customFetch<GenerateAiSchemesHistoryResponse>(getGenerateAiSchemesHistoryUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(generateAiSchemesHistoryRequest)
+  }
+);}
+
+
+
+
+export const getGenerateAiSchemesHistoryMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateAiSchemesHistory>>, TError,{data: BodyType<GenerateAiSchemesHistoryRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof generateAiSchemesHistory>>, TError,{data: BodyType<GenerateAiSchemesHistoryRequest>}, TContext> => {
+
+const mutationKey = ['generateAiSchemesHistory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateAiSchemesHistory>>, {data: BodyType<GenerateAiSchemesHistoryRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  generateAiSchemesHistory(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GenerateAiSchemesHistoryMutationResult = NonNullable<Awaited<ReturnType<typeof generateAiSchemesHistory>>>
+    export type GenerateAiSchemesHistoryMutationBody = BodyType<GenerateAiSchemesHistoryRequest>
+    export type GenerateAiSchemesHistoryMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Generate a read-only historical-basis scheme proposal
+ */
+export const useGenerateAiSchemesHistory = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateAiSchemesHistory>>, TError,{data: BodyType<GenerateAiSchemesHistoryRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof generateAiSchemesHistory>>,
+        TError,
+        {data: BodyType<GenerateAiSchemesHistoryRequest>},
+        TContext
+      > => {
+      return useMutation(getGenerateAiSchemesHistoryMutationOptions(options));
+    }
 
 export const getGenerateAiReportUrl = () => {
 
@@ -4692,4 +4852,10 @@ export function useExportAiPlan<TData = Awaited<ReturnType<typeof exportAiPlan>>
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+
+
+
+
+
 

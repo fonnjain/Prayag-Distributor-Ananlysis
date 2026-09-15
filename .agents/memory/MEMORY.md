@@ -138,4 +138,5 @@
 - [External-read route authorization](external-read-route-authorization.md) — authorize immutable terminal route names; Express strips mount prefixes before nested middleware.
 - [Pre-gate router scoping](pre-gate-router-scoping.md) — routers mounted before session auth must path-scope every router-level guard or they can intercept all protected application routes.
 - [AI Schemes E2/E3 arithmetic](ai-schemes-e2-e3.md) — breadth, bands, and margin headroom stay source-separated; holds alter calculation inputs and category economics use ERP pipe/fitting groups.
+- [AI Schemes historical basis](ai-schemes-historical-basis.md) — scheme tables establish grammar only; outcomes stay unavailable, while proposals require modeled cost and numeric breakeven.
 - [AI visit-plan lifecycle](ai-visit-plan-lifecycle.md) — defaults stay visible; revisions are immutable; completion requires newer changed evidence and month-close rules.

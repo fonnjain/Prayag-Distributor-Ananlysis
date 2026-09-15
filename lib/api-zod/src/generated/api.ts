@@ -537,6 +537,184 @@ export const GetAiSchemesAnalyticsResponse = zod.object({
 
 
 /**
+ * Lists observed scheme definitions and the honest limits of the available historical basis. The source is the scheme definition tables; historical qualification, payout, exact cost, order linkage, and measured lift are not represented as outcomes.
+ * @summary Read-only historical-basis AI Schemes analytics
+ */
+export const getAiSchemesHistoryQueryYearRegExp = new RegExp('^\\d{4}$');
+export const getAiSchemesHistoryQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const GetAiSchemesHistoryQueryParams = zod.object({
+  "itemGroup": zod.coerce.string().optional(),
+  "skuBand": zod.enum(['VERY HIGH', 'HIGH', 'MEDIUM', 'LOW', 'SCARCE', 'DORMANT']).optional(),
+  "territory": zod.coerce.string().optional(),
+  "year": zod.coerce.string().regex(getAiSchemesHistoryQueryYearRegExp).optional().describe('Calendar year intersecting the observed scheme period.'),
+  "fy": zod.coerce.string().regex(getAiSchemesHistoryQueryFyRegExp).optional().describe('Alias for year, retained for fiscal-year filter callers.')
+})
+
+export const GetAiSchemesHistoryResponse = zod.object({
+  "readOnly": zod.boolean(),
+  "source": zod.string(),
+  "sourceLabels": zod.record(zod.string(), zod.string()),
+  "schemes": zod.array(zod.object({
+  "schemeId": zod.string(),
+  "name": zod.string(),
+  "source": zod.string(),
+  "qualificationBasis": zod.string(),
+  "settlement": zod.string(),
+  "audience": zod.array(zod.string()),
+  "territoryGroup": zod.string().nullable(),
+  "productScope": zod.string().nullable(),
+  "periodFrom": zod.string(),
+  "periodTo": zod.string().nullable(),
+  "periodNote": zod.string().nullable(),
+  "itemGroups": zod.array(zod.string()),
+  "slabs": zod.array(zod.object({
+  "slabOrder": zod.number(),
+  "thresholdFrom": zod.number(),
+  "thresholdTo": zod.number().nullable(),
+  "unit": zod.string(),
+  "ratePct": zod.number().nullable(),
+  "altReward": zod.string().nullable(),
+  "freeGoods": zod.string().nullable(),
+  "rewardStatus": zod.string(),
+  "rawText": zod.string().nullable()
+})),
+  "observedStructure": zod.object({
+  "slabCount": zod.number(),
+  "thresholdUnit": zod.string().nullable(),
+  "hasAlternativeReward": zod.boolean(),
+  "hasFreeGoods": zod.boolean()
+})
+})),
+  "filters": zod.object({
+  "applied": zod.object({
+  "itemGroup": zod.string().nullable(),
+  "skuBand": zod.string().nullable(),
+  "territory": zod.string().nullable(),
+  "year": zod.string().nullable()
+}),
+  "metadata": zod.object({
+  "itemGroups": zod.array(zod.string()),
+  "skuBands": zod.array(zod.string()),
+  "territories": zod.array(zod.object({
+  "raw": zod.string(),
+  "label": zod.string(),
+  "states": zod.array(zod.string())
+}))
+})
+}),
+  "timeline": zod.object({
+  "observedPeriods": zod.array(zod.string()),
+  "gaps": zod.array(zod.string()),
+  "gapQuarters": zod.array(zod.string()),
+  "statement": zod.string()
+}),
+  "observedGrammar": zod.object({
+  "qualificationBases": zod.array(zod.string()),
+  "settlementModes": zod.array(zod.string()),
+  "thresholdUnits": zod.array(zod.string()),
+  "rewardForms": zod.record(zod.string(), zod.boolean()),
+  "typicalSlabCount": zod.number().nullish(),
+  "thresholdSpacing": zod.record(zod.string(), zod.unknown()).optional(),
+  "rateLadder": zod.record(zod.string(), zod.unknown()).optional(),
+  "duration": zod.array(zod.string()).optional(),
+  "itemGroupsPerScheme": zod.record(zod.string(), zod.unknown()).optional(),
+  "territoryScope": zod.record(zod.string(), zod.unknown()).optional(),
+  "statement": zod.string()
+}),
+  "historySummary": zod.record(zod.string(), zod.unknown()),
+  "outcomeEvidence": zod.record(zod.string(), zod.unknown()),
+  "controlAndLift": zod.record(zod.string(), zod.unknown()),
+  "itemGroupCoverage": zod.record(zod.string(), zod.unknown()),
+  "coverage": zod.object({
+  "raw": zod.record(zod.string(), zod.unknown()),
+  "canonical": zod.record(zod.string(), zod.unknown()),
+  "statement": zod.string()
+}),
+  "outcomeAvailability": zod.object({
+  "available": zod.boolean(),
+  "statement": zod.string(),
+  "evidenceBasis": zod.string()
+}),
+  "precedentBounds": zod.object({
+  "slabCount": zod.record(zod.string(), zod.number().nullable()),
+  "ratePct": zod.record(zod.string(), zod.number().nullable()),
+  "threshold": zod.record(zod.string(), zod.number().nullable()),
+  "breadth": zod.record(zod.string(), zod.unknown()),
+  "spend": zod.record(zod.string(), zod.unknown()),
+  "statement": zod.string()
+})
+})
+
+
+/**
+ * Copies an observed precedent structure without writing scheme tables. The supplied margin cap is a hard ceiling. Proposals always include an explicitly modeled cost, cost share of category gross margin, and breakeven lift. Exact historical spend and outcomes remain unavailable. Held or unknown-margin inputs are rejected.
+ * @summary Generate a read-only historical-basis scheme proposal
+ */
+export const generateAiSchemesHistoryBodyMarginCapPctExclusiveMin = 0;
+
+export const generateAiSchemesHistoryBodyBreadthOpportunityRetailersExclusiveMin = 0;
+export const generateAiSchemesHistoryBodyBreadthOpportunityRetailersMultipleOf = 1;
+
+export const generateAiSchemesHistoryBodyCategoryGrossMarginInrExclusiveMin = 0;
+
+export const generateAiSchemesHistoryBodyGrossMarginRatePctExclusiveMin = 0;
+
+export const generateAiSchemesHistoryBodyMarginCapMin = 0;
+
+export const generateAiSchemesHistoryBodyMaximumSchemeDepthPctMin = 0;
+
+export const generateAiSchemesHistoryBodyAdditionalSkusPerRetailerMin = 0;
+
+export const generateAiSchemesHistoryBodyBreadthMin = 0;
+
+export const generateAiSchemesHistoryBodyBreadthInputMin = 0;
+
+
+
+export const GenerateAiSchemesHistoryBody = zod.object({
+  "itemGroup": zod.string().optional(),
+  "skuBand": zod.enum(['VERY HIGH', 'HIGH', 'MEDIUM', 'LOW', 'SCARCE', 'DORMANT']).optional(),
+  "territory": zod.string(),
+  "marginCapPct": zod.number().gt(generateAiSchemesHistoryBodyMarginCapPctExclusiveMin).describe('Maximum permitted scheme depth, in percentage points.'),
+  "breadthOpportunityRetailers": zod.number().gt(generateAiSchemesHistoryBodyBreadthOpportunityRetailersExclusiveMin).multipleOf(generateAiSchemesHistoryBodyBreadthOpportunityRetailersMultipleOf).describe('Positive retailer count from the Tab 1 breadth opportunity.'),
+  "categoryGrossMarginInr": zod.number().gt(generateAiSchemesHistoryBodyCategoryGrossMarginInrExclusiveMin).describe('Positive category gross-margin amount from Tab 4, in INR.'),
+  "grossMarginRatePct": zod.number().gt(generateAiSchemesHistoryBodyGrossMarginRatePctExclusiveMin).describe('Positive category gross-margin rate from Tab 4, in percentage points.'),
+  "marginCap": zod.number().min(generateAiSchemesHistoryBodyMarginCapMin).optional(),
+  "maximumSchemeDepthPct": zod.number().min(generateAiSchemesHistoryBodyMaximumSchemeDepthPctMin).optional(),
+  "marginStatus": zod.enum(['known', 'held', 'unknown', 'unavailable']).optional(),
+  "held": zod.boolean().optional(),
+  "marginUnknown": zod.boolean().optional(),
+  "marginHeld": zod.boolean().optional(),
+  "additionalSkusPerRetailer": zod.number().min(generateAiSchemesHistoryBodyAdditionalSkusPerRetailerMin).optional(),
+  "breadth": zod.number().min(generateAiSchemesHistoryBodyBreadthMin).optional(),
+  "breadthInput": zod.number().min(generateAiSchemesHistoryBodyBreadthInputMin).optional(),
+  "breadthInputs": zod.record(zod.string(), zod.unknown()).optional(),
+  "margin": zod.record(zod.string(), zod.unknown()).optional(),
+  "marginInput": zod.record(zod.string(), zod.unknown()).optional(),
+  "marginInputs": zod.record(zod.string(), zod.unknown()).optional()
+})
+
+export const GenerateAiSchemesHistoryResponse = zod.object({
+  "readOnly": zod.boolean(),
+  "persisted": zod.boolean(),
+  "writes": zod.array(zod.string()),
+  "source": zod.string(),
+  "input": zod.record(zod.string(), zod.unknown()),
+  "closestPrecedent": zod.record(zod.string(), zod.unknown()),
+  "proposal": zod.record(zod.string(), zod.unknown()),
+  "margin": zod.record(zod.string(), zod.unknown()),
+  "breakeven": zod.record(zod.string(), zod.unknown()),
+  "breakevenLiftRequired": zod.record(zod.string(), zod.unknown()),
+  "flags": zod.record(zod.string(), zod.unknown()),
+  "controlLift": zod.record(zod.string(), zod.unknown()),
+  "evidenceBasis": zod.array(zod.string()),
+  "guardrails": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
  * Builds the Phase A1 payload internally, sends it to Claude with a strict system prompt, runs the numeric guard, and returns a structured JSON report. No PDF is generated server-side; the client renders and prints the returned JSON. Claude never does arithmetic — it receives only the pre-computed payload and writes narrative. The numeric guard checks every number in the generated text against the payload; any unmatched number sets guard.status to "requires_review".
  * @summary Phase A2 — generate salesperson narrative report via Claude
  */
