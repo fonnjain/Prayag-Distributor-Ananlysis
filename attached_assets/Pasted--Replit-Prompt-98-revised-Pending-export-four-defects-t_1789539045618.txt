@@ -1,0 +1,182 @@
+# Replit Prompt 98 (revised) — Pending export: four defects, then a real summary
+
+**Date:** 16 September 2026
+**Scope:** A is read-only. B fixes defects. C is the new Summary sheet.
+D cleans the rest.
+
+**Standing rule:** every figure states which database or source it came from.
+
+Written against `FactoryPendingAudit_2026-09-16.xlsx` as generated.
+
+---
+
+## Section A — four defects visible in the export
+
+```
+Read-only. Change nothing. These are in the file now.
+
+A1. THERE IS A STATE HEAD CALLED "#N/A".
+
+    Hierarchy row 3: Head | #N/A | 2 pieces | Rs 287.36
+    Its party is "CASH SALE".
+
+    That is a spreadsheet error string that has been read as a state-head
+    name and carried through the whole hierarchy. Print where it comes
+    from in REPORT 2 and how many rows carry it.
+
+    It must not appear as a head. Either resolve it or put it in a clearly
+    labelled bucket.
+
+A2. "None" APPEARS AS LITERAL TEXT.
+
+    The Classification column shows the string "None" on Party and Product
+    Group rows - a null leaking through as text.
+
+    Print the Classification values used. Party and product-group rows
+    should carry a real classification or an empty cell, never the word
+    "None".
+
+A3. FLOATING-POINT NOISE IN THE SUMMARY.
+
+      Derived pending          164202043.61999965
+      Non-territory derived     29090786.549999967
+
+    Round to paise and format. Nobody should see fifteen decimal places.
+
+A4. THE FIGURES HAVE MOVED SINCE 15 SEPTEMBER.
+
+      pending qty   2,98,679 -> 3,50,750
+      priced        Rs 2.72 Cr -> Rs 3.25 Cr
+      unpriceable      98,626 -> 14,397
+
+    Unpriceable has fallen by 84%. Did REPORT 2 gain product-group
+    allocation, or did the calculation change?
+
+    If the source improved, that is good news and the P-entry for the
+    allocation gap should be updated. If the calculation changed, say how.
+```
+
+---
+
+## Section B — the Summary sheet is a fact list, not a report
+
+The current Summary is **8 rows, 3 columns** — Measure, Value, Basis. Useful as
+provenance, useless as a report. And two of its rows have an **empty Value cell**
+with the content in the Note column.
+
+```
+Code change. Replace it with the Summary Jul shape, which is how the
+business already reads this.
+
+ONE BLOCK PER STATE HEAD:
+
+  Block header   State head name · mapped coverage %
+  TOTAL row      the head's figures across every column
+  Column header  row
+  Member rows    one per member with pending
+  Bucket rows    "- Not assigned -" and "- Disputed attribution -",
+                 below the members, visually separated
+
+COLUMNS
+
+  State | Member | Parties | Pending qty | Priced amount |
+  Unpriceable qty | Share of head | Largest group | Second group
+
+A COMPANY BLOCK first, same columns.
+
+RULES
+
+1. THE TOTAL RECONCILES. Members plus both buckets equal the TOTAL,
+   exactly, on both measures.
+
+2. HEADS WITH ZERO MEMBER COVERAGE still get a block - a TOTAL row and one
+   unassigned row. That is the finding stated plainly.
+
+3. NO EMPTY VALUE CELLS. Every row carries a figure or a labelled blank.
+   The current "Comparability statement" row with a blank value and a note
+   in column C is the pattern to avoid.
+
+4. FREEZE PANES on the column header.
+
+KEEP the existing 8 provenance rows - they are genuinely useful - but move
+them to the Info sheet where basis statements belong.
+```
+
+---
+
+## Section C — flatten the Hierarchy sheet
+
+**529 rows × 15 columns, and 8 of the 15 are reconciliation scaffolding repeated
+on every row** — Quantity Parent, Quantity Children, Quantity Difference, Amount
+Parent, Amount Children, Amount Difference, and so on.
+
+At the Company row all three quantity columns read 350750. At the Product Group
+row they read 2, 2, 2. The same number three times, 529 times over.
+
+```
+Code change.
+
+C1. ONE ROW PER PARTY. Hierarchy as COLUMNS, not as a Level column with
+    indentation:
+
+      State head | Member or bucket | Party | Pending qty | Priced amount |
+      Unpriceable | then one column per product group carrying quantity
+
+    Filterable, sortable, every row readable alone. Roughly 150 rows
+    instead of 529.
+
+C2. RECONCILIATION MOVES TO ITS OWN SHEET. Parent, children, difference,
+    per level, per measure - about 200 rows, all of them meaningful.
+
+    Repeating it on every data row is what makes the current sheet
+    unreadable.
+
+C3. DROP the Level and Classification columns. With hierarchy as columns,
+    Level is implied and Classification was carrying "None".
+
+C4. FORMAT THE NUMBERS. Indian format for rupees, grouped integers for
+    pieces. No raw floats.
+```
+
+---
+
+## Section D — the remaining sheets
+
+```
+D1. GROUP RATES - 24 rows, 11 columns, 100% filled. No change. This is the
+    one sheet that already works.
+
+D2. UNPRICEABLE - 11 rows, good structure. Two changes:
+      sort by Unallocated Residual descending, so the largest gaps lead
+      truncate the Reason column or move it to a legend - the same
+      sentence repeated on every row is noise
+
+D3. INFO - keep in full, and add the 8 provenance rows moved from Summary.
+
+RESULTING ORDER
+  1  Summary        blocks per head, the lead sheet
+  2  Detail         flat, one row per party, filterable
+  3  Group Rates
+  4  Unpriceable
+  5  Reconciliation
+  6  Info
+
+AFTER APPLYING, print the Summary sheet for the company block and for
+SANDEEP JI, and the first 15 rows of the flattened Detail sheet.
+```
+
+---
+
+## Notes
+
+- **A1 is the one to fix first.** A state head named `#N/A` carrying 2 pieces and
+  ₹287.36 is a source error that has propagated through every level of the export.
+  It will look like a data corruption to anyone who opens the file.
+- **A4 is potentially good news.** Unpriceable fell from 98,626 to 14,397. If
+  REPORT 2 gained product-group allocation, the source gap is largely closed and
+  the register entry should reflect it.
+- **C2 is the core of "not clean and crisp".** Eight of fifteen columns repeating
+  the same reconciliation on every row is why the sheet cannot be read. The
+  reconciliation is worth having — on its own sheet, once per level.
+- **Group Rates is the model.** Twenty-four rows, eleven columns, every cell
+  meaningful. The other sheets should aim at that density.
