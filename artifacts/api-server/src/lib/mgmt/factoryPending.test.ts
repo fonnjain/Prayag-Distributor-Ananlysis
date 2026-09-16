@@ -496,12 +496,35 @@ describe("factory pending attribution audit", () => {
     expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(
       ["Summary", "Detail", "Group Rates", "Unpriceable", "Reconciliation", "Info"],
     );
+    const summary = workbook.getWorksheet("Summary")!;
+    expect(summary.views).toEqual([{ state: "frozen", ySplit: 5 }]);
+    expect(summary.getCell("A1").value).toBeNull();
+    expect(summary.getRow(1).values).toEqual([, undefined, "State Head", "State", "Coverage"]);
+    expect(summary.getRow(2).values).toEqual([, undefined, "Company", undefined, 0]);
+    expect(summary.getCell("D2").numFmt).toBe('0.0% "mapped"');
+    expect(summary.getRow(3).actualCellCount).toBe(0);
+    expect(summary.getRow(4).values).toEqual([, undefined, undefined, undefined, "TOTAL", 2, 5, 50, 0]);
+    expect(summary.getRow(5).values).toEqual([
+      , "State", "Member", "Parties", "Pending qty", "Priced amount",
+      "Unpriceable qty", "Share of head", "Largest group", "Second group",
+    ]);
+    expect(summary.getCell("B6").value).toBeNull();
+    expect(summary.getCell("G6").value).toBe(1);
+    expect(summary.getCell("G6").numFmt).toBe("0.0%");
+    expect(summary.getCell("E4").numFmt).toBe("#,##,##0");
+    expect(summary.getCell("G4").numFmt).toBe("₹#,##,##0.00");
+    expect(summary.getRow(7).actualCellCount).toBe(0);
+    for (const rowNumber of [1, 2, 3, 4, 7]) {
+      expect(summary.getRow(rowNumber).values).not.toContain("—");
+    }
     expect(workbook.worksheets.find((sheet) => sheet.name === "Group Rates")?.rowCount ?? 0).toBe(result.groups.length + 1);
     expect(workbook.getWorksheet("Group Rates")?.getRow(1).values).toEqual(
       expect.arrayContaining(["Source Group", "Contributing FY Sales Value", "Robustness Flag/Note"]),
     );
     const detail = workbook.getWorksheet("Detail");
     expect(detail?.rowCount).toBe(3);
+    expect(detail?.getCell("D2").numFmt).toBe("#,##0");
+    expect(detail?.getCell("E2").numFmt).toBe("₹#,##0.00");
     result.pricingAvailable = false;
     result.pricing = null;
     result.pricedAmount = null;

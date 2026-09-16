@@ -1561,6 +1561,9 @@ export function buildFactoryPendingWorkbook(result: FactoryPendingResult): Excel
   const QTY = "#,##0";
   const INR = "₹#,##0.00";
   const PCT = "0.00%";
+  const SUMMARY_QTY = "#,##,##0";
+  const SUMMARY_INR = "₹#,##,##0.00";
+  const SUMMARY_PCT = "0.0%";
   const dash = (v: unknown): unknown => v == null || v === "" || v === "None" ? "—" : v;
   const setup = (sheet: ExcelJS.Worksheet, freeze = 1, filter = true) => {
     sheet.views = [{ state: "frozen", ySplit: freeze }];
@@ -1580,18 +1583,26 @@ export function buildFactoryPendingWorkbook(result: FactoryPendingResult): Excel
     { width: 25 }, { width: 30 }, { width: 14 }, { width: 16 }, { width: 18 }, { width: 18 },
     { width: 16 }, { width: 28 }, { width: 28 },
   ];
-  const summaryHeader = "Sources: quantities/parties/groups = REPORT 2; realised rates = sale_line_current; coverage attribution = customer_assignment/person.";
+  summary.getColumn(3).numFmt = SUMMARY_QTY; summary.getColumn(4).numFmt = SUMMARY_QTY;
+  summary.getColumn(5).numFmt = SUMMARY_INR; summary.getColumn(6).numFmt = SUMMARY_QTY;
+  summary.getColumn(7).numFmt = SUMMARY_PCT;
   const blockRows = (head: PendingHead, company = false) => {
-    const coverage = head.safeCoveragePct == null ? "Unavailable" : head.safeCoveragePct / 100;
+    const coverage = head.safeCoveragePct == null ? null : head.safeCoveragePct / 100;
     const title = company ? "Company" : head.head;
-    const h = summary.addRow([`${title} · ${typeof coverage === "number" ? (coverage * 100).toFixed(2) + "%" : "Unavailable"} mapped coverage`, summaryHeader, "REPORT 2 / sale_line_current / customer_assignment",
-      "—", "—", "—", "—", "—", "—"]);
-    h.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    h.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF5B9BD5" } };
+    const labels = summary.addRow([null, "State Head", "State", "Coverage"]);
+    labels.font = { bold: true };
+    const identity = summary.addRow([null, title, null, coverage ?? "Unavailable"]);
+    if (coverage != null) identity.getCell(4).numFmt = `${SUMMARY_PCT} "mapped"`;
+    summary.addRow([]);
     const total = head.total;
-    addSummaryRow(summary, [title, "TOTAL", head.parties.length, total,
+    const totalRow = addSummaryRow(summary, [null, null, null, "TOTAL", head.parties.length, total,
       amountAvailable ? head.pricedAmount : null,
-      amountAvailable ? head.unpriceableQty : null, 1, "—", "—"]);
+      amountAvailable ? head.unpriceableQty : null, null], false);
+    totalRow.font = { bold: true };
+    totalRow.getCell(5).numFmt = SUMMARY_QTY;
+    totalRow.getCell(6).numFmt = SUMMARY_QTY;
+    totalRow.getCell(7).numFmt = SUMMARY_INR;
+    totalRow.getCell(8).numFmt = SUMMARY_QTY;
     const columns = ["State", "Member", "Parties", "Pending qty", "Priced amount", "Unpriceable qty", "Share of head", "Largest group", "Second group"];
     const repeated = summary.addRow(columns); repeated.font = { bold: true };
     if (company) {
@@ -1600,13 +1611,14 @@ export function buildFactoryPendingWorkbook(result: FactoryPendingResult): Excel
           for (const [g, q] of Object.entries(p.byGroup)) m[g] = (m[g] ?? 0) + q;
           return m;
         }, {})).sort((a, b) => b[1] - a[1]);
-        addSummaryRow(summary, [child.head, "All members and buckets", child.parties.length, child.total,
+        addSummaryRow(summary, [child.head, null, child.parties.length, child.total,
           amountAvailable ? child.pricedAmount : null,
           amountAvailable ? child.unpriceableQty : null,
-          total ? child.total / total : 0,
-          childGroups[0] ? `${childGroups[0][0]} (${childGroups[0][1].toLocaleString("en-IN")})` : "—",
-          childGroups[1] ? `${childGroups[1][0]} (${childGroups[1][1].toLocaleString("en-IN")})` : "—"]);
+          total > 0 ? child.total / total : null,
+          childGroups[0] ? `${childGroups[0][0]} (${childGroups[0][1].toLocaleString("en-IN")})` : null,
+          childGroups[1] ? `${childGroups[1][0]} (${childGroups[1][1].toLocaleString("en-IN")})` : null], false);
       }
+      summary.addRow([]);
       return;
     }
     const buckets = head.buckets.length ? head.buckets : [{ bucket: "- Not assigned -", member: null, specialBucket: true, total: total, parties: head.parties, reconciliation: head.reconciliation }];
@@ -1624,10 +1636,11 @@ export function buildFactoryPendingWorkbook(result: FactoryPendingResult): Excel
         bucket.total,
         amountAvailable ? bucket.pricedAmount : null,
         amountAvailable ? bucket.unpriceableQty : null,
-        total ? bucket.total / total : 0,
-        group[0] ? `${group[0][0]} (${group[0][1].toLocaleString("en-IN")})` : "—",
-        group[1] ? `${group[1][0]} (${group[1][1].toLocaleString("en-IN")})` : "—"]);
+        total > 0 ? bucket.total / total : null,
+        group[0] ? `${group[0][0]} (${group[0][1].toLocaleString("en-IN")})` : null,
+        group[1] ? `${group[1][0]} (${group[1][1].toLocaleString("en-IN")})` : null], false);
     }
+    summary.addRow([]);
   };
   const company: PendingHead = {
     ...result.byHead[0], head: "Company", total: result.grandTotal,
@@ -1638,8 +1651,7 @@ export function buildFactoryPendingWorkbook(result: FactoryPendingResult): Excel
   };
   blockRows(company, true);
   for (const head of result.byHead) blockRows(head);
-  setup(summary, 3, false);
-  summary.getColumn(4).numFmt = QTY; summary.getColumn(5).numFmt = INR; summary.getColumn(6).numFmt = QTY; summary.getColumn(7).numFmt = PCT;
+  summary.views = [{ state: "frozen", ySplit: 5 }];
 
   const detail = workbook.addWorksheet("Detail");
   detail.columns = [{ header: "State head", width: 25 }, { header: "Member or bucket", width: 30 }, { header: "Party", width: 35 },
