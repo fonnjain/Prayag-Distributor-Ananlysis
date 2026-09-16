@@ -20,3 +20,9 @@ Spreadsheet error tokens in source-head cells are data-quality markers, not iden
 **Why:** REPORT 2 contained a `#N/A` head for CASH SALE with 2 pieces. Treating the error token as a person or discarding the row corrupts both hierarchy and source reconciliation.
 
 **How to apply:** Sanitize the head before carry-forward grouping, label special buckets consistently, and verify that exports contain neither source error tokens nor literal internal fallback values such as `None`.
+
+Party-level Total Order and Sale come from the FY2025-26 State Head Dashboard distributor table and join to REPORT 2 only by exact `normParty`; never use the head-level primary loaders or fuzzy fallback. Unmatched or ambiguous parties remain blank with a reason. Summary commercial totals may sum matched rows only, but must visibly disclose partial coverage. The source dashboard's assigned-member count supports its AVG and per-person/month calculations; it is not the current pending-hierarchy attribution count.
+
+**Why:** The 16 September 2026 read-only audit matched 70 of 151 REPORT 2 parties, with 81 unmatched and 0 ambiguous. Only 20 of the 70 matched dashboard member counts agreed with current pending attribution. Treating either absence or disagreement as zero would fabricate commercial values.
+
+**How to apply:** Keep dashboard Order/Sale/Difference as rupee measures in a visually separate group from REPORT 2 pending pieces. State the negative-difference drawdown convention, annotate partial aggregates, and preserve the source dashboard member-count semantics rather than relabeling current assignment counts.

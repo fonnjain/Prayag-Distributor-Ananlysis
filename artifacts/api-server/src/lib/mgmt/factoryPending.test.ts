@@ -11,6 +11,7 @@ import {
   type PendingHead,
 } from "./factoryPending.js";
 import type { StateHeadAttributionConflictReport } from "./stateHeadAttributionConflicts.js";
+import { buildPendingCommercialData } from "./factoryPendingCommercial.js";
 
 function party(partyName: string, total: number): PendingHead["parties"][number] {
   return {
@@ -484,6 +485,11 @@ describe("factory pending attribution audit", () => {
           },
         },
       }),
+      loadCommercial: async () => buildPendingCommercialData([
+        ["Distributor Name", "Total Order", "Assigned Team Member count", "Sale 25-26"],
+        ["CP ONE", 120, 2, 100],
+        ["CP TWO", 60, 1, 90],
+      ]),
     });
     expect(Object.keys(result.pricing?.byGroup ?? {})).toEqual(["C P", "CP ACCESSORIES"]);
     expect(result.pricing?.byGroup["C P"].canonicalGroup).toBe("CP (Chrome-Plated)");
@@ -492,6 +498,23 @@ describe("factory pending attribution audit", () => {
     expect(result.byHead[0].parties[0].byGroupAmount?.["C P"]).toBe(20);
     expect(result.byHead[0].parties[0].amountReconciliation?.difference).toBe(0);
     expect(result.amountReconciliation?.parties.every((row) => row.difference === 0)).toBe(true);
+    expect(result.commercialCoverage).toMatchObject({
+      totalParties: 2,
+      matchedParties: 2,
+      unmatchedParties: 0,
+      ambiguousParties: 0,
+      sourceRows: 2,
+      normalization: "normParty",
+    });
+    expect(result.byHead[0].parties[0].commercial).toMatchObject({
+      available: true,
+      totalOrder: 120,
+      sale: 100,
+      difference: 20,
+      assignedMembers: 2,
+      avgOrderBooking: 60,
+      perPersonPerMonth: 5,
+    });
     const workbook = buildFactoryPendingWorkbook(result);
     expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(
       ["Summary", "Detail", "Group Rates", "Unpriceable", "Reconciliation", "Info"],
@@ -500,19 +523,30 @@ describe("factory pending attribution audit", () => {
     expect(summary.views).toEqual([{ state: "frozen", ySplit: 5 }]);
     expect(summary.getCell("A1").value).toBeNull();
     expect(summary.getRow(1).values).toEqual([, undefined, "State Head", "State", "Coverage"]);
-    expect(summary.getRow(2).values).toEqual([, undefined, "Company", undefined, 0]);
+    expect(summary.getRow(2).values).toEqual([
+      , undefined, "Company", undefined, 0,
+      "Order vs Sale sign: positive = ordered and not yet dispatched; negative = dispatched more than booked this period, drawing down earlier orders.",
+    ]);
     expect(summary.getCell("D2").numFmt).toBe('0.0% "mapped"');
     expect(summary.getRow(3).actualCellCount).toBe(0);
-    expect(summary.getRow(4).values).toEqual([, undefined, undefined, undefined, "TOTAL", 2, 5, 50, 0]);
+    expect(summary.getRow(4).values).toEqual([
+      , undefined, undefined, undefined, "TOTAL", 2,
+      180, 190, -10, -10 / 180, 3, 60, 5, 5, 50, 0,
+    ]);
     expect(summary.getRow(5).values).toEqual([
-      , "State", "Member", "Parties", "Pending qty", "Priced amount",
-      "Unpriceable qty", "Share of head", "Largest group", "Second group",
+      , "State", "Member", "Parties", "Total Order", "Sale",
+      "Difference (Order vs Sale)", "Difference %", "Assigned members",
+      "AVG Order Booking", "Per Person per month", "Pending qty",
+      "Priced pending", "Unpriceable qty", "Share of head",
+      "Largest group", "Second group",
     ]);
     expect(summary.getCell("B6").value).toBeNull();
-    expect(summary.getCell("G6").value).toBe(1);
-    expect(summary.getCell("G6").numFmt).toBe("0.0%");
+    expect(summary.getCell("N6").value).toBe(1);
+    expect(summary.getCell("N6").numFmt).toBe("0.0%");
     expect(summary.getCell("E4").numFmt).toBe("#,##,##0");
-    expect(summary.getCell("G4").numFmt).toBe("₹#,##,##0.00");
+    expect(summary.getCell("F4").numFmt).toBe("₹#,##,##0.00");
+    expect(summary.getCell("I4").numFmt).toBe("0.00%");
+    expect(summary.getCell("M4").numFmt).toBe("#,##,##0");
     expect(summary.getRow(7).actualCellCount).toBe(0);
     for (const rowNumber of [1, 2, 3, 4, 7]) {
       expect(summary.getRow(rowNumber).values).not.toContain("—");
@@ -522,22 +556,48 @@ describe("factory pending attribution audit", () => {
       expect.arrayContaining(["Source Group", "Contributing FY Sales Value", "Robustness Flag/Note"]),
     );
     const detail = workbook.getWorksheet("Detail");
-    expect(detail?.rowCount).toBe(3);
-    expect(detail?.getCell("D2").numFmt).toBe("#,##0");
-    expect(detail?.getCell("E2").numFmt).toBe("₹#,##0.00");
+    expect(detail?.rowCount).toBe(4);
+    expect(detail?.getRow(2).values).toEqual([
+      , "State head", "Member or bucket", "Party", "Total Order", "Sale",
+      "Difference (Order vs Sale)", "Difference %", "Assigned members",
+      "AVG Order Booking", "Per Person per month", "Pending qty",
+      "Priced pending", "Unpriceable qty", "C P", "CP ACCESSORIES",
+    ]);
+    expect(detail?.getCell("D3").numFmt).toBe("₹#,##0.00");
+    expect(detail?.getCell("G3").numFmt).toBe("0.00%");
+    expect(detail?.getCell("K3").numFmt).toBe("#,##0");
+    expect(detail?.getCell("D3").value).toBe(120);
+    expect(detail?.getCell("F3").value).toBe(20);
     result.pricingAvailable = false;
     result.pricing = null;
     result.pricedAmount = null;
     result.unpriceableQty = null;
     result.amountReconciliation = null;
     const quantityOnlyWorkbook = buildFactoryPendingWorkbook(result);
-    expect(quantityOnlyWorkbook.getWorksheet("Detail")?.rowCount).toBe(3);
-    expect(quantityOnlyWorkbook.getWorksheet("Detail")?.getCell("E2").value).toBeNull();
+    expect(quantityOnlyWorkbook.getWorksheet("Detail")?.rowCount).toBe(4);
+    expect(quantityOnlyWorkbook.getWorksheet("Detail")?.getCell("L3").value).toBeNull();
     expect(quantityOnlyWorkbook.getWorksheet("Unpriceable")?.rowCount).toBe(1);
     const reconciliation = workbook.getWorksheet("Reconciliation");
     expect(reconciliation?.getRow(2).values).toEqual(
       expect.arrayContaining(["Company", "Company", "—", "—", 5, 5, 0, true]),
     );
+  });
+
+  it("derives commercial support measures and preserves genuine zero sale", () => {
+    const commercial = buildPendingCommercialData([
+      ["Distributor Name", "Total Order", "Assigned Team Member count", "Sale 25-26"],
+      ["M/S Aarya Agro (Pune)", 1_200, 2, 0],
+    ]);
+    expect(commercial.byParty.get("aaryaagro")).toEqual([{
+      party: "M/S Aarya Agro (Pune)",
+      totalOrder: 1_200,
+      sale: 0,
+      difference: 1_200,
+      differencePct: 1,
+      assignedMembers: 2,
+      avgOrderBooking: 600,
+      perPersonPerMonth: 50,
+    }]);
   });
 
   it("sanitizes spreadsheet error heads deterministically", () => {

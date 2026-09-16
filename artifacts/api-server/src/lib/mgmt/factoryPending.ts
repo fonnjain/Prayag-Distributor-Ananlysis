@@ -30,6 +30,12 @@ import { logger } from "../logger.js";
 import { pool } from "@workspace/db";
 import ExcelJS from "exceljs";
 import { tankLitresFromCode } from "../registers/tankResolution.js";
+import {
+  loadPendingCommercialData,
+  PENDING_COMMERCIAL_SOURCE,
+  type PendingCommercialData,
+  type PendingCommercialRow,
+} from "./factoryPendingCommercial.js";
 
 const SHEET_ID = "1dmt6uHOdZSIT0wgNkSfuK8W8d0YO8STW51PVOAAFHvY";
 const TAB = "REPORT 2";
@@ -56,6 +62,30 @@ export type PendingParty = {
   unpriceableReason?: string | null;
   byGroupAmount?: Record<string, number | null>;
   amountReconciliation?: ReconciliationCheck;
+  commercial?: PendingCommercialMatch | PendingCommercialUnavailable;
+};
+
+export type PendingCommercialMatch = PendingCommercialRow & {
+  available: true;
+  source: typeof PENDING_COMMERCIAL_SOURCE;
+  unavailableReason: null;
+};
+
+export type PendingCommercialUnavailable = {
+  available: false;
+  source: typeof PENDING_COMMERCIAL_SOURCE;
+  unavailableReason: string;
+};
+
+export type PendingCommercialCoverage = {
+  totalParties: number;
+  matchedParties: number;
+  unmatchedParties: number;
+  ambiguousParties: number;
+  sourceRows: number;
+  source: typeof PENDING_COMMERCIAL_SOURCE;
+  normalization: "normParty";
+  error: string | null;
 };
 
 export type PendingAttributionClassification =
@@ -202,6 +232,7 @@ export type FactoryPendingResult = {
   unpriceableQty?: number | null;
   unpriceableReason?: string | null;
   amountReconciliation?: PendingReconciliation | null;
+  commercialCoverage?: PendingCommercialCoverage;
 };
 
 // ── Cache ──────────────────────────────────────────────────────────────────────
@@ -661,6 +692,79 @@ function unavailableCoverage(): PendingCoverage {
   };
 }
 
+function addPendingCommercial(
+  byHead: PendingHead[],
+  data: PendingCommercialData | null,
+  error: string | null,
+): { byHead: PendingHead[]; coverage: PendingCommercialCoverage } {
+  let matchedParties = 0;
+  let unmatchedParties = 0;
+  let ambiguousParties = 0;
+  const attach = (party: PendingParty): PendingParty => {
+    let commercial: PendingCommercialMatch | PendingCommercialUnavailable;
+    if (!data) {
+      commercial = {
+        available: false,
+        source: PENDING_COMMERCIAL_SOURCE,
+        unavailableReason: error ?? "Commercial source unavailable",
+      };
+    } else {
+      const matches = data.byParty.get(normParty(party.party)) ?? [];
+      if (matches.length === 1) {
+        matchedParties++;
+        commercial = {
+          ...matches[0],
+          available: true,
+          source: data.source,
+          unavailableReason: null,
+        };
+      } else if (matches.length > 1) {
+        ambiguousParties++;
+        commercial = {
+          available: false,
+          source: data.source,
+          unavailableReason: `Ambiguous normParty match: ${matches.length} source rows`,
+        };
+      } else {
+        unmatchedParties++;
+        commercial = {
+          available: false,
+          source: data.source,
+          unavailableReason: "No exact normParty match in distributor order/sale source",
+        };
+      }
+    }
+    return { ...party, commercial };
+  };
+
+  const output = byHead.map((head) => {
+    const parties = head.parties.map(attach);
+    const partyByName = new Map(parties.map((party) => [party.party, party]));
+    const buckets = head.buckets.map((bucket) => ({
+      ...bucket,
+      parties: bucket.parties.map(
+        (party) => partyByName.get(party.party) ?? party,
+      ),
+    }));
+    return { ...head, parties, buckets, members: buckets };
+  });
+  const totalParties = output.reduce((sum, head) => sum + head.parties.length, 0);
+  if (!data) unmatchedParties = totalParties;
+  return {
+    byHead: output,
+    coverage: {
+      totalParties,
+      matchedParties,
+      unmatchedParties,
+      ambiguousParties,
+      sourceRows: data?.sourceRows ?? 0,
+      source: PENDING_COMMERCIAL_SOURCE,
+      normalization: "normParty",
+      error,
+    },
+  };
+}
+
 const PRICE_BASIS =
   "FY2026-27 sale_line_current, version_status=current; group-level weighted realised price = SUM(amount)/SUM(quantity denominator).";
 
@@ -1092,6 +1196,7 @@ export type FactoryPendingDependencies = {
   loadAttributionIndex?: () => Promise<AttributionIndex>;
   loadConflictIndex?: () => Promise<ConflictIndex>;
   loadPricing?: () => Promise<PendingPricing>;
+  loadCommercial?: () => Promise<PendingCommercialData>;
   now?: () => Date;
 };
 
@@ -1106,15 +1211,20 @@ export async function buildFactoryPending(
   const loadConflicts = dependencies.loadConflictIndex ?? loadConflictIndex;
   const shouldLoadPricing = Object.keys(dependencies).length === 0 || dependencies.loadPricing != null;
   const loadPricing = dependencies.loadPricing ?? loadPendingPricing;
+  const shouldLoadCommercial =
+    Object.keys(dependencies).length === 0 || dependencies.loadCommercial != null;
+  const loadCommercial =
+    dependencies.loadCommercial ?? loadPendingCommercialData;
   if (useCache && _cache && Date.now() - _cache.ts < TTL_MS) return _cache.result;
 
-  const [sheetResult, obResult, saleResult, attributionResult, conflictResult, pricingResult] = await Promise.allSettled([
+  const [sheetResult, obResult, saleResult, attributionResult, conflictResult, pricingResult, commercialResult] = await Promise.allSettled([
     read(),
     loadOb(),
     loadSale("2026-27"),
     loadAttribution(),
     loadConflicts(),
     shouldLoadPricing ? loadPricing() : Promise.resolve(null),
+    shouldLoadCommercial ? loadCommercial() : Promise.resolve(null),
   ]);
 
   const sheet = sheetResult.status === "fulfilled" ? sheetResult.value : null;
@@ -1141,6 +1251,16 @@ export async function buildFactoryPending(
   const pricingError =
     pricingResult.status === "rejected"
       ? String(pricingResult.reason instanceof Error ? pricingResult.reason.message : pricingResult.reason)
+      : null;
+  const commercial =
+    commercialResult.status === "fulfilled" ? commercialResult.value : null;
+  const commercialError =
+    commercialResult.status === "rejected"
+      ? String(
+          commercialResult.reason instanceof Error
+            ? commercialResult.reason.message
+            : commercialResult.reason,
+        )
       : null;
   const attributionAvailable =
     attributionResult.status === "fulfilled" && conflictResult.status === "fulfilled";
@@ -1182,10 +1302,15 @@ export async function buildFactoryPending(
         },
       };
   const amountPricing = addAmountPricing({ ...enriched, groups: sheet?.groups ?? [] }, pricing);
+  const commercialAttachment = addPendingCommercial(
+    amountPricing.byHead,
+    shouldLoadCommercial ? commercial : null,
+    shouldLoadCommercial ? commercialError : "Commercial source not loaded",
+  );
   const result: FactoryPendingResult = {
     groups: sheet?.groups ?? [],
     grandTotal: sheet?.grandTotal ?? 0,
-    byHead: amountPricing.byHead,
+    byHead: commercialAttachment.byHead,
     derived,
     coverage: enriched.coverage,
     candidateCoveragePct: enriched.coverage.candidateCoveragePct,
@@ -1210,6 +1335,7 @@ export async function buildFactoryPending(
         ? "Includes REPORT 2 quantity not present in product-group columns and groups without a usable positive rate."
         : null,
     amountReconciliation: amountPricing.amountReconciliation,
+    commercialCoverage: commercialAttachment.coverage,
   };
 
   if (
@@ -1218,6 +1344,7 @@ export async function buildFactoryPending(
     attributionAvailable &&
     !attributionLoadError &&
     (!shouldLoadPricing || pricingResult.status === "fulfilled")
+    && (!shouldLoadCommercial || commercialResult.status === "fulfilled")
   ) {
     _cache = { ts: Date.now(), result };
     logger.info(
@@ -1564,6 +1691,12 @@ export function buildFactoryPendingWorkbook(result: FactoryPendingResult): Excel
   const SUMMARY_QTY = "#,##,##0";
   const SUMMARY_INR = "₹#,##,##0.00";
   const SUMMARY_PCT = "0.0%";
+  const SIGN_CONVENTION =
+    "Order vs Sale sign: positive = ordered and not yet dispatched; negative = dispatched more than booked this period, drawing down earlier orders.";
+  const COMMERCIAL_FILL = "FFE2F0D9";
+  const PENDING_FILL = "FFD9EAF7";
+  const UNAVAILABLE_FILL = "FFE7E6E6";
+  const divider = { style: "medium" as const, color: { argb: "FF4472C4" } };
   const dash = (v: unknown): unknown => v == null || v === "" || v === "None" ? "—" : v;
   const setup = (sheet: ExcelJS.Worksheet, freeze = 1, filter = true) => {
     sheet.views = [{ state: "frozen", ySplit: freeze }];
@@ -1578,14 +1711,69 @@ export function buildFactoryPendingWorkbook(result: FactoryPendingResult): Excel
     r.eachCell((cell) => { cell.alignment = { vertical: "top", wrapText: true }; });
     return r;
   };
+  const commercialAggregate = (parties: PendingParty[]) => {
+    const matched = parties.filter(
+      (party): party is PendingParty & { commercial: PendingCommercialMatch } =>
+        party.commercial?.available === true,
+    );
+    const totalOrder = matched.reduce((sum, party) => sum + party.commercial.totalOrder, 0);
+    const sale = matched.reduce((sum, party) => sum + party.commercial.sale, 0);
+    const assignedMembers = matched.reduce(
+      (sum, party) => sum + party.commercial.assignedMembers,
+      0,
+    );
+    const difference = totalOrder - sale;
+    return {
+      matched: matched.length,
+      total: parties.length,
+      totalOrder: matched.length ? totalOrder : null,
+      sale: matched.length ? sale : null,
+      difference: matched.length ? difference : null,
+      differencePct:
+        matched.length && totalOrder !== 0 ? difference / totalOrder : null,
+      assignedMembers: matched.length ? assignedMembers : null,
+      avgOrderBooking:
+        matched.length && assignedMembers > 0
+          ? totalOrder / assignedMembers
+          : null,
+      perPersonPerMonth:
+        matched.length && assignedMembers > 0
+          ? totalOrder / assignedMembers / 12
+          : null,
+    };
+  };
+  const annotateCommercial = (
+    row: ExcelJS.Row,
+    aggregate: ReturnType<typeof commercialAggregate>,
+    startColumn: number,
+  ) => {
+    if (aggregate.matched === aggregate.total) return;
+    const reason =
+      aggregate.matched === 0
+        ? `Commercial measures unavailable: 0 of ${aggregate.total} parties matched by normParty.`
+        : `Partial commercial measures: ${aggregate.matched} of ${aggregate.total} parties matched by normParty; unmatched parties are excluded.`;
+    for (let column = startColumn; column < startColumn + 7; column++) {
+      const cell = row.getCell(column);
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: UNAVAILABLE_FILL },
+      };
+      cell.note = reason;
+    }
+  };
   const summary = workbook.addWorksheet("Summary");
   summary.columns = [
-    { width: 25 }, { width: 30 }, { width: 14 }, { width: 16 }, { width: 18 }, { width: 18 },
+    { width: 25 }, { width: 30 }, { width: 14 },
+    { width: 18 }, { width: 18 }, { width: 20 }, { width: 18 },
+    { width: 18 }, { width: 20 }, { width: 20 },
+    { width: 16 }, { width: 18 }, { width: 18 },
     { width: 16 }, { width: 28 }, { width: 28 },
   ];
-  summary.getColumn(3).numFmt = SUMMARY_QTY; summary.getColumn(4).numFmt = SUMMARY_QTY;
-  summary.getColumn(5).numFmt = SUMMARY_INR; summary.getColumn(6).numFmt = SUMMARY_QTY;
-  summary.getColumn(7).numFmt = SUMMARY_PCT;
+  [4, 5, 6, 9, 10, 12].forEach((column) => summary.getColumn(column).numFmt = SUMMARY_INR);
+  summary.getColumn(7).numFmt = "0.00%";
+  [3, 8, 11, 13].forEach((column) => summary.getColumn(column).numFmt = SUMMARY_QTY);
+  summary.getColumn(14).numFmt = SUMMARY_PCT;
   const blockRows = (head: PendingHead, company = false) => {
     const coverage = head.safeCoveragePct == null ? null : head.safeCoveragePct / 100;
     const title = company ? "Company" : head.head;
@@ -1593,30 +1781,61 @@ export function buildFactoryPendingWorkbook(result: FactoryPendingResult): Excel
     labels.font = { bold: true };
     const identity = summary.addRow([null, title, null, coverage ?? "Unavailable"]);
     if (coverage != null) identity.getCell(4).numFmt = `${SUMMARY_PCT} "mapped"`;
+    if (company) {
+      identity.getCell(5).value = SIGN_CONVENTION;
+      identity.getCell(5).font = { italic: true, color: { argb: "FF7F6000" } };
+      identity.getCell(5).alignment = { wrapText: true, vertical: "top" };
+      identity.height = 34;
+    }
     summary.addRow([]);
     const total = head.total;
-    const totalRow = addSummaryRow(summary, [null, null, null, "TOTAL", head.parties.length, total,
-      amountAvailable ? head.pricedAmount : null,
-      amountAvailable ? head.unpriceableQty : null, null], false);
+    const totalCommercial = commercialAggregate(head.parties);
+    const totalRow = addSummaryRow(summary, [null, null, null, "TOTAL", head.parties.length,
+      totalCommercial.totalOrder, totalCommercial.sale, totalCommercial.difference,
+      totalCommercial.differencePct, totalCommercial.assignedMembers,
+      totalCommercial.avgOrderBooking, totalCommercial.perPersonPerMonth,
+      total, amountAvailable ? head.pricedAmount : null,
+      amountAvailable ? head.unpriceableQty : null], false);
     totalRow.font = { bold: true };
     totalRow.getCell(5).numFmt = SUMMARY_QTY;
-    totalRow.getCell(6).numFmt = SUMMARY_QTY;
-    totalRow.getCell(7).numFmt = SUMMARY_INR;
-    totalRow.getCell(8).numFmt = SUMMARY_QTY;
-    const columns = ["State", "Member", "Parties", "Pending qty", "Priced amount", "Unpriceable qty", "Share of head", "Largest group", "Second group"];
-    const repeated = summary.addRow(columns); repeated.font = { bold: true };
+    [6, 7, 8, 11, 12, 14].forEach((column) => totalRow.getCell(column).numFmt = SUMMARY_INR);
+    totalRow.getCell(9).numFmt = "0.00%";
+    [10, 13, 15].forEach((column) => totalRow.getCell(column).numFmt = SUMMARY_QTY);
+    annotateCommercial(totalRow, totalCommercial, 6);
+    const columns = ["State", "Member", "Parties", "Total Order", "Sale",
+      "Difference (Order vs Sale)", "Difference %", "Assigned members",
+      "AVG Order Booking", "Per Person per month", "Pending qty",
+      "Priced pending", "Unpriceable qty", "Share of head",
+      "Largest group", "Second group"];
+    const repeated = summary.addRow(columns);
+    repeated.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    for (let column = 1; column <= repeated.cellCount; column++) {
+      const cell = repeated.getCell(column);
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: column >= 4 && column <= 10 ? "FF548235" : column >= 11 && column <= 13 ? "FF1F4E78" : "FF595959" },
+      };
+    }
+    repeated.getCell(10).border = { right: divider };
     if (company) {
       for (const child of result.byHead) {
+        const commercial = commercialAggregate(child.parties);
         const childGroups = Object.entries(child.parties.reduce<Record<string, number>>((m, p) => {
           for (const [g, q] of Object.entries(p.byGroup)) m[g] = (m[g] ?? 0) + q;
           return m;
         }, {})).sort((a, b) => b[1] - a[1]);
-        addSummaryRow(summary, [child.head, null, child.parties.length, child.total,
-          amountAvailable ? child.pricedAmount : null,
+        const row = addSummaryRow(summary, [child.head, null, child.parties.length,
+          commercial.totalOrder, commercial.sale, commercial.difference,
+          commercial.differencePct, commercial.assignedMembers,
+          commercial.avgOrderBooking, commercial.perPersonPerMonth,
+          child.total, amountAvailable ? child.pricedAmount : null,
           amountAvailable ? child.unpriceableQty : null,
           total > 0 ? child.total / total : null,
           childGroups[0] ? `${childGroups[0][0]} (${childGroups[0][1].toLocaleString("en-IN")})` : null,
           childGroups[1] ? `${childGroups[1][0]} (${childGroups[1][1].toLocaleString("en-IN")})` : null], false);
+        annotateCommercial(row, commercial, 4);
+        row.getCell(10).border = { right: divider };
       }
       summary.addRow([]);
       return;
@@ -1626,19 +1845,24 @@ export function buildFactoryPendingWorkbook(result: FactoryPendingResult): Excel
       bucket.bucket === "Attribution Conflicts" ? 2 : bucket.specialBucket ? 1 : 0;
     const ordered = buckets.slice().sort((a, b) => rank(a) - rank(b));
     for (const bucket of ordered) {
+      const commercial = commercialAggregate(bucket.parties);
       const group = (bucket.parties.length ? Object.entries(bucket.parties.reduce<Record<string, number>>((m, p) => {
         for (const [g, q] of Object.entries(p.byGroup)) m[g] = (m[g] ?? 0) + q; return m;
       }, {})).sort((a, b) => b[1] - a[1]) : []);
       const partyCount = bucket.parties.length;
       const bucketLabel = bucket.bucket === "Attribution Conflicts" || bucket.bucket === "Disputed attribution"
         ? "- Disputed attribution -" : bucket.specialBucket ? "- Not assigned -" : (bucket.member ?? bucket.bucket);
-      addSummaryRow(summary, [title, bucketLabel, partyCount,
-        bucket.total,
-        amountAvailable ? bucket.pricedAmount : null,
+      const row = addSummaryRow(summary, [title, bucketLabel, partyCount,
+        commercial.totalOrder, commercial.sale, commercial.difference,
+        commercial.differencePct, commercial.assignedMembers,
+        commercial.avgOrderBooking, commercial.perPersonPerMonth,
+        bucket.total, amountAvailable ? bucket.pricedAmount : null,
         amountAvailable ? bucket.unpriceableQty : null,
         total > 0 ? bucket.total / total : null,
         group[0] ? `${group[0][0]} (${group[0][1].toLocaleString("en-IN")})` : null,
         group[1] ? `${group[1][0]} (${group[1][1].toLocaleString("en-IN")})` : null], false);
+      annotateCommercial(row, commercial, 4);
+      row.getCell(10).border = { right: divider };
     }
     summary.addRow([]);
   };
@@ -1654,20 +1878,54 @@ export function buildFactoryPendingWorkbook(result: FactoryPendingResult): Excel
   summary.views = [{ state: "frozen", ySplit: 5 }];
 
   const detail = workbook.addWorksheet("Detail");
-  detail.columns = [{ header: "State head", width: 25 }, { header: "Member or bucket", width: 30 }, { header: "Party", width: 35 },
-    { header: "Pending qty", width: 16 }, { header: "Priced amount", width: 18 }, { header: "Unpriceable", width: 16 },
-    ...result.groups.map((g) => ({ header: g, width: 16 }))];
+  detail.columns = [{ width: 25 }, { width: 30 }, { width: 35 },
+    { width: 18 }, { width: 18 }, { width: 20 }, { width: 18 }, { width: 18 },
+    { width: 20 }, { width: 20 }, { width: 16 }, { width: 18 }, { width: 18 },
+    ...result.groups.map(() => ({ width: 16 }))];
+  const detailNote = detail.addRow([SIGN_CONVENTION]);
+  detail.mergeCells(1, 1, 1, detail.columnCount);
+  detailNote.font = { italic: true, color: { argb: "FF7F6000" } };
+  const detailHeader = detail.addRow(["State head", "Member or bucket", "Party",
+    "Total Order", "Sale", "Difference (Order vs Sale)", "Difference %",
+    "Assigned members", "AVG Order Booking", "Per Person per month",
+    "Pending qty", "Priced pending", "Unpriceable qty", ...result.groups]);
+  detailHeader.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  for (let column = 1; column <= detail.columnCount; column++) {
+    detailHeader.getCell(column).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: column >= 4 && column <= 10 ? "FF548235" : column >= 11 ? "FF1F4E78" : "FF595959" },
+    };
+  }
+  detailHeader.getCell(10).border = { right: divider };
   for (const head of result.byHead) for (const bucket of head.buckets) for (const p of bucket.parties) {
     const bucketLabel = bucket.bucket === "Attribution Conflicts" || bucket.bucket === "Disputed attribution"
       ? "- Disputed attribution -" : bucket.specialBucket ? "- Not assigned -" : (bucket.member ?? bucket.bucket);
-    addSummaryRow(detail, [head.head, bucketLabel, p.party,
-      p.total,
+    const commercial = p.commercial?.available === true ? p.commercial : null;
+    const row = addSummaryRow(detail, [head.head, bucketLabel, p.party,
+      commercial?.totalOrder ?? null, commercial?.sale ?? null,
+      commercial?.difference ?? null, commercial?.differencePct ?? null,
+      commercial?.assignedMembers ?? null, commercial?.avgOrderBooking ?? null,
+      commercial?.perPersonPerMonth ?? null, p.total,
       amountAvailable && p.pricedAmount != null ? Math.round(p.pricedAmount * 100) / 100 : null,
       amountAvailable ? p.unpriceableQty : null,
       ...result.groups.map((g) => Object.prototype.hasOwnProperty.call(p.byGroup, g) ? p.byGroup[g] : null)], false);
+    row.getCell(10).border = { right: divider };
+    if (!commercial) {
+      const reason = p.commercial?.unavailableReason ?? "Commercial source unavailable";
+      for (let column = 4; column <= 10; column++) {
+        const cell = row.getCell(column);
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: UNAVAILABLE_FILL } };
+        cell.note = reason;
+      }
+    }
   }
-  setup(detail); detail.getColumn(4).numFmt = QTY; detail.getColumn(5).numFmt = INR; detail.getColumn(6).numFmt = QTY;
-  for (let i = 7; i <= detail.columnCount; i++) detail.getColumn(i).numFmt = QTY;
+  detail.views = [{ state: "frozen", ySplit: 2 }];
+  detail.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: detail.columnCount } };
+  [4, 5, 6, 9, 10, 12].forEach((column) => detail.getColumn(column).numFmt = INR);
+  detail.getColumn(7).numFmt = "0.00%";
+  [8, 11, 13].forEach((column) => detail.getColumn(column).numFmt = QTY);
+  for (let i = 14; i <= detail.columnCount; i++) detail.getColumn(i).numFmt = QTY;
 
   addGroupRatesSheet(workbook, result);
 
@@ -1717,7 +1975,13 @@ export function buildFactoryPendingWorkbook(result: FactoryPendingResult): Excel
 
   const info = workbook.addWorksheet("Info");
   info.columns = [{ header: "Field", width: 38 }, { header: "Value", width: 120 }, { header: "Source / basis", width: 80 }];
-  [["Price basis", PRICE_BASIS, "sale_line_current"],
+  [["Commercial Order vs Sale", "Total Order and Sale are FY2025-26 rupee measures. Difference = Total Order − Sale; Difference % = Difference ÷ Total Order.", PENDING_COMMERCIAL_SOURCE],
+    ["Commercial sign convention", "Positive = ordered and not yet dispatched. Negative = dispatched more than booked this period, drawing down earlier orders; it is not a shortfall.", PENDING_COMMERCIAL_SOURCE],
+    ["Commercial party match", `${result.commercialCoverage?.matchedParties ?? 0} of ${result.commercialCoverage?.totalParties ?? result.byHead.flatMap((head) => head.parties).length} REPORT 2 parties matched; ${result.commercialCoverage?.unmatchedParties ?? "unavailable"} unmatched; ${result.commercialCoverage?.ambiguousParties ?? "unavailable"} ambiguous.`, "Exact normParty match; no fuzzy fallback"],
+    ["Commercial Summary totals", "Commercial totals sum matched party rows only. Grey cells have an Excel note stating incomplete match coverage; unmatched parties remain blank, never zero.", PENDING_COMMERCIAL_SOURCE],
+    ["Assigned members", "Count comes from the dashboard distributor row and supports AVG Order Booking and Per Person per month. It is not the current pending-hierarchy attribution count.", PENDING_COMMERCIAL_SOURCE],
+    ["Commercial versus REPORT 2", "Order/Sale/Difference are rupees from the dashboard. Pending qty is pieces from REPORT 2. They are independently sourced and have no common order key.", `${PENDING_COMMERCIAL_SOURCE}; REPORT 2`],
+    ["Price basis", PRICE_BASIS, "sale_line_current"],
     ["Amount is", "Pending quantity × average realised price per product group, FY2026-27; estimated worth of outstanding orders.", "REPORT 2 × sale_line_current"],
     ["Amount is NOT", "Not total pending stock, not financial order-book pending, not an amount to invoice, not the same orders as OB-minus-Sale, and not a reconciliation to derived pending.", "Basis limitation"],
     ["Population scope", "REPORT 2 carries product groups, not item codes; there is no common order key to match REPORT 2 rows to OB-minus-Sale.", "REPORT 2"],
