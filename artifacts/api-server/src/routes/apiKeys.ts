@@ -6,7 +6,9 @@ import { generateRawKey, hashKey, keyPrefix, type ApiKeyScope } from "../lib/api
 import { requireAdmin } from "../lib/auth";
 
 const router = Router();
-router.use(requireAdmin);
+// This router is mounted at the API root. Scope the admin gate to its own
+// route family so it cannot intercept unrelated routes registered after it.
+router.use("/keys", requireAdmin);
 
 // List all keys (hashes never returned)
 router.get("/keys", async (req, res) => {

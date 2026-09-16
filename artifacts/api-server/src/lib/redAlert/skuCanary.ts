@@ -21,6 +21,7 @@
 //   its environment explicitly.
 
 import { fyMonthLabels, fyStartYear } from "../fyAnchors.js";
+import { isMonthFrozen } from "../registers/monthlyReplace.js";
 
 // ── Pool types ────────────────────────────────────────────────────────────────
 
@@ -166,21 +167,16 @@ export type CanaryRunResult = {
   anyFail: boolean;
 };
 
-// ── Calendar helpers ──────────────────────────────────────────────────────────
+// ── Month-window helpers ──────────────────────────────────────────────────────
 
 /**
- * Month labels of `fy` whose calendar month has fully elapsed before `now`.
- * Derived from the calendar only — NOT from register_month_state — so this
- * applies to secondary data completeness regardless of primary freeze state.
+ * Month labels of `fy` whose shared four-month refresh window has closed.
+ * The canary must not compare a partial open month with a full prior-year month.
+ * This uses the common month clock rather than persisted register state because
+ * secondary SKU data can close independently of a particular primary load.
  */
 export function completedMonthLabels(fy: string, now: Date): string[] {
-  const startYear = parseInt(fy.slice(0, 4), 10);
-  return fyMonthLabels(fy).filter((_, i) => {
-    const monthIdx = (3 + i) % 12;           // Apr=3 … Mar=2
-    const year = startYear + (monthIdx < 3 ? 1 : 0);
-    const monthEnd = Date.UTC(year, monthIdx + 1, 1); // first instant of next month
-    return monthEnd <= now.getTime();
-  });
+  return fyMonthLabels(fy).filter((label) => isMonthFrozen(label, now));
 }
 
 /** "Apr-26" → "Apr-25": same month name one FY earlier. */

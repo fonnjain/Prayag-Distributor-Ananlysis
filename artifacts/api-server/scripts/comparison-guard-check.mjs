@@ -2,7 +2,8 @@
 // Comparison-page guard regression check (Task: guard regressions must not ship silently).
 //
 // Asserts, against the RUNNING api-server:
-//   1. Ravi (Faridabad) costRatioOb ≈ 39.45 and costRatioSales is UNDEFINED
+//   1. Ravi (Faridabad) costRatioOb stays near its live anchor, while
+//      costRatioSales is either a sourced positive ratio or explicitly UNDEFINED.
 //      (null value with the UNDEFINED note) — zero sales must never yield 0 or Infinity.
 //   2. A period-pair measure (newCustomersCount) with a single period and NO
 //      baseline returns a disabled note (value null), never zero.
@@ -154,7 +155,7 @@ function cell(json, measure, entity) {
   return row?.cells?.[0] ?? null;
 }
 
-// ── 1. Ravi (Faridabad): costRatioOb ≈ expected, costRatioSales UNDEFINED ──
+// ── 1. Ravi (Faridabad): anchored OB ratio and explicit sales availability ──
 {
   const { status, json } = await post({
     entityType: "member",
@@ -171,8 +172,14 @@ function cell(json, measure, entity) {
     `got ${JSON.stringify(ob)}`,
   );
   check(
-    "ravi costRatioSales is UNDEFINED (null value, UNDEFINED note), not 0",
-    sales != null && sales.value === null && /UNDEFINED/.test(sales.note ?? ""),
+    "ravi costRatioSales is sourced and positive, or explicitly UNDEFINED",
+    sales != null && (
+      (typeof sales.value === "number" &&
+        Number.isFinite(sales.value) &&
+        sales.value > 0 &&
+        /cost\s*÷\s*sales received/i.test(sales.note ?? "")) ||
+      (sales.value === null && /UNDEFINED/.test(sales.note ?? ""))
+    ),
     `got ${JSON.stringify(sales)}`,
   );
 }

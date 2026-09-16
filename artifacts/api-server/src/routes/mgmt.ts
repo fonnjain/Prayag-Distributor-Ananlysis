@@ -2173,6 +2173,20 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
       }
       months = tokens;
     }
+    // Validate scope and tab before applying data-availability holds. Invalid
+    // requests must remain 400s even while a requested period is held.
+    const head = String(req.query.head ?? "").trim();
+    const statesRaw = String(req.query.states ?? "").trim();
+    const geoStates = statesRaw ? statesRaw.split(",").map((s) => s.trim()).filter(Boolean) : null;
+    if (!dist && !head) {
+      res.status(400).json({ error: "dist (distributor normKey) or head (state head name) is required" });
+      return;
+    }
+    const VALID_TABS = new Set(["secondary", "sku", "push"]);
+    if (!VALID_TABS.has(tab)) {
+      res.status(400).json({ error: "tab must be secondary | sku | push" });
+      return;
+    }
     if (tab === "secondary" || tab === "sku") {
       const secondaryExclusions = (await getOpenResolutionHolds()).flatMap((hold) =>
         resolveHoldExclusionsFromRows({
@@ -2192,24 +2206,12 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
     // Head-scoped aggregation: when no single distributor is picked, a state
     // head (optionally narrowed by geography states) can scope the Secondary
     // and SKU tabs across every distributor served by that head's team.
-    const head = String(req.query.head ?? "").trim();
-    const statesRaw = String(req.query.states ?? "").trim();
-    const geoStates = statesRaw ? statesRaw.split(",").map((s) => s.trim()).filter(Boolean) : null;
-    if (!dist && !head) {
-      res.status(400).json({ error: "dist (distributor normKey) or head (state head name) is required" });
-      return;
-    }
     // Validate tab early — before any registry or Sheets loads — so a bad
     // tab value returns 400 immediately without waiting on a cold-cache
     // registry load (which can take >30 s and cause the guard to see
     // status=-1 rather than a clean 400).
     // The head-scope path further restricts push to dist-only below, but
     // this catches obviously wrong values before any async work starts.
-    const VALID_TABS = new Set(["secondary", "sku", "push"]);
-    if (!VALID_TABS.has(tab)) {
-      res.status(400).json({ error: "tab must be secondary | sku | push" });
-      return;
-    }
     const tabs = await import("../lib/mgmt/distributorTabs.js");
     if (!dist) {
       if (tab === "push") {

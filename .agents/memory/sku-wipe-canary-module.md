@@ -11,7 +11,7 @@ July-26 secondary data was never loaded into `secondary_sku_line`. `register_mon
 
 ## What it exports
 - `WIPE_CANARY_STATS_SQL` — per-(fy, month_label) row+distributor counts from `public.secondary_sku_line`
-- `completedMonthLabels(fy, now)` — calendar-derived (NOT from register_month_state)
+- `completedMonthLabels(fy, now)` — derived from the shared four-month refresh-window clock, not persisted register state
 - `priorLikeMonth(label)` — "Apr-26" → "Apr-25"
 - `priorFyOf` — re-export of `priorFy` from fyAnchors.ts
 - `evalPerMonthRule` / `evalTotalRule` — pure rule evaluators (R1/R3, R2)
@@ -26,8 +26,10 @@ July-26 secondary data was never loaded into `secondary_sku_line`. `register_mon
 
 ## Key design decisions
 - **`CanaryPool` is non-generic** (`query(sql, params?) => Promise<{ rows: Record<string, unknown>[] }>`). Generic return type prevents test mocks from satisfying the interface without `as any`. Callers in skuCanary.ts cast rows with `as unknown as ConcreteType[]`.
-- **`completedMonthLabels` is calendar-only**, never derived from register_month_state. The two tables are independent loading pipelines.
+- **`completedMonthLabels` uses the shared four-month closure boundary**, never persisted `register_month_state`. A partial open month must not be ratio-compared with a full prior-year month.
 - **Frozen-but-empty check always runs** in Group 12 regardless of whether any months are completed. The ratio rules (R1-R3) skip gracefully when completedLabels is empty.
 - **Non-blocking in the scheduler** — the frozen-but-empty check in `runAlertDetection` is wrapped in try/catch; errors log as WARN and do not abort detection.
 
 **Why:** Canary logic previously lived only in the CI test file. Schedulers run only in production; detection was running on data the canary never checked. Dev had July-26 secondary rows; production had zero. A green CI canary implied coverage it didn't have.
+
+**How to apply:** Keep prior-year ratio denominators live, but evaluate R1–R3 only after the month’s four-month refresh window closes (for example, Aug-26 at 1 Dec 2026 00:00 IST).

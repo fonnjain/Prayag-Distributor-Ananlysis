@@ -348,10 +348,10 @@ describe("open-FY wipe canary — ratio floors vs live prior-FY like-months", ()
     }
   });
 
-  it("negative simulation: an Apr wipe fails Rule 1 + Rule 3 for Apr but passes Rule 2", () => {
+  it("negative simulation: an Apr wipe fails the per-month Rule 1 + Rule 3 checks", () => {
     // Filtered row set, nothing deleted: zero out the first completed month in
-    // a COPY of the live stats and re-evaluate. This asymmetry — Rule 2 blind,
-    // Rules 1/3 loud — is the whole justification for the per-month rules.
+    // a COPY of the live stats and re-evaluate. Rules 1/3 must fail regardless
+    // of whether Rule 2 also fails at this point in the fiscal year.
     if (COMPLETED_LABELS.length === 0) {
       console.warn(`[wipe canary] simulation NOT APPLICABLE: no completed month yet in open FY ${OPEN_FY}`);
       return;
@@ -380,7 +380,6 @@ describe("open-FY wipe canary — ratio floors vs live prior-FY like-months", ()
       `Rule 2 actual=${r2.actual} floor=${r2.floor} pass=${r2.pass}`,
     );
     expect(r2.skipped).toBe(false);
-    expect(r2.pass, "Rule 2 alone must NOT catch a single-month wipe (that is why Rules 1/3 exist)").toBe(true);
   });
 
   it("missing prior baseline is flagged skipped by the evaluators (callers fail on it)", () => {
@@ -392,18 +391,16 @@ describe("open-FY wipe canary — ratio floors vs live prior-FY like-months", ()
     expect(evalTotalRule(12345, 0, RULE2_TOTAL_RATIO).skipped).toBe(true);
   });
 
-  it("completedMonthLabels: April boundary and FY rollover (pure)", () => {
-    // April of a new FY: no completed month yet — canary not applicable.
+  it("completedMonthLabels: four-month boundary and FY rollover (pure)", () => {
     expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 3, 1)))).toEqual([]);
     expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 3, 30)))).toEqual([]);
-    // May 1: April has just completed.
-    expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 4, 1)))).toEqual(["Apr-26"]);
-    // Calendar-year rollover inside the FY: Jan/Feb/Mar carry the NEXT year suffix.
+    expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 4, 1)))).toEqual([]);
+    expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 7, 1)))).toEqual(["Apr-26"]);
     expect(completedMonthLabels("2026-27", new Date(Date.UTC(2027, 1, 1)))).toEqual([
-      "Apr-26", "May-26", "Jun-26", "Jul-26", "Aug-26", "Sep-26",
-      "Oct-26", "Nov-26", "Dec-26", "Jan-27",
+      "Apr-26", "May-26", "Jun-26", "Jul-26", "Aug-26", "Sep-26", "Oct-26",
     ]);
-    // Prior like-month mapping crosses the rollover correctly.
+    expect(completedMonthLabels("2026-27", new Date("2026-11-30T18:29:59.999Z"))).not.toContain("Aug-26");
+    expect(completedMonthLabels("2026-27", new Date("2026-11-30T18:30:00.000Z"))).toContain("Aug-26");
     expect(priorLikeMonth("Jan-27")).toBe("Jan-26");
     expect(priorLikeMonth("Apr-26")).toBe("Apr-25");
     expect(priorFyOf("2026-27")).toBe("2025-26");

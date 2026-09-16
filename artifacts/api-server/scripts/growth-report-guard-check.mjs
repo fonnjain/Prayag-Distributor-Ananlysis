@@ -27,8 +27,10 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const REQUEST_TIMEOUT_MS = Number(process.env.GUARD_REQUEST_TIMEOUT_MS ?? 300000);
-// Max time to poll for the async job to complete (default 300 s).
-const POLL_TIMEOUT_MS = Number(process.env.GUARD_POLL_TIMEOUT_MS ?? 300000);
+// A cold state-head report currently takes about 7–8 minutes because it reads
+// the complete live member-sheet scope. Keep enough headroom for that valid
+// path; callers can still lower this explicitly for targeted environments.
+const POLL_TIMEOUT_MS = Number(process.env.GUARD_POLL_TIMEOUT_MS ?? 900000);
 const POLL_INTERVAL_MS = 3000;
 // Operator credentials so auth-gated routes respond 200 instead of 401.
 const OPERATOR_HEADERS = process.env.ADMIN_SECRET

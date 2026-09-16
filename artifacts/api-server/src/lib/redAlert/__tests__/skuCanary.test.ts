@@ -69,38 +69,47 @@ function makeFBEPool(frozenInPrimary: string[], presentInSecondary: string[]): C
   };
 }
 
-// Fixed clock: August 17 2026 (April–July are completed months)
-const NOW_AUG_17_2026 = new Date(Date.UTC(2026, 7, 17));
+// Fixed clock: November 17 2026 (April–July four-month windows are closed)
+const NOW_NOV_17_2026 = new Date(Date.UTC(2026, 10, 17));
 const OPEN_FY_2627 = "2026-27";
 const PRIOR_FY_2526 = "2025-26";
 
 // ── Pure helper tests ─────────────────────────────────────────────────────────
 
 describe("completedMonthLabels", () => {
-  it("returns [] for Apr 1 — month has not elapsed yet", () => {
+  it("returns [] for Apr 1 — no four-month window has closed", () => {
     expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 3, 1)))).toEqual([]);
   });
-  it("returns [] for Apr 30 — month still in progress", () => {
+  it("returns [] for Apr 30 — April remains in its refresh window", () => {
     expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 3, 30)))).toEqual([]);
   });
-  it("returns [Apr-26] on May 1 — first instant Apr has elapsed", () => {
-    expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 4, 1)))).toEqual(["Apr-26"]);
+  it("still returns [] on May 1 because April remains open through July", () => {
+    expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 4, 1)))).toEqual([]);
   });
-  it("returns Apr–Jul on Aug 1", () => {
-    expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 7, 1)))).toEqual([
-      "Apr-26", "May-26", "Jun-26", "Jul-26",
-    ]);
+  it("returns April on Aug 1 after its four-month window closes", () => {
+    expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 7, 1)))).toEqual(["Apr-26"]);
   });
   it("handles the calendar-year rollover inside an FY", () => {
     const labels = completedMonthLabels("2026-27", new Date(Date.UTC(2027, 1, 1)));
-    expect(labels).toContain("Jan-27");
-    expect(labels).not.toContain("Feb-27");
+    expect(labels).toContain("Oct-26");
+    expect(labels).not.toContain("Nov-26");
+    expect(labels).not.toContain("Jan-27");
     expect(labels[0]).toBe("Apr-26");
   });
-  it("returns all 12 labels on Apr 1 of the next calendar year (FY fully elapsed)", () => {
-    const labels = completedMonthLabels("2026-27", new Date(Date.UTC(2027, 3, 1)));
+  it("returns all 12 labels once March's four-month window closes", () => {
+    const labels = completedMonthLabels("2026-27", new Date(Date.UTC(2027, 6, 1)));
     expect(labels).toHaveLength(12);
     expect(labels[11]).toBe("Mar-27");
+  });
+  it("keeps Aug-26 open until 1 Dec 2026 IST", () => {
+    expect(completedMonthLabels(
+      "2026-27",
+      new Date("2026-11-30T18:29:59.999Z"),
+    )).not.toContain("Aug-26");
+    expect(completedMonthLabels(
+      "2026-27",
+      new Date("2026-11-30T18:30:00.000Z"),
+    )).toContain("Aug-26");
   });
 });
 
@@ -315,8 +324,8 @@ describe("skuCanary — Rule 4 (FMV): frozen month with zero secondary rows", ()
 // ── Ratio rule tests with mock data (R1/R2/R3) ───────────────────────────────
 
 describe("skuCanary — ratio rules with mock data", () => {
-  // August 17 2026: Apr–Jul completed in open FY 2026-27
-  const NOW = NOW_AUG_17_2026;
+  // November 17 2026: Apr–Jul four-month windows are closed in open FY 2026-27
+  const NOW = NOW_NOV_17_2026;
 
   it("R1/R2/R3 all pass when every completed month meets its floor", async () => {
     // Prior FY: 10000 rows / 50 dists each month
@@ -384,10 +393,10 @@ describe("skuCanary — ratio rules with mock data", () => {
       ],
     });
 
-    // Only April completed in this clock state
+    // Only April's four-month window has closed in this clock state.
     const result = await runSkuWipeCanary(pool, {
       environment: "dev",
-      now: new Date(Date.UTC(2026, 4, 15)), // May 15 — only Apr completed
+      now: new Date(Date.UTC(2026, 7, 1)), // Aug 1 — only Apr closed
     });
 
     expect(result.rule1Results.find((r) => r.monthLabel === "Apr-26" && !r.pass)).toBeDefined();

@@ -316,10 +316,20 @@ if (distKey) {
       delta < 1,
       `netAmount=${filt.netAmount} monthlySum=${monthlySum.toFixed(2)} delta=${delta.toFixed(2)}`);
 
-    // 7. Filtered ≤ unfiltered.
-    check("filtered netAmount does not exceed unfiltered FY total",
-      (filt.netAmount ?? 0) <= (unf.netAmount ?? 0) + 1,
-      `filtered=${filt.netAmount} unfiltered=${unf.netAmount}`);
+    // 7. Filtered ≤ unfiltered when the whole-FY basis is available. An active
+    // period HOLD deliberately withholds that total; verify the exclusion
+    // instead of coercing the unavailable value to zero.
+    if (unf.availability === "unavailable") {
+      check(
+        "unfiltered FY total is explicitly unavailable under an active HOLD",
+        unf.value === null && Array.isArray(unf.exclusions) && unf.exclusions.length > 0,
+        `body=${JSON.stringify(unf).slice(0, 400)}`,
+      );
+    } else {
+      check("filtered netAmount does not exceed unfiltered FY total",
+        (filt.netAmount ?? 0) <= (unf.netAmount ?? 0) + 1,
+        `filtered=${filt.netAmount} unfiltered=${unf.netAmount}`);
+    }
 
     // 7b. Geography filter (states=) is deliberately ignored for single-dist
     // calls — it only narrows the distributor list in the head-scope path.
