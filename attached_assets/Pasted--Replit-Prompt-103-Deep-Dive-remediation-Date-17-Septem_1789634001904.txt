@@ -1,0 +1,237 @@
+# Replit Prompt 103 — Deep Dive remediation
+
+**Date:** 17 September 2026
+**Follows:** the Prompt 102 audit, accepted in full.
+**Scope:** Six sections in priority order. A is an environment fix and blocks
+other work. Each section is its own diff and publish.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Section A — the development registry is empty. Fix first.
+
+```
+Code or data change. This blocks Batch 4 and would make a correct change
+look catastrophic.
+
+Development canonical_item_category_registry: 9,758 rows, ZERO
+master_category values.
+Production: 20,116 rows across six masters.
+
+A six-master cutover tested in development would send the entire
+Rs 138.73 Cr to Unmapped. That is an environment defect, not a code one -
+but nobody testing it would know that.
+
+A1. Why does development have 9,758 rows with no master_category while
+    production has 20,116 with six? Print the migration history for the
+    registry in each environment.
+
+    This is the FIFTH false finding this month traced to environment
+    divergence - the category bridge, the mirror gap, freshness, the
+    August freeze, and now this.
+
+A2. Populate development's master_category from the same source production
+    used - the Prompt 68 registry JSON plus the master/sub taxonomy.
+
+A3. Verify: development must return the same six masters and the same
+    Unmapped share as production for the same FY.
+
+A4. ADD AN ENVIRONMENT PARITY CHECK to the audit suite. Any table whose
+    row count or key-column population differs materially between
+    environments should report, not pass silently.
+
+    Five false findings in one month is a pattern, not a run of bad luck.
+```
+
+---
+
+## Section B — Sales Deep Dive: the projection
+
+Both defects confirmed. Prompt 90 specified the fix and was never sent.
+
+```
+Code change.
+
+B1. THE FLAT PROJECTION. RunRatePanel computes
+    (party/secondary OB + direct-dealer OB) / elapsed months x 12 and
+    labels it "Projected Year-End".
+
+    On a business doing 34.56% of its year in Q4, flat pacing understates
+    by 18.62%. Momentum already leads with a seasonal projection; this does
+    not.
+
+    Make the seasonal projection PRIMARY, using the same approved
+    FY2025-26 calibration Momentum uses. Print the seasonal share applied.
+
+    Demote the flat figure to a labelled comparator and RENAME IT.
+    "Projected Year-End" on a flat run-rate is the problem;
+    "Current monthly pace x12" describes what it is.
+
+B2. THE BASIS MISMATCH. The numerator includes direct-dealer order
+    booking; the comparator text calls the plan the annual SECONDARY
+    Business Plan.
+
+    Either compare like with like, or relabel the plan. Print what the
+    plan field actually contains.
+
+    This is wrong before seasonality is considered and should be fixed
+    even if B1 were deferred.
+```
+
+---
+
+## Section C — Sales Deep Dive: coverage arithmetic
+
+```
+Code change.
+
+Total Old Retailers and Non-Visited come from member and order-sheet
+populations. Visited comes from HR/SFA visit evidence. They are displayed
+together with no reconciliation rule, so 59 / 46 / 18 remains structurally
+possible.
+
+C1. Either reconcile them to one population, or LABEL EACH WITH ITS
+    SOURCE on the card and state plainly that they are not additive.
+
+    My preference: label. Forcing three different populations into one
+    number would hide a real measurement difference.
+
+C2. If they are not additive, "Non-visited" is a misleading name - it
+    implies total minus visited. Rename to reflect its actual source.
+
+C3. Confirm no other card on this page sums across populations that do not
+    reconcile.
+```
+
+---
+
+## Section D — Distributor Deep Dive export
+
+```
+Code change. It is the only deep dive without one.
+
+Follow the shape agreed for the Sales Deep Dive workbook and the Pending
+Orders redesign - summary first, flat detail, no technical scaffolding in
+data sheets.
+
+  Sheet 1  Summary        per distributor: retailers, active, order
+                          booking, sale, primary dispatch, pending, fill
+  Sheet 2  Detail         one row per distributor, filterable, with the
+                          six-master product mix as columns
+  Sheet 3  Retailers      retailer detail for the selected scope
+  Sheet 4  Mapping        shared distributors, direct dealers, no
+                          distributor assigned, duplicate names, mapping
+                          quality
+  Sheet 5  Working detail source and basis columns, kept out of the data
+                          sheets
+  Sheet 6  Info           FY, period, filters, sources, provisional
+                          months, holds
+
+RULES, as everywhere else: Indian formats, three states, booking never
+labelled sales, every figure sourced.
+
+Note from the audit: the current directory loads 191 distributors, 155
+members, 23 states, 12 heads - all from STALE SNAPSHOTS. The 269-row
+distributor_identity table is a broader master universe.
+
+STATE BOTH on the Info sheet, and say why the page shows 191 of 269.
+```
+
+---
+
+## Section E — the small defects
+
+```
+Four, all quick.
+
+E1. SKU OVERVIEW RENDERS A SMALL POSITIVE VALUE AS "Rs 0 Cr".
+
+    A Cr-only formatter showing zero for something non-zero is the
+    empty-versus-unknown failure in a new form. Use the Indian format rule
+    already applied elsewhere - Cr above 1 crore, L above 1 lakh, grouped
+    below.
+
+E2. SALES DEEP DIVE UI SAYS "ten auditable sheets"; the workbook has
+    eleven - Overview, Performance, Targets, Coverage and Visits, Cost,
+    Segment Spread, Reconciliation, Dormant Retailers, Profile, Working
+    detail, Info.
+
+E3. PROVISIONAL BANNERS ARE INCONSISTENT.
+      Sales Deep Dive       no banner
+      Distributor Deep Dive no banner
+      SKU Deep Dive         banner, but does not say August is partial
+                            through 19 August, and does not name its source
+
+    Use one shared component on all three. Under the four-month window
+    June to September are open, and August secondary is partial.
+
+E4. UPDATE THE RESOLUTION REGISTER. P3 records 814 codes / Rs 9.36 Cr.
+    Current: 828 codes / Rs 10.87 Cr development, 870 / Rs 10.99 Cr
+    production.
+
+    Record the production figure with its date and method, and keep the
+    earlier one - as P47 does with the two unassigned-customer counts. Two
+    dated measurements, not a silent overwrite.
+```
+
+---
+
+## Section F — shared compute, before AI Sales Plan
+
+```
+Design only. Build nothing yet.
+
+The audit's conclusion, accepted:
+
+  "Existing member SKU spread, distributor D3 whitespace, and SKU breadth
+   use different sources, entities and periods. They must not be reused as
+   if they were one measure."
+
+And none of the six AI Sales Plan tabs exists today - four partial
+analogues, two absent. So it is not duplication.
+
+F1. SPECIFY FOUR SHARED COMPUTATIONS as one API surface, each returning
+    its source and basis metadata:
+
+      peer sets                 default same-distributor, 100% coverage
+      customer-SKU penetration  which retailers buy which codes
+      adjacency                 sub-category coverage per customer
+      versioned top-80 snapshot frozen, dated, not a live threshold
+
+F2. THE TOP-80 SNAPSHOT IS VERSIONED, per the Prompt 101 recommendation.
+    Current live is 566 codes / Rs 110.99 Cr; the supplied reference was
+    560 / Rs 107.54 Cr.
+
+    Freeze it with its source date and period. A SKU dropping out of the
+    top 80% between two visits with no explanation is worse than a
+    slightly stale list.
+
+F3. ADJACENCY IS CATEGORY-LEVEL ONLY for now. The 31-subcategory registry
+    has CPVC but does not split pipe from fittings, so the
+    "buys CPVC fittings, no CPVC pipe" pitch cannot be computed.
+
+    Record that as a register entry - a code-level pipe/fitting split
+    would need Prayag review.
+
+F4. Confirm the ownership division: deep dives are the factual record of
+    what happened; AI Sales Plan owns visit-level recommendations and
+    reasons.
+```
+
+---
+
+## Notes
+
+- **Section A first, without exception.** A correct Batch 4 change tested in
+  development would show every rupee as Unmapped. Somebody would revert a working
+  change.
+- **A4 is the durable fix.** Five false findings in one month from environment
+  divergence is a pattern. A parity check that reports rather than passes silently
+  would have caught all five.
+- **B2 is worth doing even alone.** A projection whose numerator includes
+  direct-dealer booking compared against a plan labelled secondary is wrong before
+  seasonality enters.
+- **C1's recommendation is to label, not reconcile.** Three populations forced into
+  one number would hide a real measurement difference. Naming the sources is
+  honest; making them add up would not be.
