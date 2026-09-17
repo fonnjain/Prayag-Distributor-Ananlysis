@@ -142,3 +142,4 @@
 - [AI visit-plan lifecycle](ai-visit-plan-lifecycle.md) — defaults stay visible; revisions are immutable; completion requires newer changed evidence and month-close rules.
 - [Pending attribution availability](pending-attribution-availability.md) — assignment and conflict evidence are one atomic basis; if either fails, preserve source quantities but withhold coverage and attributed export.
 - [Factory pending priceability](factory-pending-priceability.md) — party commercial joins are exact/fail-closed; dashboard rupees stay separate from REPORT 2 pieces; tank rates use pieces.
+- [Retrospective load provenance](retrospective-load-provenance.md) — metadata repairs must distinguish original load time from later record time and prove protected data unchanged.
