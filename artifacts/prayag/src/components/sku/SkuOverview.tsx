@@ -45,14 +45,16 @@ interface Props {
 }
 
 function fmtCr(n: number): string {
-  return `₹${trunc2((n / 1e7))} Cr`;
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  if (abs >= 1e7) return `${sign}₹${trunc2(abs / 1e7)} Cr`;
+  if (abs >= 1e5) return `${sign}₹${trunc2(abs / 1e5)} L`;
+  return `${sign}₹${Math.trunc(abs).toLocaleString("en-IN")}`;
 }
 
 function fmtGapNet(n: number): string {
   if (n === 0) return "—";
-  const cr = n / 1e7;
-  if (cr >= 1) return `₹${trunc2(cr)} Cr`;
-  return `₹${trunc2((n / 1e5))} L`;
+  return fmtCr(n);
 }
 
 export default function SkuOverview({ rows, loading, onDrill, unmapped, summary }: Props) {

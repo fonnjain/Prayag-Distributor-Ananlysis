@@ -39,6 +39,8 @@ import { formatCompact } from "@/data/dataset";
 import { DistributorTabsPanel, type DdTab } from "./DistributorTabsPanel";
 import SecondaryRegisterCoverageNotice from "@/components/SecondaryRegisterCoverageNotice";
 import type { SecondaryRegisterCoverage } from "@/lib/secondaryRegisterCoverage";
+import ProvisionalMonthsBanner from "@/components/ProvisionalMonthsBanner";
+import { useCompleteMonths } from "@/hooks/useCompleteMonths";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -2118,6 +2120,7 @@ type GeoMode = "all" | "region" | "state";
 
 export default function DistributorDeepDive() {
   const { fy, effectivePeriodLabel: periodLabel } = useGlobalFilter();
+  const { provisionalMonths, secondaryCoverage } = useCompleteMonths(fy);
   const period = usePeriodMonths();
   const [stateHead, setStateHead] = useState("");
   // ── Filter chain: Geography → Distributor → State Head ──────────────
@@ -2292,6 +2295,29 @@ export default function DistributorDeepDive() {
         ? selRegions.join(" + ")
         : selStates.join(", ");
 
+  async function downloadDistributorWorkbook(): Promise<void> {
+    if (!stateHead) return;
+    const params = new URLSearchParams({
+      fy,
+      stateHead,
+      geo: geoLabel,
+    });
+    if (distFilter) params.set("dist", distFilter);
+    if (geoStates) params.set("states", [...geoStates].join(","));
+    if (period.param) params.set("months", period.param.replace(/^&months=/, ""));
+    const response = await fetch(`${API}/mgmt/distributor-deep-dive/export?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error(`Distributor export failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `Distributor_Deep_Dive_${fy}.xlsx`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   // Directory states → picker options (canonical, one entry per geographic state).
   const stateOptions = dir?.states ?? [];
   const distStatesByKey = new Map((dir?.distributors ?? []).map((d) => [d.distKey, d.states]));
@@ -2309,6 +2335,7 @@ export default function DistributorDeepDive() {
 
   return (
     <div className="space-y-6">
+      <ProvisionalMonthsBanner months={provisionalMonths} secondaryCoverage={secondaryCoverage} />
       {/* ── Filter chain: Geography → Distributor → State Head ─────── */}
       <div className="flex flex-wrap gap-3 items-end">
         {/* 1. Geography */}
@@ -2419,6 +2446,16 @@ export default function DistributorDeepDive() {
             )}
           </span>
         )}
+        <button
+          type="button"
+          onClick={() => void downloadDistributorWorkbook().catch((err) => setFetchError(err instanceof Error ? err.message : "Export failed"))}
+          disabled={!stateHead || loading}
+          className="ml-auto rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
+          data-testid="button-download-distributor-deep-dive"
+          title={stateHead ? "Download the six-sheet workbook for the selected scope" : "Choose a state head before exporting"}
+        >
+          Download Excel
+        </button>
       </div>
 
       {/* ── Active-selection header — every figure below is the product of

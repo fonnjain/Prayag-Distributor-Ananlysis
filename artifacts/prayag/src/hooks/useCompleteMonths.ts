@@ -25,6 +25,12 @@ export type CompleteMonthsResult = {
   provisionalMonths: string[];
   /** ISO-8601 timestamp of the last successful register sync (null before first sync). */
   lastSyncedAt: string | null;
+  secondaryCoverage: {
+    openWindowMonths: string[];
+    partialMonths: Array<{ month: string; through: string }>;
+    unavailableMonths: string[];
+    sourceError?: boolean;
+  } | null;
   loading: boolean;
 };
 
@@ -33,6 +39,7 @@ export function useCompleteMonths(fy: string): CompleteMonthsResult {
   const [partialMonths, setPartialMonths] = useState<string[]>([]);
   const [provisionalMonths, setProvisionalMonths] = useState<string[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [secondaryCoverage, setSecondaryCoverage] = useState<CompleteMonthsResult["secondaryCoverage"]>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -46,6 +53,7 @@ export function useCompleteMonths(fy: string): CompleteMonthsResult {
           completeMonths?: string[];
           provisionalMonths?: string[];
           lastSyncedAt?: string | null;
+          secondaryCoverage?: CompleteMonthsResult["secondaryCoverage"];
         }) => {
           if (cancelled) return;
           const all = d.months ?? [];
@@ -55,6 +63,7 @@ export function useCompleteMonths(fy: string): CompleteMonthsResult {
           setPartialMonths(all.filter((m) => !completeSet.has(m)));
           setProvisionalMonths(d.provisionalMonths ?? []);
           setLastSyncedAt(d.lastSyncedAt ?? null);
+          setSecondaryCoverage(d.secondaryCoverage ?? null);
         },
       )
       .catch(() => {})
@@ -66,5 +75,5 @@ export function useCompleteMonths(fy: string): CompleteMonthsResult {
     };
   }, [fy]);
 
-  return { completeMonths, partialMonths, provisionalMonths, lastSyncedAt, loading };
+  return { completeMonths, partialMonths, provisionalMonths, lastSyncedAt, secondaryCoverage, loading };
 }

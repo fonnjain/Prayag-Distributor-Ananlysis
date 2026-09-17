@@ -88,6 +88,7 @@ import {
   mapOperationalCoverageKpis,
   workbookSheetEvidence,
 } from "../lib/organisationCoverageExport.js";
+import { buildDistributorDeepDiveExport } from "../lib/mgmt/distributorDeepDiveExport.js";
 
 const router: IRouter = Router();
 
@@ -1503,11 +1504,21 @@ router.get("/mgmt/deep-dive", async (req: Request, res: Response): Promise<void>
     if (result.error && !result.stateHeads.length) {
       // Phase 5 (skuSpread) is DB-only — include it even when the Sheets
       // Data tab could not be loaded.
-      res.status(502).json({ error: result.error, skuSpread: result.skuSpread ?? null });
+        res.status(502).json({
+          error: result.error,
+          skuSpread: result.skuSpread ?? null,
+          seasonalCalibration: getSeasonalCalibration("2025-26"),
+        });
       return;
     }
 
-    res.json(result);
+    // Sales Deep Dive must use the same pinned approved curve as Momentum.
+    // Resolve explicitly: a missing approved calibration is an API error, not
+    // permission to silently fall back to a flat /12 projection.
+    res.json({
+      ...result,
+      seasonalCalibration: getSeasonalCalibration("2025-26"),
+    });
   } catch (err) {
     if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "mgmt/deep-dive: handler threw");
@@ -2140,6 +2151,111 @@ router.get("/mgmt/distributor-deep-dive", async (req: Request, res: Response): P
     if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "mgmt/distributor-deep-dive: handler threw");
     res.status(500).json({ error: "Could not load distributor deep-dive data." });
+  }
+});
+
+// GET /api/mgmt/distributor-deep-dive/export
+// Six-sheet, source-labelled workbook for the same scope as the Distributor
+// Deep Dive payload.  The directory and identity counts are deliberately
+// loaded independently so Info can explain a 191-of-269 scope without a
+// hardcoded claim.
+const distributorDeepDiveExportInFlight = new Set<string>();
+const MAX_DISTRIBUTOR_DEEP_DIVE_EXPORTS = 2;
+router.get("/mgmt/distributor-deep-dive/export", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const fy = typeof req.query.fy === "string" ? req.query.fy.trim() : currentOpenFy();
+    const stateHead = typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
+    const distributorFilter = typeof req.query.dist === "string" ? req.query.dist.trim() : "";
+    const geoLabel = typeof req.query.geo === "string" ? req.query.geo.trim() : "All India";
+    const selectedStates = typeof req.query.states === "string"
+      ? req.query.states.split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+    const months = typeof req.query.months === "string" && req.query.months.trim()
+      ? req.query.months.split(",").map((m) => m.trim())
+      : [];
+    if (months.some((m) => !/^[A-Z][a-z]{2}-\d{2}$/.test(m))) {
+      res.status(400).json({ error: "months must be comma-separated labels like Apr-26" });
+      return;
+    }
+    if (!stateHead) {
+      res.status(400).json({ error: "stateHead is required for a distributor deep-dive export" });
+      return;
+    }
+    const guardKey = [fy, stateHead, distributorFilter, selectedStates.join(","), months.join(",")].join("|");
+    if (distributorDeepDiveExportInFlight.has(guardKey)) {
+      res.status(409).json({ error: "An identical distributor export is already being generated." });
+      return;
+    }
+    if (distributorDeepDiveExportInFlight.size >= MAX_DISTRIBUTOR_DEEP_DIVE_EXPORTS) {
+      res.status(429).json({ error: "Distributor export capacity is busy; retry shortly." });
+      return;
+    }
+    distributorDeepDiveExportInFlight.add(guardKey);
+    try {
+    const { loadDistributorDeepDiveResilient } = await import("../lib/mgmt/distributorDeepDive.js");
+    const [{ result, directory, registry }, provisional, holds] = await Promise.all([
+      (async () => {
+        const [result, directory, registry] = await Promise.all([
+          loadDistributorDeepDiveResilient(fy, stateHead, undefined, months.length ? months : undefined),
+          (async () => {
+            const { loadDistributorDirectory } = await import("../lib/mgmt/distributorDirectory.js");
+            return loadDistributorDirectory(fy);
+          })(),
+          (async () => {
+            const { loadDistributorRegistry } = await import("../lib/mgmt/distributorRegistry.js");
+            return loadDistributorRegistry();
+          })(),
+        ]);
+        return { result, directory, registry };
+      })(),
+      provisionalMonthsExportInfo(fy),
+      getOpenResolutionHolds(),
+    ]);
+    const allowed = new Set(directory.distributors
+      .filter((d) => (!selectedStates.length || d.states.some((s) => selectedStates.includes(s)))
+        && (!distributorFilter || d.distKey === distributorFilter))
+      .map((d) => d.distKey));
+    const scopedResult = {
+      ...result,
+      distributors: result.distributors.filter((d) => allowed.has(d.normKey)),
+      sharedRetailers: result.sharedRetailers.filter((r) => r.distributorParts.some((p) => {
+        const key = p.trim().toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+        return allowed.has(key);
+      })),
+    };
+    const { secondaryCoverageNote } = await import("../lib/mgmt/skuSpread.js");
+    const buf = await buildDistributorDeepDiveExport({
+      result: scopedResult,
+      directoryCount: allowed.size,
+      identityCount: registry.records.length,
+      directoryMemberCount: directory.distributors.filter((d) => allowed.has(d.distKey)).reduce((n, d) => n + d.members.length, 0),
+      directoryStateCount: new Set(directory.distributors.filter((d) => allowed.has(d.distKey)).flatMap((d) => d.states)).size,
+      directoryHeadCount: new Set(directory.distributors.filter((d) => allowed.has(d.distKey)).flatMap((d) => d.heads)).size,
+      stateHead,
+      geoLabel,
+      distributorFilter,
+      months,
+      periodLabel: months.length ? months.join("–") : "Full FY",
+      provisionalMonths: provisional,
+      secondaryCoverage: await secondaryCoverageNote(fy) ?? null,
+      selectedStates,
+      activeHolds: holds.map((h) => `${h.code ?? h.id}: ${h.title}`),
+      generatedAt: new Date(),
+    });
+    const safeFy = fy.replace(/[^0-9-]/g, "");
+    res.set({
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="Distributor_Deep_Dive_${safeFy}.xlsx"`,
+      "Content-Length": buf.length,
+    });
+    res.send(buf);
+    } finally {
+      distributorDeepDiveExportInFlight.delete(guardKey);
+    }
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err }, "mgmt/distributor-deep-dive/export failed");
+    res.status(500).json({ error: "Could not generate distributor deep-dive workbook." });
   }
 });
 

@@ -14,6 +14,8 @@ import { useGlobalFilter, isFyClosed } from "@/data/global-filter-context";
 import { SALES_DEEP_DIVE_EXTRA_MANIFEST } from "@workspace/api-zod";
 import SecondaryRegisterCoverageNotice from "@/components/SecondaryRegisterCoverageNotice";
 import type { SecondaryRegisterCoverage } from "@/lib/secondaryRegisterCoverage";
+import ProvisionalMonthsBanner from "@/components/ProvisionalMonthsBanner";
+import { useCompleteMonths } from "@/hooks/useCompleteMonths";
 
 const BASE = import.meta.env.BASE_URL ?? "/";
 const API = `${BASE}api`.replace(/\/\//g, "/");
@@ -67,6 +69,14 @@ interface MemberKpis {
   totalRetailers: number | null;
   directDealersCount: number | null;
   extra: Record<string, number | string | null>;
+}
+
+interface SeasonalCalibration {
+  fy: string;
+  derivedFrom: string;
+  monthly: number[];
+  version: number | null;
+  sourceFys: string[];
 }
 
 // Per-month actuals from the member's own FY tab.
@@ -296,6 +306,7 @@ interface DeepDiveData {
   /** True when the server served the last saved snapshot because Google Sheets
    *  was briefly busy — figures may be slightly out of date. */
   stale?: boolean | null;
+  seasonalCalibration?: SeasonalCalibration | null;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -1667,17 +1678,45 @@ function WinBackPanel({
 function RunRatePanel({
   kpis,
   elapsedMonths,
+  seasonalCalibration,
 }: {
   kpis: MemberKpis;
   elapsedMonths: number;
+  seasonalCalibration?: SeasonalCalibration | null;
 }) {
   if (elapsedMonths <= 0) return null;
 
-  const ytdOb = (kpis.orderBooking ?? 0) + (kpis.directDealersOrder ?? 0);
+  if (!seasonalCalibration?.monthly?.length) {
+    return (
+      <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+        Seasonal projection unavailable — the approved FY2025-26 calibration was not returned. No flat projection is shown as a substitute.
+      </div>
+    );
+  }
+
+  const ytdOb =
+    (kpis.orderBooking ?? 0) +
+    (kpis.newPartyOrderBooking ?? 0) +
+    (kpis.directDealersOrder ?? 0);
   const pace = ytdOb / elapsedMonths; // per-month pace
-  const projected = pace * 12;
-  const plan = kpis.secondaryTarget;
-  const projVsPlanPct = plan && plan > 0 ? (projected / plan) * 100 : null;
+  const seasonalShare = seasonalCalibration.monthly
+    .slice(0, Math.floor(elapsedMonths))
+    .reduce((sum, share) => sum + share, 0);
+  if (!(seasonalShare > 0)) {
+    return (
+      <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+        Seasonal projection unavailable — the approved FY2025-26 calibration has no share for the recorded months. No flat projection is shown as a substitute.
+      </div>
+    );
+  }
+  const projected = ytdOb / seasonalShare;
+  // BM totalTargetToDate is the all-channel target used by achievementTotal,
+  // whose numerator is old-party + new-party + direct-dealer order booking.
+  const annualPlan =
+    kpis.totalTargetToDate != null
+      ? kpis.totalTargetToDate / seasonalShare
+      : null;
+  const projVsPlanPct = annualPlan && annualPlan > 0 ? (projected / annualPlan) * 100 : null;
   const barWidth = projVsPlanPct != null ? Math.min(100, projVsPlanPct) : 0;
   const isOnTrack = projVsPlanPct != null && projVsPlanPct >= 100;
 
@@ -1693,13 +1732,13 @@ function RunRatePanel({
           <p className="text-base font-bold text-foreground mt-0.5">{fmtRs(ytdOb)}</p>
         </div>
         <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-center">
-          <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Projected Year-End</p>
+          <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Seasonal projected year-end</p>
           <p className="text-base font-bold text-foreground mt-0.5">{fmtRs(projected)}</p>
         </div>
         <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-center">
           <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Annual Plan</p>
           <p className="text-base font-bold text-foreground mt-0.5">
-            {plan ? fmtRs(plan) : "—"}
+            {annualPlan ? fmtRs(annualPlan) : "—"}
           </p>
         </div>
       </div>
@@ -1729,7 +1768,10 @@ function RunRatePanel({
             />
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Monthly pace {fmtRs(pace)} × 12 months · Plan = annual secondary Business Plan.
+            Seasonal share applied: {trunc2(seasonalShare * 100)}%
+            {seasonalCalibration.version != null ? ` · curve v${seasonalCalibration.version}. ` : ". "}
+            Current monthly pace x12 comparator: {fmtRs(pace * 12)}. Plan basis: annual all-channel target
+            (old-party + new-party + direct-dealer OB), not the secondary-only plan.
           </p>
         </div>
       )}
@@ -2323,6 +2365,7 @@ const AVAILABLE_FYS = ["2026-27", "2025-26", "2024-25", "2023-24"];
 
 export default function SalesDeepDive() {
   const { fy } = useGlobalFilter();
+  const { provisionalMonths, secondaryCoverage } = useCompleteMonths(fy);
   const [selectedHead, setSelectedHead] = useState("");
   const [selectedMemberKey, setSelectedMemberKey] = useState("");
   const [dateFilter, setDateFilter] = useState<DateFilter>(DATE_FILTER_INIT);
@@ -2516,6 +2559,7 @@ export default function SalesDeepDive() {
 
   return (
     <div className="space-y-6">
+      <ProvisionalMonthsBanner months={provisionalMonths} secondaryCoverage={secondaryCoverage} />
 
       {/* Selectors */}
       <div className="flex flex-wrap gap-3 items-end">
@@ -2672,7 +2716,7 @@ export default function SalesDeepDive() {
                       disabled={exporting}
                       className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium hover:bg-muted/50 disabled:cursor-wait disabled:opacity-60"
                       data-testid="button-download-sales-deep-dive"
-                      title="Exports the resolved page figures into ten auditable sheets; unavailable values remain blank and grey with a reason."
+                      title="Exports the resolved page figures into eleven auditable sheets; unavailable values remain blank and grey with a reason."
                     >
                       {exporting
                         ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
@@ -2769,9 +2813,12 @@ export default function SalesDeepDive() {
             <Tile label="Cost Ratio (cost / sale)" value={fmtPct(kpis.costRatio)} sub="(CTC + T.A.) / sale received" />
 
             <SectionLabel>Retailer Coverage (Dashboard)</SectionLabel>
-            <Tile label="Total Old Retailers" value={fmtNum(kpis.totalOldRetailers)} sub="Source: Dashboard Data tab" />
-            <Tile label="Visited" value={fmtNum(kpis.visitedRetailers)} />
-            <Tile label="Non-Visited" value={fmtNum(kpis.nonVisitedRetailers)} />
+            <Tile label="Total Old Retailers" value={fmtNum(kpis.totalOldRetailers)} sub="Source: Dashboard Data tab; not additive with visit evidence" />
+            <Tile label="Visited (SFA evidence)" value={fmtNum(kpis.visitedRetailers)} sub="Source: SFA/field-visit evidence; separate population" />
+            <Tile label="Old retailers without recorded visit (Dashboard)" value={fmtNum(kpis.nonVisitedRetailers)} sub="Source: Dashboard/order-sheet population; not Total Old minus Visited" />
+            <p className="col-span-full text-[11px] text-muted-foreground">
+              These three cards use different source populations and are intentionally not additive or reconciled.
+            </p>
             <Tile label="New Party Order Booking" value={fmtRs(kpis.newPartyOrderBooking)} />
             {kpis.businessPerRetailer != null && (
               <Tile label="Business per Retailer" value={fmtRs(kpis.businessPerRetailer)} />
@@ -2916,7 +2963,11 @@ export default function SalesDeepDive() {
           {/* Phase 6C: Run-rate projection — only for open FY with elapsed months */}
           {kpis && roiCost && roiCost.elapsedCompleteMonths > 0 && fy === "2026-27" && (
             <div className="pt-2 border-t border-border">
-              <RunRatePanel kpis={kpis} elapsedMonths={roiCost.elapsedCompleteMonths} />
+              <RunRatePanel
+                kpis={kpis}
+                elapsedMonths={roiCost.elapsedCompleteMonths}
+                seasonalCalibration={data?.seasonalCalibration}
+              />
             </div>
           )}
 

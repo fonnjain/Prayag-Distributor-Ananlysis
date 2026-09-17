@@ -78,7 +78,7 @@ type Level = "distributor" | "direct_dealer" | "retailer" | "project";
 export default function SkuPage() {
   // Filters — FY and period come from the global filter bar (PA1 capability: FULL).
   const { fy, effectivePeriodFrom, effectivePrimaryPeriodTo, effectivePeriodLabel } = useGlobalFilter();
-  const { provisionalMonths } = useCompleteMonths(fy);
+  const { provisionalMonths, secondaryCoverage } = useCompleteMonths(fy);
   const [level, setLevel] = useState<Level>("distributor");
   // State-head scope — "" = company-wide. Applies to Overview/Drill facts and Timing.
   const [scopeHead, setScopeHead] = useState<string>("");
@@ -608,7 +608,7 @@ export default function SkuPage() {
 
       {/* ── Content ─────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto p-4">
-        <ProvisionalMonthsBanner months={provisionalMonths} />
+        <ProvisionalMonthsBanner months={provisionalMonths} secondaryCoverage={secondaryCoverage} />
         {level !== "retailer" && hasEntityFilter(entityFilter) &&
           (section === "overview" || section === "drill" || section === "focus") && (
           <p className="mb-3 text-[11px] text-amber-700 dark:text-amber-400">

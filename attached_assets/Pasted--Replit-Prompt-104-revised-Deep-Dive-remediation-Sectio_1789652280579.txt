@@ -1,0 +1,236 @@
+# Replit Prompt 104 (revised) — Deep Dive remediation, Sections B to F
+
+**Date:** 17 September 2026
+**Supersedes:** the earlier Prompt 104, written before H5 was resolved.
+**Scope:** Five sections. B and C are defects. D is a missing export. E is five
+small fixes. F is design only.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## What changed since the first version
+
+**The H5 enforcement check is removed.** It is resolved — ₹59.02 Cr of April–June
+Segment Spread loaded, zero variance, audit 7.6 passing across four authoritative
+months, and the coverage banner reading Apr–Jul.
+
+**And E3 changes because of it.** The SKU Deep Dive banner no longer needs to
+describe a three-month gap. What it does need is to say August secondary is
+partial through 19 August and September is unavailable — and the other two pages
+still have no banner at all.
+
+---
+
+## Section B — the flat projection
+
+Confirmed present by the audit. Specified in Prompt 90, never applied.
+
+```
+Code change. Sales Deep Dive RunRatePanel.
+
+B1. THE PROJECTION IS FLAT PACING.
+
+    Current: (party/secondary OB + direct-dealer OB) / elapsed months x 12,
+    labelled "Projected Year-End".
+
+    On a business doing 34.56% of its year in Q4, flat pacing understates
+    by 18.62% - it treats four months as 33.33% of a year where the
+    seasonal curve gives April-July 28.1%.
+
+    Momentum already leads with a seasonal projection. This does not.
+
+    - make the SEASONAL projection primary, using the same approved
+      FY2025-26 calibration Momentum uses
+    - print the seasonal share applied
+    - demote the flat figure to a labelled comparator
+    - RENAME IT. "Projected Year-End" on a flat run-rate is the defect.
+      "Current monthly pace x12" describes what it is.
+
+B2. THE BASIS MISMATCH - fix even if B1 were deferred.
+
+    The numerator includes direct-dealer order booking. The comparator text
+    calls the plan the annual SECONDARY Business Plan.
+
+    Print what the plan field actually contains, then either compare like
+    with like or relabel the plan. This is wrong before seasonality enters.
+
+AFTER APPLYING, print the panel as rendered for one member: both figures,
+the seasonal share used, and the corrected plan label.
+```
+
+---
+
+## Section C — coverage arithmetic
+
+```
+Code change.
+
+Total Old Retailers and Non-Visited come from member and order-sheet
+populations. Visited comes from HR/SFA visit evidence. They sit together
+with no reconciliation rule, so 59 / 46 / 18 remains structurally possible.
+
+C1. LABEL, DO NOT RECONCILE. Name the source on each card and state that
+    the three are not additive.
+
+    Forcing genuinely different populations into one number would hide a
+    real measurement difference. Naming the sources is honest; making them
+    add up would not be.
+
+C2. RENAME "Non-visited". It implies total minus visited, which is not
+    what it measures. Use a name reflecting its actual source.
+
+C3. Confirm no other card on this page sums across populations that do not
+    reconcile.
+```
+
+---
+
+## Section D — Distributor Deep Dive export
+
+```
+Code change. It is the only deep dive without one.
+
+Follow the shape now settled across Sales Deep Dive and Pending Orders -
+summary first, flat detail, technical scaffolding on its own sheet.
+
+  1  Summary         per distributor: retailers, active, order booking,
+                     sale, primary dispatch, pending, fill
+  2  Detail          one row per distributor, filterable, six-master
+                     product mix as columns
+  3  Retailers       retailer detail for the selected scope
+  4  Mapping         shared distributors, direct dealers, no distributor
+                     assigned, duplicate names, mapping quality
+  5  Working detail  source and basis columns, out of the data sheets
+  6  Info            FY, period, filters, sources, provisional months,
+                     active holds
+
+STATE THE SCOPE ON THE INFO SHEET. The directory loads 191 distributors,
+155 members, 23 states, 12 heads - all from STALE SNAPSHOTS - while
+distributor_identity holds 269. Say why the page shows 191 of 269.
+
+RULES as everywhere: Indian formats, three states, booking never labelled
+sales, every figure sourced. D3's six-master headline with legacy brand
+evidence beneath is correct and carries into the export.
+```
+
+---
+
+## Section E — five small fixes
+
+```
+E1. SKU OVERVIEW RENDERS A SMALL POSITIVE VALUE AS "Rs 0 Cr".
+
+    A Cr-only formatter showing zero for a non-zero figure is the
+    empty-versus-unknown failure in a new form. Use the Indian rule
+    applied elsewhere - Cr above a crore, L above a lakh, grouped below.
+
+E2. SALES DEEP DIVE UI SAYS "ten auditable sheets"; the workbook has
+    eleven.
+
+E3. PROVISIONAL BANNERS ARE INCONSISTENT.
+      Sales Deep Dive        none
+      Distributor Deep Dive  none
+      SKU Deep Dive          present
+
+    One shared component on all three, derived from current data and never
+    hardcoded. It should state:
+      June to September are open under the four-month window
+      August secondary is partial through 19 August
+      September secondary is unavailable
+
+    April-June is NO LONGER a gap - H5 is resolved and the register
+    coverage is Apr-Jul. Make sure the component reads live coverage
+    rather than any wording left from that period.
+
+E4. UPDATE P3 IN THE REGISTER. It records 814 codes / Rs 9.36 Cr.
+    Current: 828 / Rs 10.87 Cr development, 870 / Rs 10.99 Cr production.
+
+    Record the production figure with its date and method and KEEP the
+    earlier one, as P47 does with its two unassigned-customer counts. Two
+    dated measurements, never a silent overwrite.
+
+E5. ADD A REGISTER ENTRY for Composite - an unmapped 18th source value in
+    both environments, 16 lines, Rs 2,41,571, with no registry assignment.
+    It will keep surfacing as Unmapped until somebody decides what it maps
+    to.
+
+    owner Prayag - priority low
+```
+
+---
+
+## Section F — shared compute, design only
+
+```
+Build nothing. This precedes AI Sales Plan.
+
+The audit's conclusion, accepted:
+
+  "Existing member SKU spread, distributor D3 whitespace, and SKU breadth
+   use different sources, entities and periods. They must not be reused as
+   if they were one measure."
+
+None of the six AI Sales Plan tabs exists today - four partial analogues,
+two absent. So it is not duplication.
+
+F1. SPECIFY FOUR SHARED COMPUTATIONS as one API surface, each returning
+    source and basis metadata:
+
+      peer sets                 same-distributor default, 100% coverage
+      customer-SKU penetration  which retailers buy which codes
+      adjacency                 sub-category coverage per customer
+      versioned top-80 snapshot frozen and dated, not a live threshold
+
+F2. THE TOP-80 SNAPSHOT IS VERSIONED. Live is 566 codes / Rs 110.99 Cr;
+    the earlier reference was 560 / Rs 107.54 Cr.
+
+    Freeze with source date and period. A SKU leaving the top 80% between
+    two visits with no explanation is worse than a slightly stale list.
+
+F3. ADJACENCY IS CATEGORY-LEVEL ONLY. The 31-subcategory registry has CPVC
+    but does not split pipe from fittings, so "buys CPVC fittings, no CPVC
+    pipe" cannot be computed.
+
+    Record that as a register entry - a code-level pipe/fitting split needs
+    Prayag review.
+
+F4. Confirm the ownership division: deep dives are the factual record of
+    what happened per entity; AI Sales Plan owns visit-level
+    recommendations and reasons.
+```
+
+---
+
+## Section G — the test budget
+
+```
+Follow-ups 458 and 459.
+
+The AI Growth activation beforeAll ran 173 seconds against a stale
+120-second allowance whose comment claims 27. It has since run in 46
+seconds.
+
+A suite that takes 46 seconds once and 173 the next will exceed whatever
+budget it is given. Raise the limit if the work is genuinely that heavy,
+but look at why several large queries run sequentially in a setup hook
+first.
+
+A guard that times out reports nothing - the state Prompt 86 was built to
+end.
+```
+
+---
+
+## Notes
+
+- **B2 stands alone.** A projection whose numerator includes direct-dealer booking,
+  compared against a plan labelled the annual secondary plan, is wrong regardless
+  of pacing.
+- **C1 recommends labelling rather than reconciling**, deliberately.
+- **E3 now has a live-coverage requirement**, not just a banner. After H5, any
+  wording describing April–June as missing is stale — and the component should
+  derive coverage rather than carry it.
+- **F3 records something that cannot be built yet.** The pipe-versus-fitting pitch
+  was in the AI Sales Plan design and the registry cannot support it. Better
+  recorded than quietly dropped.

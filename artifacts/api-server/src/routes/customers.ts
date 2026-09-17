@@ -3,6 +3,7 @@
 // All analytics lead with QUANTITY (pcs). Realized price = Value / Qty.
 // Primary (distributor/dealer) and secondary (retailer) are never blended.
 import { Router } from "express";
+import { pool } from "@workspace/db";
 import ExcelJS from "exceljs";
 import {
   listCustomers,
@@ -108,10 +109,11 @@ router.get("/customers/months", async (req, res) => {
     return;
   }
   try {
-    const [months, completeMonths, provisionalMonths] = await Promise.all([
+    const [months, completeMonths, provisionalMonths, secondaryCoverage] = await Promise.all([
       getAvailableMonths(fy),
       getCompleteMonths(fy),
       getEffectivelyOpenPrimaryRegisterMonths(fy),
+      secondaryOpenCoverage(fy),
     ]);
     if (months.length === 0) {
       // Trigger a background sync if one is not already in progress.
@@ -126,6 +128,7 @@ router.get("/customers/months", async (req, res) => {
       months,
       completeMonths,
       provisionalMonths,
+      secondaryCoverage,
       syncing,
       syncError,
       lastSyncedAt: getLastSyncedAt(fy),
@@ -135,6 +138,88 @@ router.get("/customers/months", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch months" });
   }
 });
+
+/**
+ * Secondary data is not governed by the primary-register close. Keep this
+ * small disclosure live from the loaded order rows and their source dates so
+ * pages do not carry stale "Apr–Jun missing" wording.
+ */
+export async function secondaryOpenCoverage(fy: string): Promise<{
+  openWindowMonths: string[];
+  partialMonths: Array<{ month: string; through: string }>;
+  unavailableMonths: string[];
+  sourceError?: boolean;
+}> {
+  let rows: Array<{ month_number: number; max_order_date: string; has_partial: boolean; has_complete: boolean }> = [];
+  try {
+    const result = await pool.query<{ month_number: number; max_order_date: string; has_partial: boolean; has_complete: boolean }>(
+      `SELECT EXTRACT(MONTH FROM (order_datetime AT TIME ZONE 'Asia/Kolkata'))::int AS month_number,
+              MAX((order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS max_order_date,
+              BOOL_OR(LOWER(COALESCE(period_completeness, '')) = 'partial') AS has_partial,
+              BOOL_OR(LOWER(COALESCE(period_completeness, '')) = 'complete') AS has_complete
+         FROM secondary_order_line
+        WHERE fiscal_year = $1
+        GROUP BY 1`,
+      [fy],
+    );
+    rows = result.rows;
+  } catch {
+    // Coverage is an annotation. A source error must not masquerade as
+    // genuinely absent months.
+    return { openWindowMonths: [], partialMonths: [], unavailableMonths: [], sourceError: true };
+  }
+  return classifySecondaryOpenCoverage(rows, fy, new Date());
+}
+
+export function classifySecondaryOpenCoverage(
+  rows: Array<{ month_number: number; max_order_date: string; has_partial: boolean; has_complete: boolean }>,
+  fy: string,
+  now: Date,
+): {
+  openWindowMonths: string[];
+  partialMonths: Array<{ month: string; through: string }>;
+  unavailableMonths: string[];
+  sourceError?: boolean;
+} {
+  const calendarIndex = now.getUTCMonth() + 1; // Jan=1
+  const startYear = Number(fy.slice(0, 4));
+  const fyIndex = (calendarIndex >= 4 ? calendarIndex - 3 : calendarIndex + 9);
+  const labels: string[] = [];
+  const names = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+  for (let offset = -3; offset <= 0; offset++) {
+    const index = ((fyIndex - 1 + offset + 12) % 12) + 1;
+    const year = index >= 1 && index <= 9 ? startYear : startYear + 1;
+    labels.push(`${names[index - 1]}-${String(year % 100).padStart(2, "0")}`);
+  }
+  const grouped = new Map<string, { max: Date; partial: boolean; complete: boolean }>();
+  for (const row of rows) {
+    const month = Number(row.month_number);
+    const date = new Date(`${row.max_order_date}T00:00:00Z`);
+    if (!Number.isFinite(date.getTime())) continue;
+    const index = month >= 4 ? month - 3 : month + 9;
+    const year = month >= 4 ? startYear : startYear + 1;
+    const label = `${names[index - 1]}-${String(year % 100).padStart(2, "0")}`;
+    const current = grouped.get(label);
+    if (!current) grouped.set(label, { max: date, partial: row.has_partial, complete: row.has_complete });
+    else {
+      if (date > current.max) current.max = date;
+      current.partial ||= row.has_partial;
+      current.complete ||= row.has_complete;
+    }
+  }
+  const partialMonths = labels.flatMap((month) => {
+    const item = grouped.get(month);
+    if (!item) return [];
+    const date = item.max;
+    const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+    return item.partial || !item.complete || date.getUTCDate() < lastDay ? [{ month, through: date.toISOString() }] : [];
+  });
+  return {
+    openWindowMonths: labels,
+    partialMonths,
+    unavailableMonths: labels.filter((month) => !grouped.has(month)),
+  };
+}
 
 // ── Customer rankings with YoY ─────────────────────────────────────────────────
 

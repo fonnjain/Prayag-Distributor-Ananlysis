@@ -1,4 +1,12 @@
-type Props = { months: string[] };
+type Props = {
+  months: string[];
+  secondaryCoverage?: {
+    openWindowMonths: string[];
+    partialMonths: Array<{ month: string; through: string }>;
+    unavailableMonths: string[];
+    sourceError?: boolean;
+  } | null;
+};
 
 function periodLabel(months: string[]): string {
   const byYear = new Map<string, string[]>();
@@ -13,14 +21,26 @@ function periodLabel(months: string[]): string {
 }
 
 /** Quiet, shared reminder that open primary-register figures can still change. */
-export default function ProvisionalMonthsBanner({ months }: Props) {
-  if (!months.length) return null;
+export default function ProvisionalMonthsBanner({ months, secondaryCoverage }: Props) {
+  if (!months.length && !secondaryCoverage?.sourceError && !secondaryCoverage?.partialMonths.length && !secondaryCoverage?.unavailableMonths.length) return null;
+  const primaryText = months.length
+    ? `${periodLabel(months)} ${months.length === 1 ? "is" : "are"} provisional and may change until ${months.length === 1 ? "it closes" : "they close"}.`
+    : null;
+  const partial = secondaryCoverage?.partialMonths ?? [];
+  const unavailable = secondaryCoverage?.unavailableMonths ?? [];
+  const secondaryText = [
+    secondaryCoverage?.sourceError ? "Secondary coverage source unavailable (not treated as missing months)" : null,
+    partial.length
+      ? `Secondary ${partial.map((item) => `${item.month} (partial through ${new Date(item.through).toLocaleDateString("en-IN", { day: "numeric", month: "long" })})`).join(", ")}`
+      : null,
+    unavailable.length ? `Secondary ${unavailable.join(", ")} unavailable` : null,
+  ].filter(Boolean).join("; ");
   return (
     <div
       className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200"
       data-testid="banner-provisional-months"
     >
-      {periodLabel(months)} {months.length === 1 ? "is" : "are"} provisional and may change until {months.length === 1 ? "it closes" : "they close"}.
+      {primaryText}{primaryText && secondaryText ? " " : ""}{secondaryText}
     </div>
   );
 }
