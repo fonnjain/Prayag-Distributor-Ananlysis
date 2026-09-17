@@ -6,6 +6,8 @@ import { trunc2, trunc2IN } from "@/lib/trunc";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, Info, Plus, Printer, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import SecondaryRegisterCoverageNotice from "@/components/SecondaryRegisterCoverageNotice";
+import type { SecondaryRegisterCoverage } from "@/lib/secondaryRegisterCoverage";
 
 // ── API types (mirror of the C1 contract) ────────────────────────────────────
 type PeriodSpec = {
@@ -57,6 +59,7 @@ type OkResponse = {
   blocked: false; basis: Required<BasisBlock>; guards: GuardResult[]; matrix: MatrixRow[]; quadrants?: QuadrantView[]; rosterChanges?: RosterChange[]; suggestions?: Suggestion[];
   likeForLike?: { entity: string; headlineAchievement: number | null; likeForLikeAchievement: number | null; untargetedMembers: string[] }[];
   notes: string[];
+  secondaryRegisterCoverage?: SecondaryRegisterCoverage;
 };
 type BlockedResponse = { blocked: true; reason: string; guards: GuardResult[]; basis: BasisBlock };
 type ApiResult = OkResponse | BlockedResponse;
@@ -810,6 +813,9 @@ export default function ComparisonDeepDive() {
 
       {/* ── Basis strip — always above any figure ── */}
       {result && <BasisStrip result={result} />}
+      {ok?.secondaryRegisterCoverage && (
+        <SecondaryRegisterCoverageNotice coverage={ok.secondaryRegisterCoverage} />
+      )}
 
       {/* ── Blocked: the refusal is a finding, not a failure ── */}
       {result?.blocked && (

@@ -12,6 +12,8 @@ import { achBandBg, achBandText } from "@/lib/achievementBands";
 import { SalesPersonReport } from "./SalesPersonReport";
 import { useGlobalFilter, isFyClosed } from "@/data/global-filter-context";
 import { SALES_DEEP_DIVE_EXTRA_MANIFEST } from "@workspace/api-zod";
+import SecondaryRegisterCoverageNotice from "@/components/SecondaryRegisterCoverageNotice";
+import type { SecondaryRegisterCoverage } from "@/lib/secondaryRegisterCoverage";
 
 const BASE = import.meta.env.BASE_URL ?? "/";
 const API = `${BASE}api`.replace(/\/\//g, "/");
@@ -221,6 +223,7 @@ interface SegmentNet {
 interface SkuSpread {
   isLiveYear: boolean;
   liveYearNote?: string | null;
+  secondaryRegisterCoverage?: SecondaryRegisterCoverage;
   totalRows?: number | null;
   totalNet?: number | null;
   distinctSegments?: number | null;
@@ -284,6 +287,7 @@ interface DeepDiveData {
   roiCost: RoiCost | null;
   skuSpread: SkuSpread | null;
   winBack: WinBackItem[] | null;
+  secondaryRegisterCoverage?: SecondaryRegisterCoverage;
   rowsRead: number;
   /** Unix ms timestamp when the Data tab was last read from Google Sheets (or DB snapshot). */
   dataReadAt?: number | null;
@@ -1384,9 +1388,13 @@ function SkuSpreadPanel({ spread }: { spread: SkuSpread }) {
         <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
           Segment Spread (Secondary Register)
         </h3>
-        <div className="rounded-md border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-          {spread.liveYearNote ?? "Segment data will populate once a FY2026-27 secondary register is ingested."}
-        </div>
+        {spread.secondaryRegisterCoverage ? (
+          <SecondaryRegisterCoverageNotice coverage={spread.secondaryRegisterCoverage} />
+        ) : (
+          <div className="rounded-md border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+            {spread.liveYearNote ?? "Segment data will populate once a FY2026-27 secondary register is ingested."}
+          </div>
+        )}
       </div>
     );
   }
@@ -1405,11 +1413,13 @@ function SkuSpreadPanel({ spread }: { spread: SkuSpread }) {
         Segment Spread (Secondary Register)
       </h3>
 
-      {spread.liveYearNote && (
+      {spread.secondaryRegisterCoverage ? (
+        <SecondaryRegisterCoverageNotice coverage={spread.secondaryRegisterCoverage} />
+      ) : spread.liveYearNote ? (
         <div className="rounded-md border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-300">
           {spread.liveYearNote}
         </div>
-      )}
+      ) : null}
 
       {/* Summary tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1596,7 +1606,13 @@ function AvsBPanel({
   );
 }
 
-function WinBackPanel({ items }: { items: WinBackItem[] }) {
+function WinBackPanel({
+  items,
+  coverage,
+}: {
+  items: WinBackItem[];
+  coverage?: SecondaryRegisterCoverage;
+}) {
   const top = items.slice(0, 20);
   return (
     <div className="space-y-3">
@@ -1612,6 +1628,7 @@ function WinBackPanel({ items }: { items: WinBackItem[] }) {
       <p className="text-xs text-muted-foreground">
         Customers present in FY2024-25 or FY2025-26 secondary register but not in the current working sheet.
       </p>
+      {coverage && <SecondaryRegisterCoverageNotice coverage={coverage} />}
 
       <div className="rounded-lg border border-border overflow-hidden">
         <div className="grid grid-cols-[1fr_auto_auto_auto] gap-0 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide bg-muted/30 px-4 py-2">
@@ -2892,7 +2909,7 @@ export default function SalesDeepDive() {
           {/* Phase 6B: Win-back dormant retailer list */}
           {winBack && winBack.length > 0 && (
             <div className="pt-2 border-t border-border">
-              <WinBackPanel items={winBack} />
+              <WinBackPanel items={winBack} coverage={data?.secondaryRegisterCoverage} />
             </div>
           )}
 

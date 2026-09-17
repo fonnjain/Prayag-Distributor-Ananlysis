@@ -17,6 +17,10 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "../logger.js";
+import {
+  getSecondaryRegisterCoverageDisclosureSafe,
+  type SecondaryRegisterCoverageDisclosure,
+} from "../secondary/registerCoverage.js";
 
 export type SegmentNet = {
   segment: string;
@@ -36,6 +40,7 @@ export type SkuSpread = {
   netBySegment?: SegmentNet[];
   crossSellDepth?: number;
   concentrationHhi?: number;
+  secondaryRegisterCoverage?: SecondaryRegisterCoverageDisclosure;
 };
 
 type RawLine = {
@@ -117,6 +122,7 @@ export async function computeSkuSpread(
   ).length;
 
   const coverageNote = await secondaryCoverageNote(fy);
+  const secondaryRegisterCoverage = await getSecondaryRegisterCoverageDisclosureSafe(fy);
 
   if (rows.length === 0) {
     logger.info({ normKey, fy }, "skuSpread: no rows for member in closed FY");
@@ -131,6 +137,7 @@ export async function computeSkuSpread(
       netBySegment: [],
       crossSellDepth: 0,
       concentrationHhi: 0,
+      secondaryRegisterCoverage: secondaryRegisterCoverage ?? undefined,
     };
   }
 
@@ -207,5 +214,6 @@ export async function computeSkuSpread(
     netBySegment,
     crossSellDepth,
     concentrationHhi,
+    secondaryRegisterCoverage: secondaryRegisterCoverage ?? undefined,
   };
 }

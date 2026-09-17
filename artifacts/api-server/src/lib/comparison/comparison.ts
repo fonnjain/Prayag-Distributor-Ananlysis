@@ -25,6 +25,10 @@ import {
   resolveHoldExclusionsFromRows,
   type StructuredExclusion,
 } from "../resolution/holdResolver.js";
+import {
+  getSecondaryRegisterCoverageDisclosureSafe,
+  type SecondaryRegisterCoverageDisclosure,
+} from "../secondary/registerCoverage.js";
 
 // ── Selection schema ─────────────────────────────────────────────────────────
 
@@ -527,6 +531,7 @@ export type ComparisonResponse = {
   /** Values withheld by an open API-blocking resolution hold. */
   exclusions?: StructuredExclusion[];
   notes: string[];
+  secondaryRegisterCoverage?: SecondaryRegisterCoverageDisclosure;
 };
 
 export type BlockedResponse = {
@@ -627,6 +632,12 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
 
   // ── Period resolution + completeness (from data, not config) ──
   const periods = await resolvePeriods(req.periods, basis, today);
+  const coverageFy = basis === "secondary"
+    ? periods.find((period) => period.fy === "2026-27")?.fy
+    : undefined;
+  const secondaryRegisterCoverage = coverageFy
+    ? await getSecondaryRegisterCoverageDisclosureSafe(coverageFy)
+    : null;
   const openHolds = await getOpenResolutionHolds();
   const attributionExclusionsByPeriod = new Map<number, StructuredExclusion[]>();
   for (let i = 0; i < periods.length; i++) {
@@ -1249,6 +1260,7 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
     ...(suggestions ? { suggestions } : {}),
     ...(likeForLike.length > 0 ? { likeForLike } : {}),
     ...(comparisonExclusions.length > 0 ? { exclusions: comparisonExclusions } : {}),
+    ...(secondaryRegisterCoverage ? { secondaryRegisterCoverage } : {}),
     notes,
   };
 }

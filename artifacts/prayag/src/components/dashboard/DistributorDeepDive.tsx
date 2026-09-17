@@ -37,6 +37,8 @@ import {
 } from "lucide-react";
 import { formatCompact } from "@/data/dataset";
 import { DistributorTabsPanel, type DdTab } from "./DistributorTabsPanel";
+import SecondaryRegisterCoverageNotice from "@/components/SecondaryRegisterCoverageNotice";
+import type { SecondaryRegisterCoverage } from "@/lib/secondaryRegisterCoverage";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -97,6 +99,7 @@ type WhitespaceHint = {
 type DistributorSkuSpread = {
   isLiveYear: boolean;
   liveYearNote?: string;
+  secondaryRegisterCoverage?: SecondaryRegisterCoverage;
   totalMasterCategories: number;
   /** Legacy API alias. */
   totalBroadSegments: number;
@@ -833,10 +836,14 @@ function SkuSpreadPanel({
     return (
       <div className="mb-4 border border-border rounded-lg p-4 bg-muted/5">
         <div className="text-sm font-semibold mb-1">Product Mix</div>
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          {spread.liveYearNote ??
-            "Segment data will populate once a FY2026-27 secondary order-booking register is ingested."}
-        </p>
+        {spread.secondaryRegisterCoverage ? (
+          <SecondaryRegisterCoverageNotice coverage={spread.secondaryRegisterCoverage} />
+        ) : (
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {spread.liveYearNote ??
+              "Segment data will populate once a FY2026-27 secondary order-booking register is ingested."}
+          </p>
+        )}
         <p className="text-xs text-muted-foreground mt-1">
           The secondary order-booking register is the source for this panel. The dealer's assigned
           segment attribute records allocation, not actual purchases, and is never
@@ -879,11 +886,13 @@ function SkuSpreadPanel({
 
       <div className="p-4 space-y-5">
 
-        {spread.liveYearNote && (
+        {spread.secondaryRegisterCoverage ? (
+          <SecondaryRegisterCoverageNotice coverage={spread.secondaryRegisterCoverage} />
+        ) : spread.liveYearNote ? (
           <div className="rounded-md border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-300">
             {spread.liveYearNote}
           </div>
-        )}
+        ) : null}
 
         {/* Coverage tiles */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

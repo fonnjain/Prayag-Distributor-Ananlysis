@@ -27,6 +27,10 @@ import { sql } from "drizzle-orm";
 import { logger } from "../logger.js";
 import type { DistributorGroup } from "./distributorDeepDive.js";
 import { secondaryCoverageNote } from "./skuSpread.js";
+import {
+  getSecondaryRegisterCoverageDisclosureSafe,
+  type SecondaryRegisterCoverageDisclosure,
+} from "../secondary/registerCoverage.js";
 import { getRetailerRegistry, normRetailerName } from "./retailerRegistry.js";
 import categoryRegistry from "../../config/prompt68-category-registry.json";
 
@@ -256,6 +260,7 @@ export type DistributorSkuSpread = {
    * different retailer with the same name — surfaced, never silently merged.
    */
   ambiguousRetailerNames?: number;
+  secondaryRegisterCoverage?: SecondaryRegisterCoverageDisclosure;
 };
 
 // ─── Internal aggregation types ───────────────────────────────────────────────
@@ -348,6 +353,7 @@ export async function loadDistributorSkuSpread(
   distGroups: DistributorGroup[],
 ): Promise<void> {
   if (!distGroups.length) return;
+  const secondaryRegisterCoverage = await getSecondaryRegisterCoverageDisclosureSafe(fy, "distributor SKU spread");
 
   // ── Collect all retailer names ─────────────────────────────────────────────
   // normRetailer (LOWER TRIM) → distributor normKey.
@@ -361,7 +367,18 @@ export async function loadDistributorSkuSpread(
     }
   }
 
-  if (normToDistKey.size === 0) return;
+  if (normToDistKey.size === 0) {
+    for (const g of distGroups) {
+      (g as DistributorGroup & { skuSpread?: DistributorSkuSpread }).skuSpread = {
+        isLiveYear: false,
+        totalMasterCategories: TOTAL_MASTER_CATEGORIES,
+        totalBroadSegments: TOTAL_BROAD_SEGMENTS,
+        matchedRetailers: 0,
+        secondaryRegisterCoverage: secondaryRegisterCoverage ?? undefined,
+      };
+    }
+    return;
+  }
 
   // ── Retailer identity check (task 172) ─────────────────────────────────────
   // secondary_register_line has no RET#, so matching below is name-keyed
@@ -424,6 +441,15 @@ export async function loadDistributorSkuSpread(
     rows = result.rows;
   } catch (err) {
     logger.warn({ err }, "distributorSkuSpread: DB query failed");
+    for (const g of distGroups) {
+      (g as DistributorGroup & { skuSpread?: DistributorSkuSpread }).skuSpread = {
+        isLiveYear: false,
+        totalMasterCategories: TOTAL_MASTER_CATEGORIES,
+        totalBroadSegments: TOTAL_BROAD_SEGMENTS,
+        matchedRetailers: 0,
+        secondaryRegisterCoverage: secondaryRegisterCoverage ?? undefined,
+      };
+    }
     return;
   }
 
@@ -736,6 +762,7 @@ export async function loadDistributorSkuSpread(
     if (spread) {
       const amb = ambiguousByDist.get(g.normKey);
       if (amb) spread.ambiguousRetailerNames = amb;
+      if (secondaryRegisterCoverage) spread.secondaryRegisterCoverage = secondaryRegisterCoverage;
       (g as DistributorGroup & { skuSpread?: DistributorSkuSpread }).skuSpread = spread;
     }
   }

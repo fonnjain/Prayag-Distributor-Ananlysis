@@ -5,6 +5,8 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import SecondaryRegisterCoverageNotice from "@/components/SecondaryRegisterCoverageNotice";
+import type { SecondaryRegisterCoverage } from "@/lib/secondaryRegisterCoverage";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -120,6 +122,7 @@ export type FullGrowthReportData = {
   };
   narrative: Record<string, string>;
   guard: { passed: boolean; flagged: Array<{ sentence: string; termMentioned: string }> };
+  secondaryRegisterCoverage?: SecondaryRegisterCoverage | null;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -179,6 +182,9 @@ export default function FullGrowthReport({ data }: { data: FullGrowthReportData 
 
   return (
     <div className="space-y-4 text-foreground" data-testid="full-growth-report">
+      {data.secondaryRegisterCoverage && (
+        <SecondaryRegisterCoverageNotice coverage={data.secondaryRegisterCoverage} />
+      )}
       {/* Header */}
       <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3 space-y-0.5">
         <p className="text-base font-bold">Master Growth Report — {data.scopeLabel}</p>

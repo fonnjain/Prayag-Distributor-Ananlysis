@@ -14,6 +14,10 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "../logger.js";
+import {
+  getSecondaryRegisterCoverageDisclosureSafe,
+  type SecondaryRegisterCoverageDisclosure,
+} from "../secondary/registerCoverage.js";
 
 export type WinBackItem = {
   customer: string;
@@ -25,6 +29,7 @@ export type WinBackItem = {
 type WinBackResult = {
   items: WinBackItem[];
   note: string | null;
+  secondaryRegisterCoverage?: SecondaryRegisterCoverageDisclosure;
 };
 
 type RegRow = {
@@ -43,6 +48,7 @@ export async function computeWinBack(
   normKey: string,
   currentCustomers: string[],
 ): Promise<WinBackResult> {
+  const secondaryRegisterCoverage = await getSecondaryRegisterCoverageDisclosureSafe("2026-27");
   // Past-FY customers from secondary_register_line.
   const result = await db.execute<RegRow>(sql`
     SELECT
@@ -60,7 +66,11 @@ export async function computeWinBack(
 
   if (result.rows.length === 0) {
     logger.info({ normKey }, "winBack: no past-FY register rows for member");
-    return { items: [], note: "No past secondary register data found for this member." };
+    return {
+      items: [],
+      note: "No past secondary register data found for this member.",
+      secondaryRegisterCoverage: secondaryRegisterCoverage ?? undefined,
+    };
   }
 
   // Build a set of normalised current-customer names.
@@ -98,5 +108,6 @@ export async function computeWinBack(
       dormant.length === 0
         ? "All past customers appear in the current working sheet — no win-backs needed."
         : null,
+    secondaryRegisterCoverage: secondaryRegisterCoverage ?? undefined,
   };
 }

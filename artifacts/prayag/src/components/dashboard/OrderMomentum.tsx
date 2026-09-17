@@ -14,6 +14,8 @@ import { useTheme } from "next-themes";
 import { trunc2 } from "@/lib/trunc";
 import { usePeriodMonths } from "@/data/period-months";
 import { CustomTooltip } from "./shared";
+import SecondaryRegisterCoverageNotice from "@/components/SecondaryRegisterCoverageNotice";
+import type { SecondaryRegisterCoverage } from "@/lib/secondaryRegisterCoverage";
 import {
   CompanyReportFilterBar,
   EMPTY_ENTITY_FILTER,
@@ -23,6 +25,7 @@ import {
 } from "./CompanyReportFilters";
 
 type Insights = {
+  secondaryRegisterCoverage?: SecondaryRegisterCoverage;
   meta: {
     fy: string; likeMonths: string[]; priorLikeMonths: string[];
     channelLabel: string; latestMonthNote: string | null; filterNote: string | null; guards: string[];
@@ -177,6 +180,9 @@ export default function OrderMomentum() {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {data.secondaryRegisterCoverage && (
+        <SecondaryRegisterCoverageNotice coverage={data.secondaryRegisterCoverage} />
+      )}
       {/* Channel label + guards + export — the channelLabel must appear on the page */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs text-muted-foreground">

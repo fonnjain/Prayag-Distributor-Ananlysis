@@ -39,6 +39,10 @@ import {
   resolvePriorEntityFilter,
 } from "../saleLineFilter.js";
 import { logger } from "../logger.js";
+import {
+  getSecondaryRegisterCoverageDisclosureSafe,
+  type SecondaryRegisterCoverageDisclosure,
+} from "../secondary/registerCoverage.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -68,6 +72,7 @@ export type LeadingIndicator = {
 };
 
 export type MomentumInsights = {
+  secondaryRegisterCoverage?: SecondaryRegisterCoverageDisclosure;
   meta: {
     fy: string;
     likeMonths: string[];
@@ -156,8 +161,14 @@ export async function buildMomentumInsights(
   // Filtered requests are never cached (shared entity filter rollout rule) —
   // the cache only ever holds the default company-wide payload.
   const hasFilter = Boolean(filter && (filter.none || hasEntityFilterValues(filter)));
+  const secondaryRegisterCoverage = await getSecondaryRegisterCoverageDisclosureSafe(fy);
   const cacheKey = `${fy}|${(requestedLabels ?? []).join(",")}|${today.toISOString().slice(0, 10)}`;
-  if (!hasFilter && _cache && _cache.key === cacheKey && Date.now() - _cache.at < TTL_MS) return _cache.data;
+  if (!hasFilter && _cache && _cache.key === cacheKey && Date.now() - _cache.at < TTL_MS) {
+    return {
+      ..._cache.data,
+      secondaryRegisterCoverage: secondaryRegisterCoverage ?? undefined,
+    };
+  }
 
   const nClosed = closedMonthCount(fy, today);
   if (nClosed === 0) throw new Error(`FY${fy} has no closed month yet — momentum needs at least one complete month`);
@@ -635,6 +646,7 @@ export async function buildMomentumInsights(
       : null;
 
   const data: MomentumInsights = {
+    secondaryRegisterCoverage: secondaryRegisterCoverage ?? undefined,
     meta: {
       fy,
       likeMonths,

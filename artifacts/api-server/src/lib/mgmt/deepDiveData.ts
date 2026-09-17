@@ -31,6 +31,10 @@ import {
 import { computeRoiCost, type RoiCost } from "./roiCost.js";
 import { computeSkuSpread, type SkuSpread } from "./skuSpread.js";
 import { computeWinBack, type WinBackItem } from "./winBack.js";
+import {
+  getSecondaryRegisterCoverageDisclosureSafe,
+  type SecondaryRegisterCoverageDisclosure,
+} from "../secondary/registerCoverage.js";
 import { IdentityRegistry } from "./identityRegistry.js";
 import { getCachedStateDashboard } from "./stateDashboard.js";
 
@@ -212,6 +216,7 @@ export type DeepDiveDataResult = {
   roiCost: RoiCost | null;          // Phase 4: revenue-to-cost analysis (needs kpis + spread)
   skuSpread: SkuSpread | null;      // Phase 5: segment/SKU spread from secondary_register_line
   winBack: WinBackItem[] | null;    // Phase 6: dormant retailers from past-FY register vs current sheet
+  secondaryRegisterCoverage?: SecondaryRegisterCoverageDisclosure;
   rowsRead: number;
   /** Unix ms timestamp when the Data tab was last read from Google Sheets (or loaded from DB snapshot). */
   dataReadAt: number;
@@ -1315,6 +1320,9 @@ export async function loadDeepDiveData(
       selectedMemberKey ? computeSkuSpread(selectedMemberKey, fy) : Promise.resolve(null),
       selectedMemberKey ? computeWinBack(selectedMemberKey, []) : Promise.resolve(null),
     ]);
+    const secondaryRegisterCoverage =
+      skuSpread?.secondaryRegisterCoverage ??
+      await getSecondaryRegisterCoverageDisclosureSafe(fy);
     return {
       fy,
       stateHeads: [],
@@ -1325,6 +1333,7 @@ export async function loadDeepDiveData(
       roiCost: null,
       skuSpread,
       winBack: winBackResult ? winBackResult.items : null,
+      secondaryRegisterCoverage: secondaryRegisterCoverage ?? undefined,
       rowsRead: 0,
       dataReadAt: 0,
       error: `Could not load the 'Data' tab for FY ${fy}. The sheet may not be connected or the tab name may differ.`,
@@ -1427,6 +1436,9 @@ export async function loadDeepDiveData(
 
   const fromDbSnapshot = _fromDbSnap.get(fy) ?? false;
   const stale = _servedStale.get(fy) ?? false;
+  const secondaryRegisterCoverage =
+    skuSpread?.secondaryRegisterCoverage ??
+    await getSecondaryRegisterCoverageDisclosureSafe(fy);
 
   return {
     fy,
@@ -1438,6 +1450,7 @@ export async function loadDeepDiveData(
     roiCost,
     skuSpread,
     winBack: winBackResult ? winBackResult.items : null,
+    secondaryRegisterCoverage: secondaryRegisterCoverage ?? undefined,
     rowsRead: entry.rowsRead,
     dataReadAt: entry.loadedAt,
     error: null,

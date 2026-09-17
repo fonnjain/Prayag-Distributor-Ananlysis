@@ -36,6 +36,11 @@ import {
   markJobComplete,
   markJobFailed,
 } from "../lib/aiReportJobQueue.js";
+import {
+  getSecondaryRegisterCoverageDisclosure,
+  getSecondaryRegisterCoverageDisclosureSafe,
+  type SecondaryRegisterCoverageDisclosure,
+} from "../lib/secondary/registerCoverage.js";
 
 const router: IRouter = Router();
 const MODEL = "claude-sonnet-4-6";
@@ -53,7 +58,110 @@ const FY_PATTERN = /^\d{4}-\d{2}$/;
 const GROWTH_CACHE_TTL_MS = 15 * 60_000;
 const GROWTH_CACHE_PREFIX = "growth-report|";
 
-type GrowthCacheEntry = { payload: Record<string, unknown>; until: number | null };
+type GrowthCacheEntry = {
+  payload: Record<string, unknown>;
+  until: number | null;
+  secondaryRegisterSuppressed?: boolean;
+  secondaryCoverageFingerprint?: string | null;
+};
+
+/** H5 only affects the state-head path backed by secondary_register_line. */
+export function shouldSuppressSecondaryRegisterConclusions(
+  scope: "company" | "statehead" | "state",
+  requestedLabels: string[],
+  missingMonths: string[],
+): boolean {
+  return scope === "statehead" &&
+    requestedLabels.some((label) => missingMonths.includes(label));
+}
+
+export function canReuseGrowthCacheForSecondaryCoverage(
+  cachedSuppressed: boolean,
+  freshSuppressed: boolean,
+  cachedFingerprint: string | null = null,
+  freshFingerprint: string | null = null,
+): boolean {
+  if (cachedSuppressed !== freshSuppressed) return false;
+  return !freshSuppressed || cachedFingerprint === freshFingerprint;
+}
+
+export function secondaryCoverageFingerprint(
+  coverage: SecondaryRegisterCoverageDisclosure | null,
+): string | null {
+  if (!coverage) return null;
+  return JSON.stringify({
+    id: coverage.id,
+    status: coverage.status,
+    owner: coverage.owner,
+    missingMonths: coverage.missingMonths,
+    missingRows: coverage.missingRows,
+    missingNet: coverage.missingNet,
+    message: coverage.message,
+  });
+}
+
+/** Final guard: no stale AI register-derived material can escape suppression. */
+export function suppressSecondaryRegisterFinalPayload(
+  payload: Record<string, any>,
+): Record<string, any> {
+  const activate = payload.activate ?? {};
+  const widen = payload.widen ?? {};
+  const ledger = payload.opportunityLedger ?? {};
+  const summary = payload.executiveSummary ?? {};
+  const deduplication = payload.deduplication ?? {};
+  const dedupExamples = Array.isArray(deduplication.examples)
+    ? deduplication.examples.filter((example: any) => {
+        const text = `${example?.claimedByLever ?? ""} ${example?.reason ?? ""}`;
+        return !/\b(ACTIVATE|WIDEN)\b/.test(text);
+      })
+    : [];
+  const narrative = payload.narrative ?? {};
+  return {
+    ...payload,
+    activate: {
+      ...activate,
+      totalDormantCount: 0,
+      afterDedupCount: 0,
+      lowActivationDistributors: [],
+      medianActiveRetailerValue: null,
+      valueHigh: null,
+      valueLow: null,
+    },
+    widen: {
+      ...widen,
+      top20Distributors: [],
+      dataSourceNote: null,
+      valueHigh: null,
+      valueLow: null,
+    },
+    opportunityLedger: {
+      ...ledger,
+      rows: Array.isArray(ledger.rows)
+        ? ledger.rows.filter((row: any) => row?.lever !== "ACTIVATE" && row?.lever !== "WIDEN")
+        : [],
+      totalRows: Array.isArray(ledger.rows)
+        ? ledger.rows.filter((row: any) => row?.lever !== "ACTIVATE" && row?.lever !== "WIDEN").length
+        : 0,
+    },
+    executiveSummary: {
+      ...summary,
+      leverRanking: Array.isArray(summary.leverRanking)
+        ? summary.leverRanking.filter((row: any) => row?.lever !== "ACTIVATE" && row?.lever !== "WIDEN")
+        : [],
+    },
+    deduplication: {
+      ...deduplication,
+      multiLeverEntityCount: dedupExamples.length,
+      examples: dedupExamples,
+      note: `${deduplication.note ?? ""} ACTIVATE and WIDEN are unavailable under partial H5 coverage.`.trim(),
+    },
+    narrative: {
+      ...narrative,
+      activate: activate.notAvailableReason,
+      widen: widen.notAvailableReason,
+    },
+  };
+}
 const growthCache = new Map<string, GrowthCacheEntry>();
 
 function growthCacheKey(
@@ -794,14 +902,42 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
 
   const headFilter  = scope === "statehead" ? stateHead : null;
   const stateFilter = scope === "state"     ? state     : null;
+  let verifiedStateHeadCoverage: SecondaryRegisterCoverageDisclosure | null = null;
+  if (scope === "statehead") {
+    try {
+      verifiedStateHeadCoverage = await getSecondaryRegisterCoverageDisclosure(fy);
+    } catch (error) {
+      req.log.error({ err: error, fy, stateHead }, "AI Growth secondary coverage verification failed");
+      res.status(503).json({
+        error: "Secondary register coverage could not be verified. AI Growth secondary conclusions are temporarily unavailable.",
+      });
+      return;
+    }
+  }
 
   // ── Cache check — synchronous 200 for warm cache hits ─────────────────────
   const cacheKey = growthCacheKey(fy, scope, stateHead, state, monthFrom, monthTo, dormantRevival, atRiskRecovery, rangeUptake);
   if (!forceFresh) {
     const hit = growthCache.get(cacheKey);
     if (hit && (hit.until === null || Date.now() < hit.until)) {
-      res.json({ ...hit.payload, cachedAt: hit.payload.generatedAt });
-      return;
+      const freshCoverage = scope === "statehead"
+        ? verifiedStateHeadCoverage
+        : await getSecondaryRegisterCoverageDisclosureSafe(fy, "AI Growth cache");
+      const freshSuppressed = freshCoverage != null &&
+        shouldSuppressSecondaryRegisterConclusions(scope, labels, freshCoverage.missingMonths);
+      if (canReuseGrowthCacheForSecondaryCoverage(
+        hit.secondaryRegisterSuppressed === true,
+        freshSuppressed,
+        hit.secondaryCoverageFingerprint ?? null,
+        secondaryCoverageFingerprint(freshCoverage),
+      )) {
+        const cachedPayload = { ...hit.payload };
+        if (freshCoverage) cachedPayload.secondaryRegisterCoverage = freshCoverage;
+        else delete cachedPayload.secondaryRegisterCoverage;
+        res.json({ ...cachedPayload, cachedAt: hit.payload.generatedAt });
+        return;
+      }
+      growthCache.delete(cacheKey);
     }
   }
 
@@ -830,6 +966,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       shrinkerRows,
       projectGapRows,
       blockedResult,
+      secondaryRegisterCoverage,
     ] = await Promise.all([
       queryCustomerStates(fy, labels, priorLabels, headFilter, stateFilter),
       queryLostCodes(fy, labels, priorLabels, headFilter, stateFilter),
@@ -837,7 +974,16 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       queryShrinkers(fy, labels, py, priorLabels, headFilter, stateFilter),
       queryProjectGaps(fy, labels),
       getBlockedCustomers().catch((): { blocked: Set<string>; available: boolean } => ({ blocked: new Set(), available: false })),
+      scope === "statehead"
+        ? Promise.resolve(verifiedStateHeadCoverage)
+        : getSecondaryRegisterCoverageDisclosureSafe(fy, "AI Growth report"),
     ]);
+    const secondaryRegisterPartial = secondaryRegisterCoverage != null &&
+      shouldSuppressSecondaryRegisterConclusions(
+        scope,
+        labels,
+        secondaryRegisterCoverage.missingMonths,
+      );
 
     // Scheme nudges (uses head filter internally)
     const schemeResult: NudgeResult | null = await computeNudgeList(
@@ -1338,6 +1484,33 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
           : "SKU spread data not available for this state head.",
     };
 
+    // H5 is non-blocking for factual readers, but an AI narrative must not
+    // turn a partial secondary-register period into a full-year conclusion.
+    // State-head ACTIVATE/WIDEN are the paths that read the register directly;
+    // company/state paths use the item-code SKU table and remain factual.
+    if (secondaryRegisterPartial) {
+      lowActivationDists.length = 0;
+      widenDists.length = 0;
+      activateEntitySet.clear();
+      activate.totalDormantCount = 0;
+      activate.afterDedupCount = 0;
+      activate.lowActivationDistributors = [];
+      activate.notAvailable = true;
+      activate.notAvailableReason =
+        secondaryRegisterCoverage!.message +
+        " AI secondary-register conclusions are withheld until the protected load is complete.";
+      activate.valueHigh = null;
+      activate.valueLow = null;
+      widen.notAvailable = true;
+      widen.notAvailableReason =
+        secondaryRegisterCoverage!.message +
+        " AI secondary-register conclusions are withheld until the protected load is complete.";
+      widen.valueHigh = null;
+      widen.valueLow = null;
+      widen.top20Distributors = [];
+      widen.segmentRollup = [];
+    }
+
     // ── §6 PROTECT — value at risk (NOT added to total) ──────────────────────
     const hiddenShrinkers = shrinkerRows.map(r => ({
       name:         r.customer,
@@ -1502,14 +1675,16 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       }
     }
 
-    const preDedupValue = totalCloseValue + recoveryValueHigh + activateValueHigh + totalWidenValueHigh;
+    const effectiveActivateValueHigh = secondaryRegisterPartial ? 0 : activateValueHigh;
+    const effectiveWidenValueHigh = secondaryRegisterPartial ? 0 : totalWidenValueHigh;
+    const preDedupValue = totalCloseValue + recoveryValueHigh + effectiveActivateValueHigh + effectiveWidenValueHigh;
     const postDedupValue = totalCloseValue +
       recoverEntities.reduce((s, c) => {
         const r = atRiskRows.find(x => x.customer.toUpperCase() === c.toUpperCase());
         return s + (parseFloat(r?.prior_net ?? "0") || 0) * atRiskRecovery;
       }, 0) +
-      activateValueHigh +
-      totalWidenValueHigh;
+       effectiveActivateValueHigh +
+       effectiveWidenValueHigh;
 
     const deduplication = {
       preDedupValue: t2(preDedupValue),
@@ -1644,9 +1819,9 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     // Levers ranked by post-dedup value
     const leverValues: Array<{ lever: string; value: number; entityCount: number }> = [
       { lever: "CLOSE",    value: totalCloseValue,     entityCount: allNudges.length },
-      { lever: "RECOVER",  value: postDedupValue - totalCloseValue - activateValueHigh - totalWidenValueHigh, entityCount: recoverEntities.length },
-      { lever: "ACTIVATE", value: activateValueHigh,   entityCount: lowActivationDists.length },
-      { lever: "WIDEN",    value: totalWidenValueHigh, entityCount: widenDists.length },
+      { lever: "RECOVER",  value: postDedupValue - totalCloseValue - effectiveActivateValueHigh - effectiveWidenValueHigh, entityCount: recoverEntities.length },
+      { lever: "ACTIVATE", value: effectiveActivateValueHigh,   entityCount: lowActivationDists.length },
+      { lever: "WIDEN",    value: effectiveWidenValueHigh, entityCount: widenDists.length },
     ].filter(lever => lever.entityCount > 0 && lever.value > 0)
       .sort((a, b) => b.value - a.value);
 
@@ -1725,7 +1900,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     );
 
     const generatedAt = new Date().toISOString();
-    const responsePayload: Record<string, unknown> = {
+    let responsePayload: Record<string, unknown> = {
       type:             "full-growth-report",
       fy,
       scope,
@@ -1759,17 +1934,26 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       whereNotToLook,
       capacityCheck,
       assumptionsAndLimits,
+      secondaryRegisterCoverage,
       deduplication,
       narrative: sectionNarratives,
       guard,
     };
+    if (secondaryRegisterPartial) {
+      responsePayload = suppressSecondaryRegisterFinalPayload(responsePayload);
+    }
 
         // ── Store in cache ─────────────────────────────────────────────────────
         // Closed FYs are frozen — store permanently.
         // Open FYs: store for 15 minutes (aligns with member-sheet cache TTL).
         const frozen = isFrozen(fy);
         const until = frozen ? null : Date.now() + GROWTH_CACHE_TTL_MS;
-        growthCache.set(cacheKey, { payload: responsePayload, until });
+        growthCache.set(cacheKey, {
+          payload: responsePayload,
+          until,
+          secondaryRegisterSuppressed: secondaryRegisterPartial,
+          secondaryCoverageFingerprint: secondaryCoverageFingerprint(secondaryRegisterCoverage),
+        });
 
         await markJobComplete(jobId, responsePayload);
       } catch (innerErr) {

@@ -134,10 +134,6 @@ export async function markJobComplete(
   payload: Record<string, unknown>,
 ): Promise<void> {
   const job = jobs.get(jobId);
-  if (job) {
-    job.status = "complete";
-    liveJobByCacheKey.delete(job.cacheKey);
-  }
 
   // Persist payload in the existing route_payload_snapshot table.
   await pool.query(
@@ -152,6 +148,14 @@ export async function markJobComplete(
      WHERE job_id = $1`,
     [jobId],
   );
+
+  // Publish "complete" to in-memory pollers only after the durable payload and
+  // database status are both present. Otherwise a poll can observe complete
+  // and read an empty snapshot in the small window between these writes.
+  if (job) {
+    job.status = "complete";
+    liveJobByCacheKey.delete(job.cacheKey);
+  }
 }
 
 /** Transition job to "failed" and record the error message. */
