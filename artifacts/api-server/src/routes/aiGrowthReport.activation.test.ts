@@ -73,6 +73,22 @@ import {
   RULE3_DIST_RATIO,
 } from "../lib/redAlert/skuCanary.js";
 
+const ACTIVATION_SETUP_HOOK_TIMEOUT_MS = 240_000;
+
+async function timedSetupPhase<T>(
+  phase: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const startedAt = performance.now();
+  try {
+    return await run();
+  } finally {
+    console.log(
+      `[activation guard] setup phase ${phase}: ${Math.round(performance.now() - startedAt)} ms`,
+    );
+  }
+}
+
 // ── GUARD_FY derivation (shared pattern from src/lib/fyAnchors.ts) ────────────
 
 // Full-ingest marker is DERIVED from live stats, not hardcoded: an FY counts as
@@ -222,14 +238,17 @@ let rangeGapRowsEmpty: DistRangeGapRow[] = [];
 let rowCountN = 0;
 
 beforeAll(async () => {
+  const setupStartedAt = performance.now();
   // Derive the anchor FY from live per-FY ingest stats (see deriveGuardFy).
-  const statsRes = await pool.query<{ fy: string; rows: string; months: string }>(`
-    SELECT fy,
-           COUNT(*)::text                     AS rows,
-           COUNT(DISTINCT month_label)::text  AS months
-    FROM   public.secondary_sku_line
-    GROUP  BY fy
-  `);
+  const statsRes = await timedSetupPhase("FY ingest stats", () =>
+    pool.query<{ fy: string; rows: string; months: string }>(`
+      SELECT fy,
+             COUNT(*)::text                     AS rows,
+             COUNT(DISTINCT month_label)::text  AS months
+      FROM   public.secondary_sku_line
+      GROUP  BY fy
+    `),
+  );
   const stats: FyIngestStats[] = statsRes.rows.map((r) => ({
     fy: r.fy,
     rows: parseInt(r.rows, 10),
@@ -255,9 +274,11 @@ beforeAll(async () => {
     `Run GET /api/audit Group 12 on the deployed server for production coverage. ` +
     `Open FY: ${OPEN_FY}, prior FY: ${PRIOR_FY}, completed months: [${COMPLETED_LABELS.join(", ")}]`,
   );
-  const canaryRes = await pool.query<{ fy: string; month_label: string; rows: string; distributors: string }>(
-    WIPE_CANARY_STATS_SQL,
-    [[OPEN_FY, PRIOR_FY]],
+  const canaryRes = await timedSetupPhase("wipe canary", () =>
+    pool.query<{ fy: string; month_label: string; rows: string; distributors: string }>(
+      WIPE_CANARY_STATS_SQL,
+      [[OPEN_FY, PRIOR_FY]],
+    ),
   );
   openMonthStats = new Map();
   priorMonthStats = new Map();
@@ -270,20 +291,33 @@ beforeAll(async () => {
     `completed months: ${COMPLETED_LABELS.length > 0 ? COMPLETED_LABELS.join(", ") : "(none yet — FY just started)"}`,
   );
 
-  // Run sequentially to avoid DB pool contention when the full validation
-  // suite is running alongside other test files.  The activation query
-  // scans ≈379 000 rows and takes ≈27 s; parallel execution can push the
-  // total past the 60 s hookTimeout under load.
-  activationRows      = await runActivationQuery(GUARD_FY, FULL_FY_LABELS);
-  activationRowsEmpty = await runActivationQuery("1900-01", ["Apr-00"]);
-  rangeGapRows        = await runRangeGapQuery(GUARD_FY);
-  rangeGapRowsEmpty   = await runRangeGapQuery("1900-01");
-  const countRes      = await pool.query<{ n: string }>(
-    "SELECT COUNT(*)::text AS n FROM public.secondary_sku_line WHERE fy = $1",
-    [GUARD_FY],
+  // Run sequentially to avoid multiplying scans and DB pool contention when
+  // validation files overlap. Per-phase timings make future runtime drift
+  // visible; the explicit hook budget is a ceiling, not a performance target.
+  activationRows = await timedSetupPhase("activation", () =>
+    runActivationQuery(GUARD_FY, FULL_FY_LABELS),
+  );
+  activationRowsEmpty = await timedSetupPhase("activation empty guard", () =>
+    runActivationQuery("1900-01", ["Apr-00"]),
+  );
+  rangeGapRows = await timedSetupPhase("range gap", () =>
+    runRangeGapQuery(GUARD_FY),
+  );
+  rangeGapRowsEmpty = await timedSetupPhase("range gap empty guard", () =>
+    runRangeGapQuery("1900-01"),
+  );
+  const countRes = await timedSetupPhase("anchor row count", () =>
+    pool.query<{ n: string }>(
+      "SELECT COUNT(*)::text AS n FROM public.secondary_sku_line WHERE fy = $1",
+      [GUARD_FY],
+    ),
   );
   rowCountN = parseInt(countRes.rows[0]?.n ?? "0");
-}, 120_000); // 2-minute budget: activation query ≈27 s, rest < 2 s
+  console.log(
+    `[activation guard] total setup: ${Math.round(performance.now() - setupStartedAt)} ms ` +
+      `(budget ${ACTIVATION_SETUP_HOOK_TIMEOUT_MS} ms)`,
+  );
+}, ACTIVATION_SETUP_HOOK_TIMEOUT_MS);
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
