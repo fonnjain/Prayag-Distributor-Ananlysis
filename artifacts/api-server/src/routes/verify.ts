@@ -7,8 +7,22 @@ import {
   pruneGhostRows,
 } from "../lib/verify/verify.js";
 import { requireVerificationEndpointAccess } from "../lib/apiKeyAuth.js";
+import { loadEnvironmentParitySnapshot } from "../lib/audit/environmentParity.js";
 
 const router: IRouter = Router();
+
+router.get(
+  "/verify/environment-parity",
+  requireVerificationEndpointAccess,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      res.json(await loadEnvironmentParitySnapshot());
+    } catch (err) {
+      req.log.error({ err }, "environment parity snapshot failed");
+      res.status(502).json({ error: "Could not build the environment parity snapshot." });
+    }
+  },
+);
 
 // Default FY derives from the calendar so the page never opens on a stale year.
 

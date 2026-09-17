@@ -7,11 +7,8 @@ import config from "../config/prompt68-category-registry.json";
 const router = Router();
 const CONFIG_TEXT = JSON.stringify(config);
 const CONFIG_SHA256 = createHash("sha256").update(CONFIG_TEXT).digest("hex");
-const EXPECTED = { codes: 4000, amount: "1362734071.53" };
-const EXPECTED_MASTERS = [
-  ["PLUMBING", 1053, "459815505.75"], ["PTMT", 1222, "430817629.14"],
-  ["C P", 1128, "333224362.92"], ["SANITARYWARE", 236, "68911307.60"],
-  ["SINK", 199, "61220747.03"], ["HARDWARE", 162, "8744519.09"],
+const EXPECTED_MASTER_NAMES = [
+  "PLUMBING", "PTMT", "C P", "SANITARYWARE", "SINK", "HARDWARE",
 ] as const;
 const EFFECTIVE_FROM = "2026-04-01";
 
@@ -42,20 +39,46 @@ async function controls(client: { query: Function }, source: "incoming" | "regis
     SELECT (SELECT count(*)::int FROM fy) rows,
       (SELECT count(DISTINCT code)::int FROM fy) codes,
       (SELECT coalesce(sum(amount::numeric),0)::numeric(20,2)::text FROM fy) amount,
+      (SELECT count(*)::int FROM a) mapped,
+      (SELECT coalesce(sum(amount::numeric),0)::numeric(20,2)::text FROM a) mapped_amount,
       (SELECT count(*)::int FROM fy f WHERE NOT EXISTS (SELECT 1 FROM a WHERE a.line_uid=f.line_uid)) unmapped,
+      (SELECT coalesce(sum(f.amount::numeric),0)::numeric(20,2)::text FROM fy f
+        WHERE NOT EXISTS (SELECT 1 FROM a WHERE a.line_uid=f.line_uid)) unmapped_amount,
       (SELECT count(*)::int FROM per_line WHERE n > 1) overlapping,
       coalesce((SELECT jsonb_object_agg(master_category,jsonb_build_array(codes,amount)) FROM per_master),'{}') masters
   `, source === "incoming" ? [JSON.stringify(config.assignments)] : []);
 }
 
-function controlsPass(row: any): boolean {
-  if (Number(row.codes) !== EXPECTED.codes || row.amount !== EXPECTED.amount ||
-      Number(row.unmapped) !== 0 || Number(row.overlapping) !== 0) return false;
+/**
+ * Prompt 68 originally used 4,000 codes / Rs 136.27 Cr / zero unmapped as
+ * point-in-time production verification. Those transaction totals are not an
+ * invariant: new FY rows and the known Composite residue changed them while
+ * the approved 10,417-code assignment generation remained unchanged.
+ *
+ * The durable controls are therefore:
+ * - every current transaction is either mapped once or explicitly unmapped;
+ * - mapped plus unmapped value cross-foots to the current transaction total;
+ * - no transaction overlaps assignments; and
+ * - the mapped result contains exactly the six approved masters.
+ *
+ * The preview hash pins these current controls between preview and apply.
+ */
+export function controlsPass(row: any): boolean {
+  const rows = Number(row.rows);
+  const mapped = Number(row.mapped);
+  const unmapped = Number(row.unmapped);
+  const amount = Number(row.amount);
+  const mappedAmount = Number(row.mapped_amount);
+  const unmappedAmount = Number(row.unmapped_amount);
   const masters = row.masters ?? {};
-  return EXPECTED_MASTERS.every(([name, codes, amount]) => {
-    const x = masters[name];
-    return x && Number(x[0]) === codes && x[1] === amount;
-  });
+  const masterNames = Object.keys(masters).sort();
+  return Number.isFinite(rows) &&
+    Number.isFinite(amount) &&
+    mapped + unmapped === rows &&
+    Math.abs((mappedAmount + unmappedAmount) - amount) < 0.01 &&
+    Number(row.overlapping) === 0 &&
+    masterNames.length === EXPECTED_MASTER_NAMES.length &&
+    EXPECTED_MASTER_NAMES.every((name) => masterNames.includes(name));
 }
 
 function authorized(req: import("express").Request): boolean {
@@ -122,7 +145,12 @@ router.get("/admin/category-registry/preview", async (req, res) => {
     return res.json({
       configSha256: CONFIG_SHA256, sourceFiles: config.source_files,
       corrections: config.corrections, diff, masterBreakdown: masterBreakdown.rows,
-      expectedControls: { ...EXPECTED, masters: EXPECTED_MASTERS }, controls: controlRow,
+      expectedControls: {
+        assignmentGeneration: config.assignments.length,
+        masterNames: EXPECTED_MASTER_NAMES,
+        rule: "Current rows and value must cross-foot; no overlaps; exactly the six approved masters.",
+      },
+      controls: controlRow,
       applyRequired: controlsPass(controlRow),
       previewHash: createHash("sha256").update(JSON.stringify({ config: CONFIG_SHA256, diff, controls: controlRow })).digest("hex"),
       intended: { insert: Number(diff.incoming), supersede: Number(diff.supersede) },
@@ -152,7 +180,7 @@ router.post("/admin/category-registry/apply", async (req, res) => {
     })).digest("hex");
     if (req.body.previewHash !== expectedPreviewHash) throw new Error("Preview token is stale");
     if (!controlsPass(before.rows[0])) {
-      throw new Error(`Production controls failed: ${JSON.stringify(before.rows[0])}`);
+      throw new Error(`Current cross-foot controls failed: ${JSON.stringify(before.rows[0])}`);
     }
     const load = await client.query(`
       INSERT INTO canonical_category_load
@@ -217,6 +245,11 @@ router.post("/admin/category-registry/apply", async (req, res) => {
     }
     const after = await controls(client, "registry");
     if (!controlsPass(after.rows[0])) throw new Error(`Post-apply controls failed: ${JSON.stringify(after.rows[0])}`);
+    if (JSON.stringify(after.rows[0]) !== JSON.stringify(before.rows[0])) {
+      throw new Error(`Post-apply controls differ from approved preview: ${JSON.stringify({
+        before: before.rows[0], after: after.rows[0],
+      })}`);
+    }
     await client.query("COMMIT");
     return res.json({ applied: true, loadId: load.rows[0].id, configSha256: CONFIG_SHA256 });
   } catch (error) {

@@ -20,3 +20,9 @@ Every category-coverage probe must state the environment it queried and must not
 **Why:** Development had null `master_category` values while production held 10,417 populated assignments, causing a valid production bridge to be reported incorrectly as defective.
 
 **How to apply:** Label every probe result as development or production, and check the intended environment before concluding that assignments, coverage, or source data are missing.
+
+Prompt 68 load controls must validate the approved assignment generation, current transaction cross-foot, zero overlap, and six-master vocabulary. Never freeze current-FY transaction code/value totals into the loader.
+
+**Why:** The original 4,000-code / ₹136.27 Cr / zero-unmapped control was a point-in-time snapshot. It later rejected the unchanged approved generation after valid transactions and a known Composite residue arrived.
+
+**How to apply:** Pin preview-to-apply with the preview hash, require mapped plus explicitly unmapped rows/value to equal the live total, and compare environments separately through the read-only parity snapshot.

@@ -22,6 +22,7 @@ describe("verification service identity authorization", () => {
 
   it.each([
     ["GET", "/verify"],
+    ["GET", "/verify/environment-parity"],
     ["GET", "/mgmt/verify"],
     ["GET", "/audit"],
     ["GET", "/audit/download"],

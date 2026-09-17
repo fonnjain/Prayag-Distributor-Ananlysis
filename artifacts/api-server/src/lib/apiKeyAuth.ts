@@ -10,6 +10,7 @@ export type ApiKeyScope = "full_api" | "verification" | "external_read";
 const VERIFICATION_IDENTITY_NAME = "verification";
 const VERIFICATION_ENDPOINTS = new Set([
   "GET /verify",
+  "GET /verify/environment-parity",
   "GET /mgmt/verify",
   "GET /audit",
   "GET /audit/download",
