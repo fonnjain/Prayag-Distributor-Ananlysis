@@ -38,7 +38,17 @@ describe("July retrospective provenance controls", () => {
     ).toThrow("24 August 2026");
   });
 
-  it("keeps commit disabled until review pins the exact original time", () => {
+  it("pins commit to the exact production row-ledger timestamp", () => {
+    expect(() =>
+      assertJulyRetrospectiveInput(
+        {
+          originalLoadedAt: "2026-08-24T12:10:23.752064Z",
+          recordedBy: "reviewer",
+          sourceNote: "Original controls independently verified.",
+        },
+        true,
+      ),
+    ).not.toThrow();
     expect(() =>
       assertJulyRetrospectiveInput(
         {
@@ -48,7 +58,7 @@ describe("July retrospective provenance controls", () => {
         },
         true,
       ),
-    ).toThrow("commit is disabled");
+    ).toThrow("does not match");
   });
 
   it("pins the original archive and complete controls", () => {
@@ -57,6 +67,13 @@ describe("July retrospective provenance controls", () => {
         "PSCode_3_NEW_REPORTS_JULY2026-20260805T074609Z-1-001_1785917168364.zip",
       archiveSha256:
         "d9030146be8c34be9cfcb16c5f6930e5778e9cdfac0b96e93b95628a42f4e161",
+      approvedOriginalLoadedAt: "2026-08-24T12:10:23.752064Z",
+      originalTimestampEvidence: {
+        source: "production secondary_sku_line.ingested_at",
+        rows: 34_147,
+        earliest: "2026-08-24T12:10:23.752064Z",
+        latest: "2026-08-24T12:10:23.752064Z",
+      },
       expected: {
         filesFound: 163,
         filesDropped: 14,

@@ -9,9 +9,15 @@ export const JUL26_RETROSPECTIVE_PROVENANCE = {
     "PSCode_3_NEW_REPORTS_JULY2026-20260805T074609Z-1-001_1785917168364.zip",
   archiveSha256: JUL26_PSCODE3_APPROVED_ARCHIVE_SHA256,
   originalLoadDate: "2026-08-24",
-  // The source evidence currently establishes the date, not the exact time.
-  // Keep commit disabled until review supplies the exact original timestamp.
-  approvedOriginalLoadedAt: null as string | null,
+  approvedOriginalLoadedAt: "2026-08-24T12:10:23.752064Z",
+  originalTimestampEvidence: {
+    source: "production secondary_sku_line.ingested_at",
+    rule:
+      "Use the common transaction timestamp because MIN(ingested_at) = MAX(ingested_at) across all 34,147 Jul-26 rows.",
+    rows: 34_147,
+    earliest: "2026-08-24T12:10:23.752064Z",
+    latest: "2026-08-24T12:10:23.752064Z",
+  },
   retrospectiveRecordDate: "2026-09-17",
   expected: {
     filesFound: 163,
@@ -47,7 +53,7 @@ export function assertJulyRetrospectiveInput(
   requireApprovedTimestamp = false,
 ): void {
   if (
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(
       input.originalLoadedAt,
     )
   ) {
@@ -209,12 +215,18 @@ export async function commitJulyRetrospectiveProvenance(
       sourceControls: JUL26_RETROSPECTIVE_PROVENANCE.expected,
       before: { sku: beforeSku, mirror: beforeMirror },
       dataTablesWritten: [],
+      originalTimestampEvidence:
+        JUL26_RETROSPECTIVE_PROVENANCE.originalTimestampEvidence,
     };
     const note =
       `RETROSPECTIVE PROVENANCE recorded ${recordedAt
         .toISOString()
         .slice(0, 10)} for the original 24 August 2026 load; this record was ` +
-      `not written at load time. ${input.sourceNote.trim()}`;
+      `not written at load time. Original load time ` +
+      `${JUL26_RETROSPECTIVE_PROVENANCE.approvedOriginalLoadedAt} was pinned ` +
+      `from ${JUL26_RETROSPECTIVE_PROVENANCE.originalTimestampEvidence.source}; ` +
+      `${JUL26_RETROSPECTIVE_PROVENANCE.originalTimestampEvidence.rule} ` +
+      `${input.sourceNote.trim()}`;
 
     await client.query(
       `INSERT INTO secondary_sku_load_provenance
@@ -227,7 +239,7 @@ export async function commitJulyRetrospectiveProvenance(
         JUL26_PSCODE3.month,
         note,
         `retrospective-record:${input.recordedBy.trim()}`,
-        new Date(input.originalLoadedAt),
+        input.originalLoadedAt,
         JUL26_RETROSPECTIVE_PROVENANCE.archiveSha256,
         JUL26_RETROSPECTIVE_PROVENANCE.expected.rows,
         JUL26_RETROSPECTIVE_PROVENANCE.expected.net,
@@ -259,7 +271,7 @@ export async function commitJulyRetrospectiveProvenance(
     return {
       metadataOnly: true,
       retrospective: true,
-      originalLoadedAt: new Date(input.originalLoadedAt).toISOString(),
+      originalLoadedAt: input.originalLoadedAt,
       provenanceRecordedAt: recordedAt.toISOString(),
       before: { sku: beforeSku, mirror: beforeMirror },
       after: { sku: afterSku, mirror: afterMirror },
