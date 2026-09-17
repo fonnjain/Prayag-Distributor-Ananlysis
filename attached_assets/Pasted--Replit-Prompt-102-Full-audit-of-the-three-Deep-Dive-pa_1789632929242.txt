@@ -1,0 +1,231 @@
+# Replit Prompt 102 — Full audit of the three Deep Dive pages
+
+**Date:** 16 September 2026
+**Scope:** Read-only throughout. Change nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Why now.** `/ai-sales-plan` is being designed and overlaps all three deep dives.
+Before adding a fourth page that draws on the same data, establish what these
+three already do, what is wrong in them, and what would be duplicated.
+
+Several items below are **known and unresolved** — listed so they are confirmed
+rather than rediscovered.
+
+---
+
+## Section A — Sales Deep Dive
+
+```
+Read-only. Change nothing.
+
+KNOWN OPEN ITEMS - confirm each is still present or now fixed.
+
+A1. THE "OTHER" SECTION leaks raw source field names to users:
+      TOTALVISITSOFBUSINESSRECEIVEDPART, TARGETCALCULATEDBGBF,
+      DIFFERENCEINTARGETSHCX, DIFFERENCEIJCZ,
+      ORDERBOOKINGFROMSECONDARYORDERBOOKINGREPORT20
+
+    Some duplicate named fields already on the page - TARGETCALCULATEDBGBF
+    at Rs 1.90 Cr equals Total Target to date.
+
+    Still present? What does each mean, and which are duplicates?
+
+A2. COVERAGE ARITHMETIC DOES NOT ADD UP.
+      Total retailers 59, Visited 46, Non-visited 18. 46 + 18 = 64.
+    Print all three with their sources. Which population differs?
+
+A3. "ORDERS / DAY 27,325.39" is order booking VALUE per working day, not a
+    count of orders. Still mislabelled?
+
+A4. THE FLAT "PROJECTED YEAR-END" understates by 18.62% - flat pacing
+    treats four months as 33.33% of a year where the seasonal curve gives
+    April-July 28.1%.
+
+    Prompt 90 proposed making the seasonal projection primary. Not applied.
+    Still showing flat as "Projected Year-End"?
+
+A5. THE PROJECTION'S BASIS LABEL. It includes direct-dealer OB but
+    compares against a plan labelled the annual SECONDARY plan. Confirm
+    what the plan field actually contains.
+
+A6. "TOTAL TARGET" sums a secondary target and a primary target.
+    Rajan Srivastava: Rs 1.63 Cr + Rs 26.66 L = Rs 1.90 Cr.
+
+    Prompt 89 established the "primary" component is direct-dealer
+    BOOKING, not dispatch - so the sum is defensible. CONFIRM that in
+    writing, and confirm it is stated on the page so nobody re-raises it.
+
+A7. AI NARRATIVE TOKENS. "Requires review - 5 of 205 tokens could not be
+    matched" with raw payload paths leaking into prose -
+    [performance.totalOB], [identity.workingDays], [identity.fy].
+
+    Which five, and why do they fail?
+
+A8. SEGMENT SPREAD uses CRM brand vocabulary - C.P. 5000 SERIES, CPVC
+    DURALIFE - not the six masters. Confirmed acceptable because
+    secondary_register_line has brand_canon and no item code.
+
+    Is that stated on the section? A user seeing one vocabulary here and
+    another on Products needs to know why.
+
+A9. THE EXPORT. Coverage and Visits was 163 rows, Profile 65 rows for
+    what should be ten profile fields. Prompt 84 approved an 11-sheet
+    restructure with a Working detail sheet.
+
+    Was it applied? Print the current sheet list and row counts.
+
+A10. THE MONTHLY MESSAGE. "Month selection is not available because the
+     headline source is not period-sliced." secondary_head_month holds
+     1,944 FY2026-27 rows across twelve months.
+
+     Still true, or stale?
+```
+
+---
+
+## Section B — Distributor Deep Dive
+
+```
+B1. WHAT DOES THIS PAGE SHOW? Print every section, its fields and their
+    sources. It has had far less scrutiny than Sales Deep Dive.
+
+B2. THE MULTIPLIER PATH. The distributor-tab tests logged
+    "column sl.qty does not exist", caught the error five times, and
+    passed anyway because nothing asserted deflator, realCurrent or
+    realGrowth.
+
+    Assertions were added in Prompt 86. Confirm the multiplier query now
+    runs cleanly in production and the assertions cover it.
+
+B3. D3 SEGMENTS. The grouping sweep found D3 shows legacy segments as
+    expandable evidence under a six-master headline - result plus labelled
+    source, which is the correct pattern.
+
+    Confirm it still is, and that the headline is on the registry masters.
+
+B4. Does this page carry an export? If not, it is the only deep dive
+    without one.
+
+B5. 57 distributors, 75 members, 8 states was the last reported scope.
+    Confirm current figures. 269 distributors exist in the master - why
+    does this page show 57?
+
+B6. Which of its measures are order booking and which are dispatch? The
+    same confusion that produced lineSale = lineAmount elsewhere.
+```
+
+---
+
+## Section C — SKU Deep Dive
+
+```
+C1. WHAT DOES THIS PAGE SHOW? Every section, fields, sources.
+
+C2. IT IS STILL ON THE OLD FLAT 17 GROUPING. Batch 4 of Prompt 76 -
+    SKU Deep Dive, margin payloads, AI segment sections - was never run.
+
+    Confirm, and print what changes if it moves to the six masters. Which
+    figures shift, which breakdowns merge.
+
+C3. AUGUST 2026. Section A of Prompt 101 found August is NOT empty -
+    8,602 rows, 1,108 retailers, Rs 5.64 Cr, partial to 19 August.
+    September is unavailable.
+
+    What does this page show for August, and does it state the partiality?
+
+C4. TANK UNITS. Prompt 54A confirmed sale_line holds resolved pieces in
+    qty with litres in qty_ltr, and that MRP measures read qty correctly.
+    But 46 rows have qty_ltr NULL and still carry raw litres.
+
+    Does this page read qty or qty_ltr, and are those 46 rows handled?
+
+C5. THE 780 UNPRICED CODES - now 814 at Rs 9.36 Cr after P008 hyphen
+    recovery. How does this page show a SKU with no MRP? Blank, zero, or
+    excluded?
+
+C6. Does it carry an export, and what shape?
+```
+
+---
+
+## Section D — overlap with AI Sales Plan
+
+```
+This is the point of the audit.
+
+D1. WHICH OF THE SIX PROPOSED AI SALES PLAN TABS ALREADY EXIST, wholly or
+    partly, in these three pages?
+
+      Tab 1  what a customer buys, FY25 vs FY26, stopped SKUs
+      Tab 2  top-80% SKUs they do not buy
+      Tab 3  SKUs their peers buy
+      Tab 4  SKUs nobody in the peer set buys
+      Tab 5  top 80% by state vs India
+      Tab 6  the rest by national performance
+
+    Sales Deep Dive already has Segment Spread, Win-back dormant
+    retailers, and Cross-sell depth. SKU Deep Dive has breadth. Some of
+    this exists.
+
+D2. WHAT SHOULD MOVE rather than be duplicated? If SKU Deep Dive already
+    computes peer penetration, AI Sales Plan should call it, not rebuild
+    it.
+
+D3. WHICH PAGE SHOULD OWN WHAT? Recommend a division:
+      deep dives      - what happened, per entity
+      AI Sales Plan   - what to do next, per visit
+
+    If a measure exists on two pages with different logic, name it. Two
+    pages disagreeing about the same customer is worse than one page
+    lacking a feature.
+
+D4. SHARED COMPUTE. Peer sets, adjacency and the top-80% snapshot are
+    needed by AI Sales Plan and arguably by SKU Deep Dive. Should they be
+    a shared service?
+```
+
+---
+
+## Section E — common checks across all three
+
+```
+E1. THREE STATES. On each page, find every figure that shows zero where it
+    means unavailable. This has been the single most recurrent defect in
+    this system.
+
+E2. ORDER BOOKING LABELLED AS SALES. Any column headed "Sales" carrying
+    order booking. lineSale = lineAmount was found and fixed in the State
+    Head export; check these three.
+
+E3. UNFORMATTED NUMBERS. Raw floats, scientific notation, percentages as
+    decimals, rupees without Indian grouping.
+
+E4. PERCENTAGES WITHOUT THEIR SIDES. Any achievement or share percentage
+    that cannot be reconciled from figures visible on the same screen.
+
+E5. PROVISIONAL MONTHS. Under the four-month window, June to September are
+    open. Is that stated on each page?
+
+E6. HELD DATA. Do these pages consult the Resolution register? H1 holds
+    PTMT January-April margin. If any shows PTMT margin for those months,
+    it is showing a figure overstated by ~21 points.
+
+Report everything. Propose nothing yet.
+```
+
+---
+
+## Notes
+
+- **Section D is the reason for the audit.** Building a fourth page that recomputes
+  peer penetration differently from SKU Deep Dive would create two answers to one
+  question, and this project has spent weeks removing exactly that.
+- **E6 is the one I would check first.** The Resolution register exists and enforces
+  holds at the API layer. If the deep dives predate it and read `margin_fact`
+  directly, they may be showing held PTMT months.
+- **A2 has been open since the first Deep Dive review** and is a small, visible
+  arithmetic failure — 46 + 18 = 64 against a stated 59. It undermines confidence
+  in everything beside it.
+- **B is the thinnest section because Distributor Deep Dive has had the least
+  scrutiny.** That is itself worth knowing.

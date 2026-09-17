@@ -954,3 +954,17 @@ mtime_ms = 1789632642589
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/7d16d51b-40eb-4dbf-bc86-0f30d1f5b5ce/01e498de-34d9-4fbf-9410-285732d4ff05"
 storage_version_token = "1789632649431356"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "i8F3N7XE3or_P9o6BFwct"
+uri = "file://exports/prompt-102-deep-dive-full-audit.docx"
+type = "word_document"
+title = "Prompt 102 — Full Deep Dive Audit"
+description = "Read-only A–E audit of Sales, Distributor, and SKU Deep Dive, including source-attributed findings, current database checks, overlap analysis, hold behavior, and verification results."
+logical_id = "89e17694-e3d7-4266-81fd-ce90120771af"
+content_hash = "sha256:80d682d52c7ceca0007bd9db5ef8eec3451ca0c0765d3af6fbd55065d6aced6b"
+size = 46189
+mtime_ms = 1789633807860
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/89e17694-e3d7-4266-81fd-ce90120771af/6b793e32-d435-41af-963b-e4c35dd13e5f"
+storage_version_token = "1789633818101182"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
