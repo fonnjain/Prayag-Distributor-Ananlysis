@@ -1,0 +1,233 @@
+# Replit Prompt 101 — AI Sales Plan
+
+**Date:** 16 September 2026
+**Scope:** A is read-only. B is the design. C is the build order.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**A new page: `/ai-sales-plan`.** The fourth AI page. `/ai-targets` proposes
+targets, `/ai-schemes` proposes schemes, `/ai-plan` proposes where to go. **This
+one proposes what to say when you get there.**
+
+---
+
+## The design constraint that shapes everything
+
+The top 80% of the portfolio is **560 codes**. A typical retailer buys **~14
+SKUs**. So the naive gap list is **546 items**.
+
+**Nobody can act on 546 lines.** A 30-minute retailer visit covers eight to
+twelve SKUs credibly.
+
+So this page is not a gap report. **It is a ranked shortlist with a reason
+attached to each line**, and the ranking is the whole product.
+
+The top 80% composition, for reference:
+
+| Group | Codes | Value |
+|---|---:|---:|
+| PTMT / Faucets | 114 | ₹27.34 Cr |
+| CP (Chrome-Plated) | 151 | ₹24.18 Cr |
+| CPVC | 55 | ₹11.95 Cr |
+| SWR | 34 | ₹8.23 Cr |
+| WATER TANK | 23 | ₹6.37 Cr |
+| UPVC | 40 | ₹6.34 Cr |
+| **Total** | **560** | **₹107.54 Cr** |
+
+---
+
+## Section A — read-only, before design is fixed
+
+```
+Read-only. Change nothing.
+
+A1. THE CUSTOMER'S OWN HISTORY. For a named retailer, from
+    secondary_sku_line:
+      FY2025-26: SKUs bought, quantity and value each, months active
+      FY2026-27 to date: the same
+      which of their SKUs are in the top 80% portfolio and which are not
+      which they bought last year and have NOT bought this year
+
+    That last line is the strongest pitch on the page and nobody has it
+    today. Print it for three sample retailers.
+
+A2. PEER SETS. H4 records that canonical geography resolves for 46.27% of
+    FY2026-27 active retailers after the distributor bridge.
+
+    So a same-region peer set works for under half. Print, for the same
+    three retailers:
+      same-state peers, if geography resolves
+      same-distributor peers - always available, and arguably a better
+        comparison than state
+      similar-size peers by annual value quintile
+
+    RECOMMEND which peer basis to lead with. My view: same-distributor
+    first, because it always resolves and a distributor's other retailers
+    are a genuinely comparable set. State second where available.
+
+A3. ADJACENCY. For each retailer, which sub-categories do they buy and
+    which do they not?
+
+    A retailer buying CPVC fittings and no CPVC pipe is a different pitch
+    from one buying no CPVC at all. Print the sub-category coverage for
+    the three samples - how many of 31 they touch.
+
+A4. STATE VERSUS INDIA DEMAND. For the "new customer" tabs, can a SKU's
+    demand be shown per state beside all-India?
+
+    Primary sale_line has state_canon. Secondary has the geography gap.
+    Say which source can carry a state-level SKU ranking and how complete
+    it is.
+
+A5. LAST-YEAR QUANTITY AS A REFERENCE POINT. Confirm FY2025-26
+    retailer-level quantity is available per SKU, since the whole
+    "buy more" pitch rests on it.
+
+    Note H2: August 2026 secondary SKU is empty, and FY2026-27 runs only to
+    July. So the current-year picture has a gap that must be stated.
+
+A6. HOW MANY RETAILERS have enough history to plan against? A retailer with
+    two SKUs and one month has no pattern. Print the distribution of SKUs
+    per retailer so a minimum threshold can be set.
+```
+
+---
+
+## Section B — the page
+
+```
+Design for comment.
+
+TWO AUDIENCES, five tabs. You suggested three plus two; I think five, with
+one addition to each side.
+
+=== EXISTING CUSTOMER ===
+Selected by retailer, or by member showing their retailers.
+
+TAB 1 - WHAT THEY BUY
+  Not a gap list. The salesperson must know this customer BEFORE the gap
+  makes sense.
+
+    every SKU this customer bought, FY2025-26 and FY2026-27 to date
+    quantity and value, side by side, with the change
+    their total, their rank among the member's retailers, months active
+
+    THREE FLAGS, computed:
+      BOUGHT LAST YEAR, NOT THIS YEAR   - the strongest pitch available
+      DOWN MORE THAN 30%                - slipping
+      UP MORE THAN 30%                  - working, do more
+
+    Then, separately: which top-80% SKUs they ALREADY buy, and at what
+    quantity against the peer median. "You buy C62, but half what your
+    peers buy" is a better opening than a new product.
+
+TAB 2 - BUY MORE OF THE TOP 80%
+  Top-80% SKUs this customer does NOT buy, ranked.
+
+    RANKING, in order of weight:
+      1. peer penetration - what share of their peer set buys it
+      2. adjacency - do they already buy this sub-category
+      3. portfolio rank - position within the 560
+
+    SHOW 10, with the top 3 flagged. Not 546.
+
+    Each line carries its reason: "8 of 11 peers at this distributor buy
+    it" or "you buy CPVC fittings but no CPVC pipe".
+
+TAB 3 - SKU PEERS
+  SKUs their peers buy that they do not, WITHOUT the top-80% restriction.
+
+    Default peer set: same distributor. Toggle to same state where
+    geography resolves, and to national.
+
+    STATE THE PEER BASIS AND ITS SIZE ON THE TAB - "compared against 11
+    retailers under this distributor". A peer signal from 3 retailers is
+    not the same as from 40.
+
+    Ranked by peer penetration, then by peer median quantity.
+
+TAB 4 - NEW SKU
+  Products the peer set does NOT buy either, but which sell elsewhere.
+
+    This is the range-extension tab. Ranked by quantity sold elsewhere,
+    largest first, as you specified.
+
+    Add one filter the salesperson needs: EXCLUDE what this region cannot
+    sell. A SKU selling only in Kerala is not a pitch in Bihar.
+
+    If geography does not resolve for this retailer, say so and fall back
+    to national with that stated.
+
+=== NEW CUSTOMER ===
+No purchase history exists, so ranking must come from the market.
+
+TAB 5 - TOP 80%, STATE VS INDIA
+  The 560 top-80% SKUs with TWO demand columns side by side:
+
+    what this SKU does in THIS STATE      value, quantity, rank
+    what it does ACROSS INDIA             value, quantity, rank
+
+    Sorted by state demand, so a new customer is pitched what actually
+    moves where they are.
+
+    THE GAP BETWEEN THE TWO COLUMNS IS THE INSIGHT. A SKU ranked 12th
+    nationally and 180th in this state is either an opportunity or a
+    product that does not suit the market. Flag large divergences both
+    ways.
+
+TAB 6 - THE REST, BY NATIONAL PERFORMANCE
+  Everything outside the top 80%, ranked by all-India sales.
+
+    Same two columns. This is the long tail for a customer who wants
+    breadth beyond the core range.
+
+EVERY TAB
+  - source named on every figure
+  - H2 stated where FY2026-27 secondary is incomplete - August empty, data
+    to July only
+  - peer basis and peer count always visible
+  - never a zero where a figure is unavailable
+  - export to Excel, one workbook per customer, so it can be carried
+```
+
+---
+
+## Section C — build order
+
+```
+C1  Section A. It may change the peer basis and the minimum-history
+    threshold.
+
+C2  TAB 1 - what they buy. Ships alone and is immediately useful. A
+    salesperson walking in knowing what this customer bought last year and
+    has stopped buying is better prepared than anything else on this page.
+
+C3  TAB 5 - top 80%, state vs India. Needs no customer history, so it
+    works for every new prospect from day one.
+
+C4  TAB 2 - buy more of the top 80%. Needs the ranking engine.
+
+C5  TAB 3 - SKU peers. Needs peer sets, which is the hard part.
+
+C6  TAB 4 and TAB 6 - the extension tabs.
+
+C2 and C3 are worth shipping even if nothing after them is built.
+```
+
+---
+
+## Notes
+
+- **Tab 1 before Tab 2, deliberately.** You listed the gap first, but a
+  salesperson who does not know what the customer already buys cannot use a gap
+  list. "You bought 200 of C62 last year and nothing this year" is a stronger
+  opening than any recommendation.
+- **The peer basis matters more than the algorithm.** Same-distributor peers
+  always resolve and are genuinely comparable — same market, same supply route.
+  Same-state peers only resolve for 46.27% of retailers under H4. I would lead
+  with distributor.
+- **Tab 5's two columns are the point of that tab.** A SKU ranked 12th nationally
+  and 180th in a state is a question worth asking. Showing only one column answers
+  nothing.
+- **Ten per tab, three flagged.** 546 lines is a report nobody reads. Ten lines
+  with a reason each is a visit plan.

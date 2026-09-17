@@ -14,5 +14,6 @@ description: RET# is the retailer identity in secondary SKU registers; merged-ce
 - Older FYs title the RET# column "ID"; newer ones "RETAILER ID". Row-serial columns (SR.NO) must never bind to the retailer-id field — only `RET#<digits>` forms are valid IDs (normalise + reject everything else so serial pollution can't recur).
 - Column matchers: "RETAILER ID" startsWith "RETAILER", so name/id columns need exact matching, not prefix matching.
 - Cross-period retailer joins must match ID-to-ID only when BOTH sides carry one, else name-to-name — a plain coalesce key mis-declares rows "new" when ID coverage is asymmetric.
+- In the frozen FY2025-26 SKU generation, the RET# identity is stored in `retailer`; in FY2026-27 it is stored in `retailer_id` while `retailer` becomes the display name. Cross-FY SKU history must join those RET# fields, not compare the two `retailer` values.
 - Backfills that change line UIDs need atomic per-FY replace: buffer all parsed rows, then delete+insert in ONE transaction only after every sheet read succeeded (a mid-read quota failure must never half-load an FY). Also: `arr.push(...rows)` overflows the call stack on ~300k-row tabs — loop instead.
 - Register (non-SKU) rows carry no retailer id — consumers there stay name-keyed but must surface registry ambiguity counts rather than merging silently.

@@ -940,3 +940,17 @@ mtime_ms = 1789393282462
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/0b320094-e068-4a39-b684-bc4c0e4cd20d/fe1b1e46-ba91-4ef8-b356-7f25d1937e9c"
 storage_version_token = "1789393289019206"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "LvsUlmdG8kXlyszvoULSB"
+uri = "file://exports/prompt-101-ai-sales-plan-section-a.docx"
+type = "word_document"
+title = "Prompt 101 — AI Sales Plan Section A"
+description = "Formatted Word document containing the read-only A1–A6 findings, three retailer examples, source notes, revised page design, and top-80 decision."
+logical_id = "7d16d51b-40eb-4dbf-bc86-0f30d1f5b5ce"
+content_hash = "sha256:e048956b6ce23b42c0d10651bfec51ba5be6c2d819f20bbed9783f2f1ba0f462"
+size = 42567
+mtime_ms = 1789632642589
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/7d16d51b-40eb-4dbf-bc86-0f30d1f5b5ce/01e498de-34d9-4fbf-9410-285732d4ff05"
+storage_version_token = "1789632649431356"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
