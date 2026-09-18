@@ -2,8 +2,9 @@
 //
 // Navigation groups:
 //   Dashboard — Overview, Regional, Coverage, Products, Momentum, Growth,
-//               AI Analyst, Reports, Company Reports, Targets, Pending, Sources, Health
-//   Sales     — State Head, Sales People, Primary, Secondary, Combined
+//               Reports, Company Reports, Targets, Pending, Sources, Health
+//   AI        — Analyst, Reports, Targets, Plans, Schemes, Deep Dives
+//   Sales     — State Head, Sales People, Primary, Secondary
 //   MRP       — MRP Master, Margin (GP contribution data)
 //   Market    — Market Survey (competitor pricing intelligence)
 //   Customers — Rankings, Price Shrinkers, At Risk & New, Schemes
@@ -78,18 +79,28 @@ const NAV: NavGroup[] = [
       { id: "products",        label: "Products",        path: "/products",        icon: Package },
       { id: "momentum",        label: "Momentum",        path: "/momentum",        icon: TrendingUp },
       { id: "growth",          label: "Growth",          path: "/growth",          icon: LineChart },
-      { id: "analyst",         label: "AI Analyst",      path: "/analyst",         icon: Bot },
-      { id: "ai-reports",      label: "AI Reports",      path: "/ai-reports",      icon: FileSpreadsheet },
       { id: "reports",         label: "Reports",         path: "/reports",         icon: FileSpreadsheet },
       { id: "company-reports", label: "Company Reports", path: "/company-reports", icon: BarChartIcon },
       { id: "comparison",      label: "Comparison",      path: "/comparison",      icon: LineChart },
-      { id: "ai-targets",      label: "AI Targets",      path: "/ai-targets",      icon: Bot },
-      { id: "ai-plan",         label: "AI Visit Plan",   path: "/ai-plan",         icon: Map },
-      { id: "ai-sales-plan",   label: "AI Sales Plan",   path: "/ai-sales-plan",   icon: Bot },
-      { id: "ai-schemes",      label: "AI Schemes",      path: "/ai-schemes",      icon: Database },
       { id: "targets",         label: "Targets",         path: "/targets",         icon: Target },
       { id: "pending",         label: "Pending Orders",  path: "/pending",         icon: ClipboardList },
       { id: "data-health",     label: "Data Health",     path: "/data-health",     icon: ShieldCheck },
+    ],
+  },
+  {
+    id: "ai",
+    label: "AI",
+    icon: Bot,
+    items: [
+      { id: "analyst",       label: "AI Analyst",    path: "/analyst",       icon: Bot },
+      { id: "ai-reports",    label: "AI Reports",    path: "/ai-reports",    icon: FileSpreadsheet },
+      { id: "ai-targets",    label: "AI Targets",    path: "/ai-targets",    icon: Bot },
+      { id: "ai-plan",       label: "AI Visit Plan", path: "/ai-plan",       icon: Map },
+      { id: "ai-sales-plan", label: "AI Sales Plan", path: "/ai-sales-plan", icon: Bot },
+      { id: "ai-schemes",    label: "AI Schemes",    path: "/ai-schemes",    icon: Database },
+      { id: "deep-dive",             label: "Sales Deep Dive",       path: "/sales/deep-dive",             icon: BookOpen },
+      { id: "distributor-deep-dive", label: "Distributor Deep Dive", path: "/sales/distributor-deep-dive", icon: Network },
+      { id: "sku-deep-dive",         label: "SKU Deep Dive",         path: "/sku",                         icon: Layers },
     ],
   },
   {
@@ -112,9 +123,6 @@ const NAV: NavGroup[] = [
       { id: "primary-performance",    label: "Primary Performance",    path: "/sales/primary-performance",    icon: BarChartIcon },
       { id: "secondary-performance",  label: "Secondary Performance",  path: "/sales/secondary-performance",  icon: ShoppingBag },
       { id: "secondary-orders",       label: "Secondary Orders",       path: "/secondary-orders",             icon: ShoppingCart },
-      { id: "deep-dive",              label: "Sales Deep Dive",        path: "/sales/deep-dive",              icon: BookOpen },
-      { id: "distributor-deep-dive",  label: "Distributor Deep Dive",  path: "/sales/distributor-deep-dive",  icon: Network  },
-      { id: "sku-deep-dive",          label: "SKU Deep Dive",          path: "/sku",                          icon: Layers   },
     ],
   },
   {
@@ -195,14 +203,19 @@ function activeIds(location: string, nav: NavGroup[]): { groupId: string; itemId
   if (location === "/secondary-orders" || location.startsWith("/secondary-orders?")) {
     return { groupId: "sales", itemId: "secondary-orders" };
   }
+  // AI routes include the three Deep Dive pages whose URLs remain unchanged.
+  const aiGroup = nav.find((group) => group.id === "ai");
+  const aiItem = aiGroup?.items.find((item) =>
+    location === item.path || location.startsWith(`${item.path}?`) || location.startsWith(`${item.path}/`)
+  );
+  if (aiItem) {
+    return { groupId: "ai", itemId: aiItem.id };
+  }
   if (location.startsWith("/sales")) {
     const slug = location.replace(/^\/sales\/?/, "").split("?")[0];
     const salesGrp = nav.find((g) => g.id === "sales")!;
     const item = salesGrp.items.find((i) => i.id === slug) ?? salesGrp.items[0];
     return { groupId: "sales", itemId: item.id };
-  }
-  if (location === "/sku" || location.startsWith("/sku/")) {
-    return { groupId: "sales", itemId: "sku-deep-dive" };
   }
   if (location === "/mrp" || location === "/mrp/") {
     return { groupId: "mrp", itemId: "mrp-master" };
@@ -238,15 +251,6 @@ function activeIds(location: string, nav: NavGroup[]): { groupId: string; itemId
     return { groupId: "settings", itemId: "resolution" };
   }
   // Dashboard
-  if (location.startsWith("/ai-plan")) {
-    return { groupId: "dashboard", itemId: "ai-plan" };
-  }
-  if (location.startsWith("/ai-sales-plan")) {
-    return { groupId: "dashboard", itemId: "ai-sales-plan" };
-  }
-  if (location.startsWith("/ai-schemes")) {
-    return { groupId: "dashboard", itemId: "ai-schemes" };
-  }
   const slug = location === "/" ? "overview" : location.replace(/^\//, "").split("?")[0];
   const item = nav[0].items.find((i) => i.id === slug) ?? nav[0].items[0];
   return { groupId: "dashboard", itemId: item.id };
@@ -284,6 +288,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   // Start with the active group expanded; others collapsed.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     dashboard: activeGroupId === "dashboard",
+    ai:        activeGroupId === "ai",
     alerts:    activeGroupId === "alerts",
     sales:     activeGroupId === "sales",
     mrp:       activeGroupId === "mrp",
