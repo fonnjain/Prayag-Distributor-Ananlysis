@@ -6328,6 +6328,39 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
       END $verify$;
     `,
   },
+  {
+    id: "129_prompt116_permanent_source_seam",
+    sql: `
+      -- Product-Wise began on 1 Aug-26 (lowest CRM order SORD-9); PSCode3
+      -- ended on 31 Jul-26. There is no dual-source month to reconcile.
+      UPDATE resolution_item
+         SET title = 'AUGUST 2026 SECONDARY SKU — PERMANENT PRODUCT-WISE SOURCE SEAM',
+             month = 'Aug-26 onward',
+             reason = 'PSCode3 ended on 31 July 2026. Product-Wise began on 1 August 2026 (lowest Product-Wise CRM order: SORD-9), so no overlapping CRM month exists and cross-source retailer × item equality is unprovable from CRM exports. August onward is usable only on the Product-Wise Basic Order Value, ex-GST basis; July and earlier remain on PSCode3 net_amount with observed gross. Multi-month retailer × item arithmetic crossing 31 July is permanently not comparable and remains withheld rather than mixed or shown as zero.',
+             evidence = '[Source: Product-Wise CRM source chronology confirmed 18 September 2026] SORD-9 is dated 1 August 2026 and the August export contains no earlier rows. PSCode3 ends 31 July 2026. [Source: production PostgreSQL read replica, 18 September 2026] July secondary_sku_line has 34,147 PSCode3 rows, 3,297 retailer identities, 2,346 item codes, Rs 22,34,36,806 net and Rs 44,23,26,730.10 observed gross. August secondary_order_line has 28,185 Product-Wise rows, 2,832 retailers, 2,380 item codes and Rs 19,57,88,289 Basic Order Value ex-GST. Independent bridge checks: secondary_head_month and primary sale_line span both months but measure member dashboard orders/receipts and primary dispatch respectively; neither proves retailer × item commercial equivalence. The July register mirror has no August counterpart. This is a permanent source seam, not a pending export or pending reconciliation.',
+             owner = 'internal - permanent source contract',
+             updated_at = now()
+       WHERE code = 'H2'
+         AND type = 'HOLD'
+         AND status = 'open';
+
+      DO $verify$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM resolution_item WHERE code='H2' AND type='HOLD' AND status='open')
+           AND NOT EXISTS (
+             SELECT 1 FROM resolution_item
+              WHERE code='H2' AND type='HOLD' AND status='open'
+                AND month='Aug-26 onward'
+                AND reason ILIKE '%no overlapping CRM month exists%'
+                AND reason ILIKE '%permanently not comparable%'
+                AND evidence ILIKE '%permanent source seam%'
+           )
+        THEN
+          RAISE EXCEPTION 'Prompt 116 permanent source seam correction is incomplete';
+        END IF;
+      END $verify$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

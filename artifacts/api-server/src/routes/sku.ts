@@ -78,6 +78,7 @@ import {
 import { parseJsonArray } from "./companyReports.js";
 import { provisionalMonthsExportInfo } from "../lib/exportInfo.js";
 import { currentOpenFy, deriveSaleLineCohortFy, deriveSaleLineClosedFys } from "../lib/fyAnchors.js";
+import { SecondarySourceSeamError, secondarySourceForMonth } from "../lib/secondary/sourceContract.js";
 import { getVolumeDecline } from "../lib/sku/skuVolumeDecline.js";
 import { getPriceShrinkers } from "../lib/sku/skuPriceShrinkers.js";
 import { getOpenResolutionHolds, resolveHoldExclusionsFromRows } from "../lib/resolution/holdResolver.js";
@@ -189,7 +190,9 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       // NET source documented explicitly (acceptance criterion).
       netSource:
         level === "retailer"
-          ? "secondary_sku_line.net_amount (Sub Total column from secondary register)"
+          ? monthLabels.every((month) => secondarySourceForMonth(month) === "productwise_xlsx")
+            ? "secondary_sku_line.net_amount mapped from Product-Wise Basic Order Value, ex-GST"
+            : "secondary_sku_line.net_amount (PSCode3 SKU NET / Sub Total)"
           : "sale_line.amount (taxable value / net invoice amount)",
       segmentSource:
         level === "retailer"
@@ -232,6 +235,10 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
         : await build();
     res.json(payload);
   } catch (err) {
+    if (err instanceof SecondarySourceSeamError) {
+      res.status(409).json({ error: err.message, code: err.code, comparability: "unprovable_from_crm" });
+      return;
+    }
     req.log.error({ err, fy, level }, "sku facts failed");
     res.status(500).json({ error: "Could not load SKU facts." });
   }
@@ -262,7 +269,7 @@ router.get("/sku/retailer-aug26", async (req: Request, res: Response): Promise<v
     const total = Number(rows[0]?.total_count ?? 0);
     res.json({
       ...AUG26_RETAILER_VIEW,
-      excludedFrom: ["B3", "secondary discount", "multi-month gap", "multi-month breadth", "trends", "recommendations"],
+      excludedFrom: ["B3", "cross-source secondary discount", "multi-month gap across the seam", "multi-month breadth across the seam", "cross-source trends", "recommendations"],
       pagination: { limit, offset, total, hasMore: offset + rows.length < total },
       rows: rows.map(({ total_count: _totalCount, ...row }) => row),
     });
@@ -1240,7 +1247,7 @@ router.get("/sku/discounts", async (req: Request, res: Response): Promise<void> 
   try {
     const [primary, secondary, blocked] = await Promise.all([
       getPrimaryDiscountByCode(fy, channel, monthLabels),
-      getSecondaryDiscountByCode(fy),
+       getSecondaryDiscountByCode(fy, monthLabels),
       getBlockedCapabilities(),
     ]);
     const holds = await getOpenResolutionHolds();

@@ -21,9 +21,18 @@ export type SecondarySeam = {
   from: SecondarySourceMetadata;
   to: SecondarySourceMetadata;
   crossesSourceBoundary: true;
-  approvedEquivalence: boolean;
+  crmOverlapExists: false;
+  comparability: "unprovable_from_crm";
   disclosure: string;
 };
+
+export class SecondarySourceSeamError extends Error {
+  readonly code = "SECONDARY_SOURCE_SEAM_NOT_COMPARABLE";
+  constructor(message: string) {
+    super(message);
+    this.name = "SecondarySourceSeamError";
+  }
+}
 
 const MONTH_RE = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2}$/;
 
@@ -59,7 +68,6 @@ export function assertSecondarySourceMonth(metadata: SecondarySourceMetadata): v
 export function secondarySeam(
   from: SecondarySourceMetadata,
   to: SecondarySourceMetadata,
-  approvedEquivalence = false,
 ): SecondarySeam {
   assertSecondarySourceMonth(from);
   assertSecondarySourceMonth(to);
@@ -70,17 +78,18 @@ export function secondarySeam(
     from,
     to,
     crossesSourceBoundary: true,
-    approvedEquivalence,
-    disclosure: approvedEquivalence
-      ? `Secondary source seam: ${from.month} ${from.source}/${from.value_basis} to ${to.month} ${to.source}/${to.value_basis}; approved equivalence recorded.`
-      : `Secondary source seam: ${from.month} ${from.source}/${from.value_basis} to ${to.month} ${to.source}/${to.value_basis}; values must not be aggregated until equivalence is approved.`,
+    crmOverlapExists: false,
+    comparability: "unprovable_from_crm",
+    disclosure: `Secondary source seam: ${from.month} ${from.source}/${from.value_basis} to ${to.month} ${to.source}/${to.value_basis}. PSCode3 ended on 31 July 2026 and Product-Wise began on 1 August 2026, so no overlapping CRM month exists. Retailer × item values across the seam are permanently not comparable and must not be aggregated.`,
   };
 }
 
-export function assertSecondaryAggregationAllowed(metadata: SecondarySourceMetadata[], approvedEquivalence = false): void {
+export function assertSecondaryAggregationAllowed(metadata: SecondarySourceMetadata[]): void {
   metadata.forEach(assertSecondarySourceMonth);
   const sources = new Set(metadata.map((entry) => entry.source));
-  if (sources.size > 1 && !approvedEquivalence) {
-    throw new Error("Secondary cross-source aggregation refused: July-to-August equivalence is not approved.");
+  if (sources.size > 1) {
+    throw new SecondarySourceSeamError(
+      "Secondary cross-source aggregation refused: PSCode3 ended on 31 July 2026 and Product-Wise began on 1 August 2026. No overlapping CRM month exists, so retailer × item equality is unprovable from CRM data.",
+    );
   }
 }

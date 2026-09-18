@@ -1,10 +1,9 @@
 # Product-Wise Prompt 116 — implementation and gate report
 
 **Date:** 18 September 2026  
-**Implementation scope:** corrected H2 source-change hold, source contract,
-read-only effective-MRP adapter, and isolated July reconciliation gate.  
-**Consumer status:** no existing consumer, route, UI surface, ingestion loader,
-or database table was changed or enabled.
+**Implementation scope:** corrected H2 permanent source-seam hold, source
+contract, effective-MRP adapter, Product-Wise-only retailer facts/discount, and
+an explicit refusal of cross-seam arithmetic.
 
 ## Freshness check — UGD codes
 
@@ -30,18 +29,20 @@ development active generation at this read time. No cache row was changed.
 A replay-safe migration corrects open H2 records without reopening a resolved
 or closed administrator decision:
 
-- H2 is a permanent Product-Wise source-change hold, not a missing-export
-  reminder.
+- H2 is a permanent Product-Wise source seam, not a missing-export or
+  pending-reconciliation reminder.
 - PSCode3 ended after July 2026; no August PSCode3 export is requested.
 - Product-Wise retailer × item data exists in `secondary_order_line`, but its
-  value basis differs from the legacy SKU register.
+  value basis differs permanently from the legacy SKU register.
 - The scope is `Aug-26 onward`, and the owner is the internal parity build.
-- The evidence lists the blocked SKU surfaces and records that only PSCode3's
-  observed MRP/gross fields are irreproducible; the calculation is rebuildable.
+- The evidence records that PSCode3 ended 31 July and Product-Wise began
+  1 August; no overlapping CRM month exists.
 - The central hold resolver now applies open-ended month scopes to every
   concrete month and fiscal year from August 2026 onward.
 
-The surface remains withheld rather than displaying zero.
+Product-Wise-only periods are usable on their stated basis. Cross-seam
+retailer × item arithmetic remains withheld rather than mixed or displayed as
+zero.
 
 ## Section B — source contract
 
@@ -55,15 +56,17 @@ contract:
 - Every metadata object requires `source`, `value_basis`, `month`, `cutoff`,
   and `completeness`.
 - Source-month and value-basis mismatches throw.
-- Cross-source aggregation throws unless an explicit approved-equivalence flag
-  is supplied.
-- `secondarySeam()` emits the required July/August disclosure.
+- Cross-source aggregation always throws. There is no CRM-overlap route to an
+  approved-equivalence flag.
+- `secondarySeam()` states `crmOverlapExists: false`,
+  `comparability: "unprovable_from_crm"`, and emits the permanent July/August
+  disclosure.
 
-The contract is pure and is not yet wired into existing consumers. This is
-intentional: Section D6 prohibits changing consumer surfaces before the D2–D4
-report. Therefore Section B's contract/enforcement layer is implemented, but
-its “every row and every node” rollout remains gated by the missing July
-comparison.
+The contract is wired into retailer SKU facts. Product-Wise-only month
+selections use Product-Wise rows and report source, value basis, month, cutoff,
+completeness, identity coverage, and the permanent seam limitation. A request
+that includes both a PSCode3 and Product-Wise month returns a structured
+conflict instead of summing them.
 
 ## Section C — effective-MRP adapter
 
@@ -82,8 +85,16 @@ comparison.
   excluded product codes.
 - Mixed-period inputs retain the MRP source on every row; August 2026 is
   correctly classified as open FY2026-27 and uses the active synced generation.
+- The secondary-discount endpoint now uses this adapter for Product-Wise-only
+  period selections. Its response labels gross as derived/never observed and
+  exposes the MRP controls. Mixed-source discount periods return unavailable
+  with the permanent-seam reason.
+- Development runtime check: all 8,602 August rows currently lack a matching
+  effective-MRP record, so secondary discount is correctly returned as not
+  offered with 0% value coverage. No zero MRP, zero gross, or fabricated
+  discount is emitted.
 
-## Section D — isolated reconciliation gate
+## Section D — CRM reconciliation is impossible
 
 `artifacts/api-server/src/lib/secondary/julyReconciliation.ts` provides:
 
@@ -97,13 +108,33 @@ comparison.
   still-unproven commercial questions.
 - No loader calls, SQL writes, or `secondary_sku_line` references.
 
-The current result is intentionally:
+The current result is:
 
-**BLOCKED — no independent July Product-Wise export is present.**
+**IMPOSSIBLE — no independent July Product-Wise export can exist.**
 
-The approved PSCode3 target control remains 34,147 rows,
-₹223,436,806 net, and ₹442,326,730.10 gross. Those values are not treated as
-evidence of Product-Wise parity.
+PSCode3 ended on 31 July 2026. The lowest Product-Wise CRM order, `SORD-9`, is
+dated 1 August 2026, and the August export has no earlier rows. The approved
+PSCode3 target control remains 34,147 rows, ₹223,436,806 net, and
+₹442,326,730.10 observed gross. Those values are not treated as evidence of
+Product-Wise parity.
+
+### Independent bridge check
+
+**Database queried:** Replit production PostgreSQL read replica, 18 September
+2026.
+
+| Dataset/source | July 2026 | August 2026 | Finding |
+|---|---:|---:|---|
+| `secondary_head_month` member dashboard | 162 members; ₹20.72 Cr ordered; ₹20.91 Cr received | 162 members; ₹14.41 Cr ordered; ₹15.37 Cr received | Spans the seam at member/month grain only; no retailer or item keys |
+| `sale_line_current` primary dispatch | 13,767 rows; 317 customers; 2,595 codes; ₹32.05 Cr taxable dispatch | 12,870 rows; 337 customers; 2,591 codes; ₹30.42 Cr taxable dispatch | Spans the seam at customer/item grain, but measures primary dispatch, not secondary booking |
+| `secondary_register_line` register mirror | 34,147 rows; ₹22.34 Cr net; ₹44.23 Cr gross | No rows | July control only; no August bridge |
+| `secondary_order_line` | 34,147 legacy-CRM PSCode3 rows; ₹22.34 Cr | 28,185 Product-Wise rows; 2,832 retailers; 2,380 codes; ₹19.58 Cr Basic Order Value ex-GST | Contains the two seam sources themselves; not independent evidence |
+
+The member dashboard and primary dispatch can contextualise the business change
+between months, but neither can establish a conversion ratio between PSCode3
+NET and Product-Wise Basic Order Value. Demand, dispatch timing, population,
+and cutoff can all change between July and August. The seam is therefore
+permanent and commercially undeterminable from available data.
 
 ## Verification
 
@@ -113,7 +144,11 @@ and an existing H2 analytics consumer:
 - `sourceContract.test.ts` — 3 tests
 - `productWiseMrpAdapter.test.ts` — 4 tests
 - `julyReconciliation.test.ts` — 2 tests
-- Total combined verification: **5 files, 27 tests passed**
+- Latest focused verification: **5 files, 22 tests passed**
+- Development runtime: August-only retailer facts return ₹5,64,03,177 Basic
+  Order Value across 14 segments, 100% identified rows, and explicit partial
+  source completeness. A July+August facts request raises
+  `SECONDARY_SOURCE_SEAM_NOT_COMPARABLE`.
 
 API TypeScript typecheck passed and `git diff --check` passed.
 
@@ -122,12 +157,11 @@ API and database package TypeScript checks passed. `git diff --check` passed.
 ## Final disposition
 
 - Sections A and E: implemented and verified in code.
-- Section B: central contract and cross-seam refusal implemented; rollout into
-  existing rows/nodes is correctly stopped at D6.
-- Section C: read-only MRP adapter implemented and verified; not activated on a
-  consumer.
-- Section D: **BLOCKED** because no independent July Product-Wise export is
-  present. D2–D4 and commercial-basis equivalence are not claimed.
-
-The independent July file is required before the D2–D4 report can be produced
-or any existing secondary consumer may be changed.
+- Section B: source metadata is active for retailer facts; mixed-source
+  arithmetic is refused.
+- Section C: effective-MRP adapter is active for Product-Wise-only secondary
+  discount, with derived-gross and coverage controls.
+- Section D: **IMPOSSIBLE from CRM exports**, not pending. Independent
+  aggregate bridges exist but cannot prove commercial equality.
+- Permanent rule: pre-August and post-August retailer × item series are not
+  comparable and must say so.

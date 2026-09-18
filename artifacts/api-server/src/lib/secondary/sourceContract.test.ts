@@ -27,7 +27,11 @@ describe("secondary source contract", () => {
     const july = { source: "pscode3_xlsx" as const, value_basis: "net_amount" as const, month: "Jul-26", cutoff: "archive", completeness: "complete" as const };
     const august = { source: "productwise_xlsx" as const, value_basis: "basic_order_value_ex_gst" as const, month: "Aug-26", cutoff: "CRM export", completeness: "complete" as const };
     expect(() => assertSecondaryAggregationAllowed([july, august])).toThrow("aggregation refused");
-    expect(secondarySeam(july, august).disclosure).toContain("must not be aggregated");
-    expect(() => assertSecondaryAggregationAllowed([july, august], true)).not.toThrow();
+    expect(secondarySeam(july, august)).toMatchObject({
+      crmOverlapExists: false,
+      comparability: "unprovable_from_crm",
+    });
+    expect(secondarySeam(july, august).disclosure).toContain("permanently not comparable");
+    expect(() => assertSecondaryAggregationAllowed([july, august])).toThrow("No overlapping CRM month exists");
   });
 });

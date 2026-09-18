@@ -64,6 +64,8 @@ export type TrendData = {
   sourceMetadata?: Record<string, {
     source: string;
     valueBasis: string;
+    month: string;
+    cutoff: string;
     completeness: "complete" | "partial" | "unavailable";
     identityCoverage: number | null;
     included: boolean;
@@ -241,7 +243,7 @@ export default function SkuTrends({ data }: Props) {
           <p className="font-semibold">Monthly source basis</p>
           <div className="mt-1 space-y-1">
             {Object.entries(data.sourceMetadata ?? {}).flatMap(([month, entries]) => entries.map((meta) => (
-              <p key={`${month}-${meta.source}`}><b>{month}</b>: {meta.source} · {meta.valueBasis} · {meta.completeness} · {meta.included ? "included" : `excluded${meta.exclusionReason ? ` — ${meta.exclusionReason}` : ""}`} · identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}</p>
+               <p key={`${month}-${meta.source}`}><b>{month}</b>: {meta.source} · {meta.valueBasis} · cutoff {meta.cutoff} · {meta.completeness} · {meta.included ? "included" : "excluded"} · identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}{meta.exclusionReason ? ` · ${meta.exclusionReason}` : ""}</p>
             )))}
             {Object.entries(data.excludedMonths ?? {}).map(([month, reason]) => (
               <p key={month} className="font-medium"><b>{month}</b>: excluded — {reason}</p>

@@ -71,6 +71,8 @@ type FactsResponse = {
   sourceMetadata?: Record<string, {
     source: string;
     valueBasis: string;
+    month: string;
+    cutoff: string;
     completeness: "complete" | "partial" | "unavailable";
     identityCoverage: number | null;
     included: boolean;
@@ -168,7 +170,7 @@ export default function SkuPage() {
     if (scopeHead) params.set("scopeId", scopeHead);
     fetch(`${BASE}/api/sku/facts?${params}${filterQuery}`)
       .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        if (!r.ok) return r.json().then((body: { error?: string }) => Promise.reject(new Error(body.error ?? `HTTP ${r.status}`)));
         return r.json() as Promise<FactsResponse>;
       })
       .then((d) => { if (!cancelled) setOverviewData(d); })
@@ -207,7 +209,7 @@ export default function SkuPage() {
     if (scopeHead) params.set("scopeId", scopeHead);
     fetch(`${BASE}/api/sku/facts?${params}${filterQuery}`)
       .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        if (!r.ok) return r.json().then((body: { error?: string }) => Promise.reject(new Error(body.error ?? `HTTP ${r.status}`)));
         return r.json() as Promise<FactsResponse>;
       })
       .then((d) => { if (!cancelled) setDrillData(d); })
@@ -694,7 +696,7 @@ export default function SkuPage() {
             <div className="mb-4 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
               <p className="font-semibold">Monthly source metadata</p>
               {Object.entries(overviewData.sourceMetadata).map(([month, entries]) => entries.map((meta) => (
-                <p key={`${month}-${meta.source}`}><b>{month}</b>: {meta.source} · {meta.valueBasis} · {meta.completeness} · {meta.included ? "included" : `excluded${meta.exclusionReason ? ` — ${meta.exclusionReason}` : ""}`} · identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}</p>
+                <p key={`${month}-${meta.source}`}><b>{month}</b>: {meta.source} · {meta.valueBasis} · cutoff {meta.cutoff} · {meta.completeness} · {meta.included ? "included" : "excluded"} · identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}{meta.exclusionReason ? ` · ${meta.exclusionReason}` : ""}</p>
               )))}
             </div>
           )
@@ -713,7 +715,7 @@ export default function SkuPage() {
             <h3 className="text-sm font-semibold">August 2026 · isolated retailer × item view</h3>
             <p className="mt-1 text-xs text-muted-foreground">Source: Product-Wise CRM order booking, August 2026</p>
             <p className="text-xs text-muted-foreground">Value: Basic Order Value, ex-GST</p>
-            <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Not comparable with PSCode3 SKU NET without reconciliation</p>
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Permanently not comparable with PSCode3 SKU NET: PSCode3 ended 31 July and Product-Wise began 1 August, so no overlapping CRM month exists.</p>
             {augViewError ? <p className="mt-2 text-xs text-destructive">{augViewError}</p> : (
               <div className="mt-3 max-h-64 overflow-auto">
                 <table className="w-full text-xs">

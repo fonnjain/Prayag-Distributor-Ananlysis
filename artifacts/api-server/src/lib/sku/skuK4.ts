@@ -38,6 +38,8 @@ import { SKU_SHEET_IDS, secondarySkuFyHasData, getSecondarySkuFyPeriodLabel } fr
 import { logger } from "../logger.js";
 import { deriveSaleLineClosedFys, currentOpenFy } from "../fyAnchors.js";
 import { getOpenResolutionHolds, resolveHoldExclusionsFromRows, type StructuredExclusion } from "../resolution/holdResolver.js";
+import { adaptProductWiseMrp } from "../secondary/productWiseMrpAdapter.js";
+import { secondarySourceForMonth } from "../secondary/sourceContract.js";
 
 // Closed-FY list is derived at runtime from sale_line_current ingest stats
 // (all fully-ingested calendar-closed FYs, ascending), with a grace window
@@ -383,17 +385,130 @@ export type SecondaryDiscountResult = {
     holds?: boolean;
     note: string;
   };
+  sourceMetadata?: {
+    source: "productwise_xlsx";
+    valueBasis: "basic_order_value_ex_gst";
+    grossBasis: "derived";
+    observedGross: false;
+  };
+  mrpControls?: {
+    rows: number;
+    includedRows: number;
+    missingMrpRows: number;
+    missingMrpValue: number;
+    excludedCodes: string[];
+    valueSelected: number;
+    valueCovered: number;
+    valueCoveragePct: number;
+  };
 };
 
 export async function getSecondaryDiscountByCode(
   fy: string,
+  monthLabels: string[] | null = null,
 ): Promise<SecondaryDiscountResult> {
-  const label =
-    "Register Discount column (retailer-level, beside Sub Total). A DIFFERENT measure from the primary MRP discount.";
-  const secondaryPeriods = FY_MONTHS.map((month) => {
+  const selectedPeriods = monthLabels ?? FY_MONTHS.map((month) => {
     const suffix = ["Jan", "Feb", "Mar"].includes(month) ? fy.slice(-2) : fy.slice(2, 4);
     return `${month}-${suffix}`;
   });
+  const selectedSources = new Set(selectedPeriods.map(secondarySourceForMonth));
+  if (selectedSources.size > 1) {
+    return {
+      measureLabel: "Secondary discount uses source-specific value bases.",
+      fy,
+      available: false,
+      reason: "PSCode3 ended on 31 July 2026 and Product-Wise began on 1 August 2026. No overlapping CRM month exists, so a discount series crossing the seam is permanently not comparable.",
+      codes: [],
+      widestGaps: [],
+      verification: { sampled: false, note: "permanent source seam" },
+    };
+  }
+  if (selectedSources.has("productwise_xlsx")) {
+    const raw = await db.execute<{
+      product_code: string; order_datetime: string; category_name: string | null;
+      discount_pct: number | null; basic_order_value: number; dealer_id: string;
+    }>(sql`
+      SELECT product_code, order_datetime::text, category_name,
+             discount_pct::float8, basic_order_value::float8, dealer_id
+        FROM secondary_order_line
+       WHERE fiscal_year = ${fy}
+         AND source_kind = 'product_wise'
+         AND to_char(order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')
+             = ANY(ARRAY[${sql.join(selectedPeriods.map((month) => sql`${month}`), sql`, `)}])
+         AND basic_order_value IS NOT NULL
+    `);
+    const adapted = await adaptProductWiseMrp(raw.rows.map((row) => ({
+      productCode: row.product_code,
+      month: selectedPeriods[0]!,
+      transactionDate: row.order_datetime,
+      segment: row.category_name,
+      discountPct: row.discount_pct,
+      basicOrderValueExGst: row.basic_order_value,
+    })));
+    const customerRows = new Map<string, {
+      code: string; segment: string; customer: string; net: number; gross: number;
+    }>();
+    adapted.rows.forEach((row, index) => {
+      if (!row.included || row.gross == null) return;
+      const source = raw.rows[index]!;
+      const key = `${row.productCode}\u0000${source.dealer_id}`;
+      const current = customerRows.get(key) ?? {
+        code: row.productCode, segment: row.segment ?? "Unmapped",
+        customer: source.dealer_id, net: 0, gross: 0,
+      };
+      current.net += row.basicOrderValueExGst;
+      current.gross += row.gross;
+      customerRows.set(key, current);
+    });
+    const byCode = new Map<string, {
+      segment: string; customers: Array<{ id: string; net: number; gross: number }>;
+    }>();
+    for (const row of customerRows.values()) {
+      const current = byCode.get(row.code) ?? { segment: row.segment, customers: [] };
+      current.customers.push({ id: row.customer, net: row.net, gross: row.gross });
+      byCode.set(row.code, current);
+    }
+    const codes: DiscountCodeRow[] = [...byCode.entries()].map(([code, group]) => {
+      const customers = group.customers.map((row) => ({
+        ...row, discount: row.gross > 0 ? Math.max(0, Math.min(1, 1 - row.net / row.gross)) : 0,
+      })).sort((a, b) => a.discount - b.discount || a.id.localeCompare(b.id));
+      const net = customers.reduce((sum, row) => sum + row.net, 0);
+      const gross = customers.reduce((sum, row) => sum + row.gross, 0);
+      const discounts = customers.map((row) => row.discount);
+      return {
+        code,
+        segment: group.segment,
+        customers: customers.length,
+        net,
+        avgDiscount: gross > 0 ? Math.max(0, Math.min(1, 1 - net / gross)) : 0,
+        minDiscount: Math.min(...discounts),
+        maxDiscount: Math.max(...discounts),
+        spread: Math.max(...discounts) - Math.min(...discounts),
+        lowCustomer: customers[0]?.id ?? null,
+        highCustomer: customers.at(-1)?.id ?? null,
+      };
+    }).sort((a, b) => b.net - a.net);
+    return {
+      measureLabel: "Product-Wise Discount % on Basic Order Value, ex-GST; effective MRP is used only for not-offered coverage. Gross is derived, never observed.",
+      fy,
+      available: codes.length > 0,
+      reason: codes.length > 0 ? undefined : "No Product-Wise rows passed the effective-MRP and discount controls.",
+      codes: codes.slice(0, 500),
+      widestGaps: codes.filter((row) => row.customers >= 3).sort((a, b) => b.spread - a.spread).slice(0, 25),
+      sourceMetadata: {
+        source: "productwise_xlsx", valueBasis: "basic_order_value_ex_gst",
+        grossBasis: "derived", observedGross: false,
+      },
+      mrpControls: adapted.controls,
+      verification: {
+        sampled: false,
+        note: `${adapted.controls.includedRows} of ${adapted.controls.rows} Product-Wise rows have effective MRP and a valid discount denominator; value coverage ${(adapted.controls.valueCoveragePct * 100).toFixed(2)}%. Gross is derived, not observed.`,
+      },
+    };
+  }
+  const label =
+    "Register Discount column (retailer-level, beside Sub Total). A DIFFERENT measure from the primary MRP discount.";
+  const secondaryPeriods = selectedPeriods;
   const secondaryExclusions = (await getOpenResolutionHolds()).flatMap((hold) =>
     resolveHoldExclusionsFromRows({
       measure: "secondary SKU",

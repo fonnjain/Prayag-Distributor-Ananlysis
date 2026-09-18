@@ -6,7 +6,7 @@ describe("SKU source seam contract", () => {
     expect(AUG26_RETAILER_VIEW).toEqual({
       source: "Product-Wise CRM order booking, August 2026",
       valueBasis: "Basic Order Value, ex-GST",
-      comparability: "Not comparable with PSCode3 SKU NET without reconciliation",
+      comparability: "Permanently not comparable with PSCode3 SKU NET: the CRM systems have no overlapping month",
     });
   });
 
@@ -32,8 +32,9 @@ describe("SKU source seam contract", () => {
     expect(page.hasMore).toBe(true);
   });
 
-  it("excludes Product-Wise from standard facts, trends, gaps, breadth and recommendations", () => {
+  it("allows a Product-Wise-only period but refuses a mixed source selection", () => {
     expect(includedInStandardRetailerAnalytics("pscode3_xlsx")).toBe(true);
-    expect(includedInStandardRetailerAnalytics("productwise_xlsx")).toBe(false);
+    expect(includedInStandardRetailerAnalytics("productwise_xlsx")).toBe(true);
+    expect(includedInStandardRetailerAnalytics("productwise_xlsx", ["pscode3_xlsx", "productwise_xlsx"])).toBe(false);
   });
 });

@@ -19,7 +19,7 @@ export type JulyComparisonRow = {
 };
 
 export type JulyReconciliationReport = {
-  status: "BLOCKED" | "MEASURED";
+  status: "IMPOSSIBLE" | "MEASURED";
   source: "productwise_xlsx";
   valueBasis: "basic_order_value_ex_gst";
   sourceFile: string | null;
@@ -137,7 +137,8 @@ function grouped(rows: JulyComparisonRow[], key: (row: JulyComparisonRow) => str
 
 /**
  * Read-only gate. Without an independently supplied July CRM file this returns
- * BLOCKED; it never calls a loader and never accesses or mutates SKU tables.
+ * IMPOSSIBLE; the two CRM systems have no overlapping month. It never calls a
+ * loader and never accesses or mutates SKU tables.
  */
 export async function reconcileIndependentJulyProductWise(
   filePath: string | null,
@@ -145,9 +146,9 @@ export async function reconcileIndependentJulyProductWise(
 ): Promise<JulyReconciliationReport> {
   if (!filePath) {
     return {
-      status: "BLOCKED", source: "productwise_xlsx", valueBasis: "basic_order_value_ex_gst",
+      status: "IMPOSSIBLE", source: "productwise_xlsx", valueBasis: "basic_order_value_ex_gst",
       sourceFile: null, sourceSha256: null,
-      reason: "Independent July Product-Wise export is not present; D2-D4 reconciliation cannot be measured.",
+      reason: "No independent July Product-Wise export can exist: PSCode3 ended on 31 July 2026 and the Product-Wise CRM began on 1 August 2026 (lowest CRM order SORD-9). Cross-source equality is unprovable from CRM exports.",
     };
   }
   const rows = await parseIndependentJulyProductWise(filePath);

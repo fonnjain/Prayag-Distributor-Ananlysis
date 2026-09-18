@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import { JULY_PSCODE3_CONTROL, reconcileIndependentJulyProductWise } from "./julyReconciliation.js";
 
 describe("isolated July Product-Wise reconciliation gate", () => {
-  it("reports BLOCKED without an independent July file", async () => {
+  it("reports IMPOSSIBLE because the CRM systems have no overlapping month", async () => {
     const report = await reconcileIndependentJulyProductWise(null);
-    expect(report.status).toBe("BLOCKED");
-    expect(report.reason).toContain("cannot be measured");
+    expect(report.status).toBe("IMPOSSIBLE");
+    expect(report.reason).toContain("can exist");
   });
 
   it("keeps the PSCode3 control as a target and the gate read-only", () => {

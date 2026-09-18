@@ -15,17 +15,17 @@ Product-Wise month permanence shares the existing `register_month_state` and the
 
 **How to apply:** Keep all Product-Wise loaders on the shared freeze decision/state; never add a bypass or reset endpoint. The API status must expose every month/source pair's frozen state and source evidence.
 
-Product-Wise parity has a hard activation gate: source-contract and read-only
-adapter code may be built first, but no existing secondary consumer may cross
-the July/August seam until an independent July Product-Wise export has been
-reconciled against PSCode3 at row, item, retailer, total, and inclusion-rule
-levels.
+Product-Wise and PSCode3 have a permanent source seam. PSCode3 ends on 31 July
+2026; Product-Wise begins on 1 August 2026, so no overlapping CRM month exists
+and cross-source retailer-item equality is unprovable from CRM data.
 
-**Why:** The accepted PSCode3 July total is only a single-source target control;
-it does not prove that Product-Wise Basic Order Value has the same commercial
-definition or GST/returns/status population.
+**Why:** The lowest Product-Wise order is dated 1 August. Aggregate sources that
+span both months measure different grains (member dashboards or primary
+dispatch) and cannot establish a conversion between PSCode3 NET and Product-Wise
+Basic Order Value.
 
-**How to apply:** Keep pre-August and post-August values separate and disclose
-the seam. A measured mismatch is acceptable evidence; an unmeasured seam is
-not. Do not enable source-aware consumer rollout until the comparison report
-exists.
+**How to apply:** Product-Wise-only periods may be used on Basic Order Value,
+ex-GST with source/cutoff/completeness metadata. Keep pre-August and post-August
+retailer-item arithmetic separate forever; refuse mixed sums and trends. Gross
+derived through discount must remain labelled derived, and rows without
+effective MRP are unavailable/not offered, never zero.
