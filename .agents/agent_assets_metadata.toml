@@ -1010,3 +1010,17 @@ mtime_ms = 1789703270206
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/367ce0cf-4538-41e5-aaaf-1704c38dfb93/4d4f92ff-0361-44dd-8293-fa06266ec9f2"
 storage_version_token = "1789703283367434"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "qzs5aO8gZAFfCXzH2axFG"
+uri = "file://exports/Reports_Data_Source_Resolution_2026-09-18.xlsx"
+type = "table"
+title = "Reports Data-Source Resolution"
+description = "Excel audit of resolved report fields, remaining unavailable fields, required source/action, owner, impact, and safe handling."
+logical_id = "3c04853a-582a-4c86-868d-1b0f0467c54e"
+content_hash = "sha256:3e93dbfadf149cf4b0c5d408c209efcc9a1721a3314a154576cdc4a62e0ede41"
+size = 8704
+mtime_ms = 1789711472688
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/3c04853a-582a-4c86-868d-1b0f0467c54e/c94c8f2f-6693-4ac1-a4ec-93d632404f80"
+storage_version_token = "1789711565457012"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

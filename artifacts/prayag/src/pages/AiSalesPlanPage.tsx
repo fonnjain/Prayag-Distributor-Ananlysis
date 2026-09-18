@@ -12,24 +12,20 @@ import { formatCompact, formatINR } from "@/data/dataset";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-const INDIAN_STATES = [
-  "Andaman and Nicobar Islands", "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", 
-  "Chandigarh", "Chhattisgarh", "Dadra and Nagar Haveli", "Daman and Diu", "Delhi", 
-  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jammu and Kashmir", "Jharkhand", 
-  "Karnataka", "Kerala", "Ladakh", "Lakshadweep", "Madhya Pradesh", "Maharashtra", 
-  "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Puducherry", "Punjab", 
-  "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", 
-  "Uttarakhand", "West Bengal"
-];
-
 // API Types
 type AiSalesPlanOptions = {
-  members: { id: string; member: string; retailerCount: number }[];
-  retailers: { id: string; retailer: string; member: string; state: string; distributor: string; distributorId: string }[];
+  stateHeads: { id: string; stateHead: string; memberCount: number; retailerCount: number }[];
+  members: { id: string; member: string; retailerCount: number; stateHeadId: string | null; stateHead: string | null }[];
+  states: { state: string; retailerCount: number }[];
+  districts: { district: string; retailerCount: number }[];
+  retailers: {
+    id: string; retailer: string; member: string; memberId: string | null;
+    stateHead: string | null; stateHeadId: string | null; state: string | null;
+    district: string | null; distributor: string | null; distributorId: string | null;
+  }[];
   source: string;
   coverage: any;
   counts: any;
-  retailer?: { truncated?: boolean }; // Fallback for truncation flag
 };
 
 type SharedComputeResponse = {
@@ -131,13 +127,23 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
-function useAiSalesPlanOptions(fy: string, q: string, memberId: string) {
+function useAiSalesPlanOptions(
+  fy: string,
+  q: string,
+  stateHeadId: string,
+  memberId: string,
+  state: string,
+  district: string,
+) {
   return useQuery({
-    queryKey: ["ai-sales-plan-options", fy, q, memberId],
+    queryKey: ["ai-sales-plan-options", fy, q, stateHeadId, memberId, state, district],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams({ fy });
       if (q) params.set("q", q);
+      if (stateHeadId && stateHeadId !== "all") params.set("stateHead", stateHeadId);
       if (memberId && memberId !== "all") params.set("member", memberId);
+      if (state && state !== "none") params.set("state", state);
+      if (district && district !== "all") params.set("district", district);
       const res = await fetch(`${BASE}/api/ai-sales-plan/options?${params}`, {
         credentials: "include",
         signal,
@@ -427,8 +433,10 @@ export default function AiSalesPlanPage() {
   const fy = "2026-27";
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebounce(searchTerm, 300);
+  const [selectedStateHeadId, setSelectedStateHeadId] = useState<string>("all");
   const [selectedMemberId, setSelectedMemberId] = useState<string>("all");
   const [selectedState, setSelectedState] = useState<string>("none");
+  const [selectedDistrict, setSelectedDistrict] = useState<string>("all");
   const [selectedRetailer, setSelectedRetailer] = useState<any>(null);
 
   useEffect(() => {
@@ -442,9 +450,25 @@ export default function AiSalesPlanPage() {
     if (selectedRetailer && selectedRetailer.state && selectedRetailer.state !== selectedState) {
       setSelectedState(selectedRetailer.state);
     }
+    if (selectedRetailer?.district && selectedRetailer.district !== selectedDistrict) {
+      setSelectedDistrict(selectedRetailer.district);
+    }
+    if (selectedRetailer?.memberId && selectedRetailer.memberId !== selectedMemberId) {
+      setSelectedMemberId(selectedRetailer.memberId);
+    }
+    if (selectedRetailer?.stateHeadId && selectedRetailer.stateHeadId !== selectedStateHeadId) {
+      setSelectedStateHeadId(selectedRetailer.stateHeadId);
+    }
   }, [selectedRetailer]);
 
-  const { data: options, isLoading: isOptionsLoading } = useAiSalesPlanOptions(fy, debouncedSearch, selectedMemberId);
+  const { data: options, isLoading: isOptionsLoading, error: optionsError } = useAiSalesPlanOptions(
+    fy,
+    debouncedSearch,
+    selectedStateHeadId,
+    selectedMemberId,
+    selectedState,
+    selectedDistrict,
+  );
   
   const effectiveState = selectedRetailer ? selectedRetailer.state : (selectedState === "none" ? "" : selectedState);
 
@@ -478,27 +502,16 @@ export default function AiSalesPlanPage() {
   }, []);
 
   const handleSearchFocus = () => {
-    if (debouncedSearch) setIsDropdownOpen(true);
+    if (options?.retailers) setIsDropdownOpen(true);
   };
   
   useEffect(() => {
-    if (debouncedSearch && options?.retailers && options.retailers.length > 0) {
+    if (debouncedSearch && options?.retailers) {
       setIsDropdownOpen(true);
-    } else {
-      setIsDropdownOpen(false);
     }
   }, [debouncedSearch, options]);
 
-  const uniqueMembers = React.useMemo(() => {
-    if (!options?.members) return [];
-    return options.members;
-  }, [options]);
-
-  const isSearchTruncated = 
-    options?.retailer?.truncated || 
-    options?.counts?.retailer?.truncated || 
-    options?.counts?.retailers?.truncated || 
-    (options as any)?.truncated;
+  const isSearchTruncated = options?.coverage?.retailer?.truncated === true;
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-background">
@@ -517,9 +530,29 @@ export default function AiSalesPlanPage() {
 
           <div className="flex flex-wrap items-center gap-3">
             <Badge variant="outline" className="h-9 px-3 bg-muted/50 rounded-md text-sm font-normal">FY {fy}</Badge>
-            
+
+            <Select value={selectedStateHeadId} onValueChange={(val) => {
+              setSelectedStateHeadId(val);
+              setSelectedMemberId("all");
+              setSelectedState("none");
+              setSelectedDistrict("all");
+              setSelectedRetailer(null);
+            }}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="All State Heads" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All State Heads</SelectItem>
+                {(options?.stateHeads ?? []).map((head) => (
+                  <SelectItem key={head.id} value={head.id}>{head.stateHead}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             <Select value={selectedMemberId} onValueChange={(val) => {
               setSelectedMemberId(val);
+              setSelectedState("none");
+              setSelectedDistrict("all");
               setSelectedRetailer(null);
             }}>
               <SelectTrigger className="w-[180px]">
@@ -527,7 +560,7 @@ export default function AiSalesPlanPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Members</SelectItem>
-                {uniqueMembers.map((m: any) => (
+                {(options?.members ?? []).map((m) => (
                   <SelectItem key={m.id} value={m.id}>{m.member}</SelectItem>
                 ))}
               </SelectContent>
@@ -535,6 +568,7 @@ export default function AiSalesPlanPage() {
 
             <Select value={selectedState} onValueChange={(val) => {
               setSelectedState(val);
+              setSelectedDistrict("all");
               if (selectedRetailer && selectedRetailer.state !== val && val !== "none") {
                 setSelectedRetailer(null);
               }
@@ -544,8 +578,25 @@ export default function AiSalesPlanPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">All States</SelectItem>
-                {INDIAN_STATES.map((state) => (
-                  <SelectItem key={state} value={state}>{state}</SelectItem>
+                {(options?.states ?? []).map((row) => (
+                  <SelectItem key={row.state} value={row.state}>{row.state}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={selectedDistrict} onValueChange={(val) => {
+              setSelectedDistrict(val);
+              if (selectedRetailer && selectedRetailer.district !== val && val !== "all") {
+                setSelectedRetailer(null);
+              }
+            }}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="All Districts" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Districts</SelectItem>
+                {(options?.districts ?? []).map((row) => (
+                  <SelectItem key={row.district} value={row.district}>{row.district}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -586,7 +637,9 @@ export default function AiSalesPlanPage() {
                               className="px-3 py-2 hover:bg-muted cursor-pointer text-sm border-b last:border-0"
                             >
                               <div className="font-semibold text-foreground">{r.retailer} <span className="text-muted-foreground font-normal text-xs">({r.id})</span></div>
-                              <div className="text-[10px] text-muted-foreground mt-0.5">{r.distributor} &bull; {r.state} &bull; {r.member}</div>
+                              <div className="text-[10px] text-muted-foreground mt-0.5">
+                                {[r.stateHead, r.member, r.district, r.state, r.distributor].filter(Boolean).join(" • ")}
+                              </div>
                             </div>
                           ))
                         )}
@@ -601,6 +654,7 @@ export default function AiSalesPlanPage() {
                 </>
               )}
             </div>
+            {optionsError && <span className="text-xs text-destructive">Filters failed to load.</span>}
           </div>
         </div>
       </div>

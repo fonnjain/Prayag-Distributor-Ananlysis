@@ -990,6 +990,7 @@ export async function buildWorkingDataWorkbook(p: CompanyReportsPayload, filter?
   addR7("Total sale", p.r7_asOf.total);
   addR7(p.fy === "2023-24" ? "Invoice count*" : "Invoice count", p.r7_asOf.invoiceCount);
   addR7("Customer count", p.r7_asOf.customerCount);
+  addR7("Source note", p.r7_asOf.note);
   if (p.fy === "2023-24") {
     addR7(
       "Invoice-count limitation",
@@ -1003,12 +1004,28 @@ export async function buildWorkingDataWorkbook(p: CompanyReportsPayload, filter?
   addR7("By state", "Amount", true);
   for (const s of p.r7_asOf.byState) addR7(s.state, s.amount);
 
+  addSheet(wb, "R7 Party Detail", [
+    { header: "Party", key: "customer", width: 36 },
+    { header: "State", key: "state", width: 22 },
+    { header: "Master group", key: "group", width: 22 },
+    { header: "Sub-category", key: "subcategory", width: 22 },
+    { header: "Amount", key: "amount", width: 20 },
+  ], p.r3b_byPartyGroup
+    .filter((row) => row.thisFy !== 0)
+    .map((row) => ({
+      customer: row.customer,
+      state: row.state,
+      group: row.group,
+      subcategory: row.subcategory,
+      amount: row.thisFy,
+    })));
+
   // Helper sheets are deliberately last and veryHidden in the working-data
   // workbook; the sales-head wrapper below removes them.
   const visibleOrder = [
     "Info", "Report 1", "Report 2", "R3 By Group", "R3A State x Group",
     "R3B Party x Group", "R4 Quantity", "R5 By Customer",
-    "R6 By Group (full prior)", "R7 As-of Snapshot",
+    "R6 By Group (full prior)", "R7 As-of Snapshot", "R7 Party Detail",
   ];
   const ordered = [...visibleOrder, "Export Data R1", "Export Data R2"];
   ordered.forEach((name, index) => {
@@ -1020,10 +1037,10 @@ export async function buildWorkingDataWorkbook(p: CompanyReportsPayload, filter?
 }
 
 /**
- * Sales-head workbook. Verification dumps and the metadata snapshot live only
- * behind Download working data. Formula cells which depended on those hidden
+ * Sales-head workbook. Formula cells which depended on hidden verification
  * ranges are frozen to their already-computed cached values before the helper
- * sheets are removed, so the default file never contains broken references.
+ * sheets are removed, so the default file contains Reports 1–7 without broken
+ * references or internal-only formula data.
  */
 export async function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyReportsFilter): Promise<ExcelJS.Workbook> {
   const wb = await buildWorkingDataWorkbook(p, filter);
@@ -1064,7 +1081,7 @@ export async function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyRe
   // Dropdowns need the hidden helper ranges. The sales-head file is a
   // filtered snapshot, so do not leave validations pointing at removed sheets.
   for (const ws of [r1, r2]) clearDataValidations(ws);
-  for (const name of ["R7 As-of Snapshot", "Export Data R1", "Export Data R2"]) {
+  for (const name of ["Export Data R1", "Export Data R2"]) {
     const sheet = wb.getWorksheet(name);
     if (sheet) wb.removeWorksheet(sheet.id);
   }
@@ -1072,6 +1089,7 @@ export async function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyRe
   const visibleOrder = [
     "Info", "Report 1", "Report 2", "R3 By Group", "R3A State x Group",
     "R3B Party x Group", "R4 Quantity", "R5 By Customer", "R6 By Group (full prior)",
+    "R7 As-of Snapshot", "R7 Party Detail",
   ];
   visibleOrder.forEach((name, index) => {
     const sheet = wb.getWorksheet(name);

@@ -53,6 +53,20 @@ const unavailable = (reason: string, source: string, period: string, filters: Re
 });
 
 type Retailer = { id: string; distributor: string | null; cp_code?: string | null; state: string | null; value: number };
+type SalesPlanIdentity = {
+  id: string;
+  retailer: string;
+  member: string | null;
+  memberId: string | null;
+  stateHead: string | null;
+  stateHeadId: string | null;
+  state: string | null;
+  district: string | null;
+  distributor: string | null;
+  distributorId: string | null;
+};
+const salesPlanIdentityCache = new Map<string, { expiresAt: number; rows: SalesPlanIdentity[] }>();
+const salesPlanIdentityInflight = new Map<string, Promise<SalesPlanIdentity[]>>();
 
 async function peerSet(retailer: string, fy: string, basis: string, state?: string) {
   const target = await pool.query<any>(
@@ -290,56 +304,186 @@ const categories = [...new Set(assignments.map((a) => a.subcategory).filter(Bool
 router.get("/ai-sales-plan/options", async (req, res): Promise<void> => {
   const fy = String(req.query.fy ?? "2026-27").trim();
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  const stateHead = typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
   const member = typeof req.query.member === "string" ? req.query.member.trim() : "";
+  const state = typeof req.query.state === "string" ? req.query.state.trim() : "";
+  const district = typeof req.query.district === "string" ? req.query.district.trim() : "";
   const cap = 100;
   if (!FY.test(fy)) { res.status(400).json({ error: "fy must be YYYY-YY" }); return; }
-  if (q.length > 120 || member.length > 120) { res.status(400).json({ error: "q and member must be at most 120 characters" }); return; }
+  if ([q, stateHead, member, state, district].some((value) => value.length > 120)) {
+    res.status(400).json({ error: "filter values must be at most 120 characters" });
+    return;
+  }
   try {
-    const params: unknown[] = [fy];
-    const conditions = ["fiscal_year=$1", "dealer_id ~ '^RET#[0-9]+$'"];
-    if (member) { params.push(member); conditions.push(`sales_user_name=$${params.length}`); }
-    if (q) {
-      params.push(`%${q}%`);
-      conditions.push(`(dealer_id ILIKE $${params.length}
-        OR COALESCE(customer_name,'') ILIKE $${params.length})`);
-    }
-    params.push(cap + 1);
-    const retailers = await pool.query(
-      `SELECT dealer_id id,
-              MAX(customer_name) display, MAX(sales_user_name) member,
-              MAX(state) state,
-              MAX(cp_code) FILTER (WHERE cp_code ~ '^DIST#[0-9]+$') dist_id,
-              MAX(cp_name) distributor,
-              COUNT(*) OVER()::int total_count
-         FROM secondary_order_line WHERE ${conditions.join(" AND ")}
-        GROUP BY 1 ORDER BY 2 NULLS LAST, 1 LIMIT $${params.length}`, params);
-    const rows = retailers.rows.slice(0, cap).map((r) => ({
-      id: r.id, retailer: r.display ?? r.id, member: r.member ?? null,
-      state: r.state ?? null, distributor: r.dist_id ?? r.distributor ?? null,
-      distributorId: r.dist_id ?? null,
-    }));
+    const hierarchyCte = `
+      WITH raw_hierarchy AS (
+        SELECT head_canon member_key,
+               MIN(head_raw) member,
+               MIN(state_head) state_head
+          FROM secondary_head_month
+         WHERE fy=$1 AND NULLIF(BTRIM(state_head),'') IS NOT NULL
+         GROUP BY head_canon
+        HAVING COUNT(DISTINCT REGEXP_REPLACE(LOWER(state_head),'[^a-z0-9]+','','g'))=1
+      ), hierarchy AS (
+        SELECT member_key, member, state_head,
+               REGEXP_REPLACE(LOWER(state_head),'[^a-z0-9]+','','g') state_head_key
+          FROM raw_hierarchy
+      ), base AS (
+        SELECT sol.dealer_id,
+               sol.customer_name,
+               sol.sales_user_name,
+               REGEXP_REPLACE(LOWER(sol.sales_user_name),'[^a-z0-9]+','','g') member_key,
+               COALESCE(h.member, sol.sales_user_name) member,
+               h.state_head,
+               h.state_head_key,
+               COALESCE(NULLIF(BTRIM(sol.state),''), NULLIF(BTRIM(cm.state),'')) state,
+               COALESCE(NULLIF(BTRIM(sol.district),''), NULLIF(BTRIM(cm.district),'')) district,
+               sol.cp_code,
+               sol.cp_name
+          FROM secondary_order_line sol
+          LEFT JOIN hierarchy h
+            ON h.member_key=REGEXP_REPLACE(LOWER(sol.sales_user_name),'[^a-z0-9]+','','g')
+          LEFT JOIN customer_master cm ON cm.id=sol.dealer_id
+         WHERE sol.fiscal_year=$1
+           AND sol.dealer_id ~ '^RET#[0-9]+$'
+      )`;
 
-    // The order source supplies the recorded sales-user name beside RET#.
-    // Filtering stays exact and never merges similar names.
-    const memberParams: unknown[] = [fy];
-    const memberWhere = ["fiscal_year=$1", "NULLIF(BTRIM(sales_user_name),'') IS NOT NULL"];
-    if (q) { memberParams.push(`%${q}%`); memberWhere.push(`sales_user_name ILIKE $${memberParams.length}`); }
-    if (member) { memberParams.push(member); memberWhere.push(`sales_user_name=$${memberParams.length}`); }
-    memberParams.push(cap + 1);
-    const members = await pool.query(
-      `SELECT sales_user_name id,
-              sales_user_name display, COUNT(DISTINCT dealer_id)::int retailer_count,
-              COUNT(*) OVER()::int total_count
-         FROM secondary_order_line WHERE ${memberWhere.join(" AND ")}
-        GROUP BY 1 ORDER BY 2 NULLS LAST, 1 LIMIT $${memberParams.length}`, memberParams);
-    const memberRows = members.rows.slice(0, cap).map((r) => ({ id: r.id, member: r.display ?? r.id, retailerCount: Number(r.retailer_count) }));
-    const totalRetailers = Number(retailers.rows[0]?.total_count ?? rows.length);
-    const totalMembers = Number(members.rows[0]?.total_count ?? memberRows.length);
-    const coverage = { source: "secondary_order_line (dealer_id RET#; valid cp_code DIST# with cp_name fallback; sales_user_name; state)", period: fy,
-      requested: { q: q || null, member: member || null }, cap, retailer: { returned: rows.length, truncated: retailers.rows.length > cap },
-      member: { returned: memberRows.length, truncated: members.rows.length > cap },
-      totals: { retailers: totalRetailers, members: totalMembers } };
-    res.json({ fy, q: q || null, member: member || null, members: memberRows, retailers: rows, source: coverage.source, coverage, counts: { members: totalMembers, retailers: totalRetailers } });
+    const cached = salesPlanIdentityCache.get(fy);
+    let identities = cached && cached.expiresAt > Date.now() ? cached.rows : null;
+    if (!identities) {
+      let pending = salesPlanIdentityInflight.get(fy);
+      if (!pending) {
+        pending = pool.query<any>(
+          `${hierarchyCte}
+           SELECT dealer_id id,
+                  MIN(customer_name) display,
+                  member_key,
+                  MIN(member) member,
+                  MIN(state_head) state_head,
+                  MIN(state_head_key) state_head_key,
+                  MAX(state) state,
+                  MAX(district) district,
+                  MAX(cp_code) FILTER (WHERE cp_code ~ '^DIST#[0-9]+$') dist_id,
+                  MAX(cp_name) distributor
+             FROM base
+            GROUP BY dealer_id, member_key`,
+          [fy],
+        ).then((identityResult) => identityResult.rows.map((r): SalesPlanIdentity => ({
+          id: String(r.id),
+          retailer: r.display ?? r.id,
+          member: r.member ?? null,
+          memberId: r.member_key ?? null,
+          stateHead: r.state_head ?? null,
+          stateHeadId: r.state_head_key ?? null,
+          state: r.state ?? null,
+          district: r.district ?? null,
+          distributor: r.dist_id ?? r.distributor ?? null,
+          distributorId: r.dist_id ?? null,
+        }))).then((rows) => {
+          salesPlanIdentityCache.set(fy, { rows, expiresAt: Date.now() + 60_000 });
+          return rows;
+        }).finally(() => {
+          salesPlanIdentityInflight.delete(fy);
+        });
+        salesPlanIdentityInflight.set(fy, pending);
+      }
+      identities = await pending;
+    }
+    const matchesHead = (row: typeof identities[number]) => !stateHead || row.stateHeadId === stateHead;
+    const matchesMember = (row: typeof identities[number]) => !member || row.memberId === member;
+    const matchesState = (row: typeof identities[number]) => !state || row.state === state;
+    const matchesDistrict = (row: typeof identities[number]) => !district || row.district === district;
+
+    const headMap = new Map<string, { id: string; stateHead: string; memberIds: Set<string>; retailerIds: Set<string> }>();
+    for (const row of identities) {
+      if (!row.stateHeadId || !row.stateHead) continue;
+      const entry = headMap.get(row.stateHeadId) ?? {
+        id: row.stateHeadId, stateHead: row.stateHead, memberIds: new Set<string>(), retailerIds: new Set<string>(),
+      };
+      if (row.memberId) entry.memberIds.add(row.memberId);
+      entry.retailerIds.add(row.id);
+      headMap.set(row.stateHeadId, entry);
+    }
+    const stateHeads = [...headMap.values()]
+      .map((entry) => ({
+        id: entry.id, stateHead: entry.stateHead,
+        memberCount: entry.memberIds.size, retailerCount: entry.retailerIds.size,
+      }))
+      .sort((a, b) => a.stateHead.localeCompare(b.stateHead));
+
+    const memberMap = new Map<string, { id: string; member: string; stateHeadId: string | null; stateHead: string | null; retailerIds: Set<string> }>();
+    for (const row of identities.filter(matchesHead)) {
+      if (!row.memberId || !row.member) continue;
+      const entry = memberMap.get(row.memberId) ?? {
+        id: row.memberId, member: row.member, stateHeadId: row.stateHeadId, stateHead: row.stateHead, retailerIds: new Set<string>(),
+      };
+      entry.retailerIds.add(row.id);
+      memberMap.set(row.memberId, entry);
+    }
+    const memberRows = [...memberMap.values()]
+      .map(({ retailerIds, ...entry }) => ({ ...entry, retailerCount: retailerIds.size }))
+      .sort((a, b) => a.member.localeCompare(b.member));
+
+    const stateMap = new Map<string, Set<string>>();
+    for (const row of identities.filter((candidate) => matchesHead(candidate) && matchesMember(candidate))) {
+      if (!row.state) continue;
+      const retailerIds = stateMap.get(row.state) ?? new Set<string>();
+      retailerIds.add(row.id);
+      stateMap.set(row.state, retailerIds);
+    }
+    const states = [...stateMap.entries()]
+      .map(([stateName, retailerIds]) => ({ state: stateName, retailerCount: retailerIds.size }))
+      .sort((a, b) => a.state.localeCompare(b.state));
+
+    const districtMap = new Map<string, Set<string>>();
+    for (const row of identities.filter((candidate) => matchesHead(candidate) && matchesMember(candidate) && matchesState(candidate))) {
+      if (!row.district) continue;
+      const retailerIds = districtMap.get(row.district) ?? new Set<string>();
+      retailerIds.add(row.id);
+      districtMap.set(row.district, retailerIds);
+    }
+    const districts = [...districtMap.entries()]
+      .map(([districtName, retailerIds]) => ({ district: districtName, retailerCount: retailerIds.size }))
+      .sort((a, b) => a.district.localeCompare(b.district));
+
+    const searchKey = q.toLocaleLowerCase("en-IN");
+    const retailerMatches = identities.filter((row) =>
+      matchesHead(row) && matchesMember(row) && matchesState(row) && matchesDistrict(row)
+      && (!searchKey || row.id.toLocaleLowerCase("en-IN").includes(searchKey)
+        || String(row.retailer).toLocaleLowerCase("en-IN").includes(searchKey)));
+    const retailerById = new Map<string, typeof identities[number]>();
+    for (const row of retailerMatches) if (!retailerById.has(row.id)) retailerById.set(row.id, row);
+    const matchingRetailers = [...retailerById.values()]
+      .sort((a, b) => String(a.retailer).localeCompare(String(b.retailer)) || a.id.localeCompare(b.id));
+    const totalRetailers = matchingRetailers.length;
+    const rows = matchingRetailers.slice(0, cap);
+    const coverage = {
+      source: "secondary_head_month hierarchy + secondary_order_line RET# identity + customer_master geography fallback",
+      period: fy,
+      requested: { q: q || null, stateHead: stateHead || null, member: member || null, state: state || null, district: district || null },
+      cap,
+      retailer: { returned: rows.length, truncated: totalRetailers > cap },
+      hierarchy: {
+        mappedMembers: memberRows.filter((row) => row.stateHeadId).length,
+        unmappedMembers: memberRows.filter((row) => !row.stateHeadId).length,
+      },
+      totals: {
+        stateHeads: stateHeads.length, members: memberRows.length,
+        states: states.length, districts: districts.length, retailers: totalRetailers,
+      },
+    };
+    res.json({
+      fy, q: q || null, stateHead: stateHead || null, member: member || null,
+      state: state || null, district: district || null,
+      stateHeads,
+      members: memberRows,
+      states,
+      districts,
+      retailers: rows,
+      source: coverage.source,
+      coverage,
+      counts: coverage.totals,
+    });
   } catch (err) {
     req.log.error({ err, fy }, "sales-plan options failed");
     res.status(500).json({ error: "Could not load sales-plan selector options." });

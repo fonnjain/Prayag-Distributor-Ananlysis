@@ -68,17 +68,19 @@ function fixture(): CompanyReportsPayload {
 }
 
 describe("Company Reports C1 workbook", () => {
-  it("separates the sales-head workbook from working-data helpers", async () => {
+  it("includes Reports 1-7 while excluding internal working-data helpers", async () => {
     const wb = await buildWorkbook(fixture(), { states: ["BIHAR"] });
     const names = wb.worksheets.map((sheet) => sheet.name);
     expect(names).toEqual([
       "Info", "Report 1", "Report 2", "R3 By Group", "R3A State x Group",
       "R3B Party x Group", "R4 Quantity", "R5 By Customer", "R6 By Group (full prior)",
+      "R7 As-of Snapshot", "R7 Party Detail",
     ]);
     expect(names).not.toContain("R1-R2 Sale by State");
     expect(names).not.toContain("Export Data R1");
     expect(names).not.toContain("Export Data R2");
-    expect(names).not.toContain("R7 As-of Snapshot");
+    expect(names).toContain("R7 As-of Snapshot");
+    expect(names).toContain("R7 Party Detail");
   });
 
   it("places totals above headers, uses dropdowns, formulas, and formats", async () => {
@@ -148,7 +150,11 @@ describe("Company Reports C1 workbook", () => {
     const reloaded = new ExcelJS.Workbook();
     await reloaded.xlsx.load(buffer as unknown as Parameters<typeof reloaded.xlsx.load>[0]);
     expect(reloaded.worksheets.map((sheet) => sheet.name))
-      .toEqual(["Info", "Report 1", "Report 2", "R3 By Group", "R3A State x Group", "R3B Party x Group", "R4 Quantity", "R5 By Customer", "R6 By Group (full prior)"]);
+      .toEqual([
+        "Info", "Report 1", "Report 2", "R3 By Group", "R3A State x Group",
+        "R3B Party x Group", "R4 Quantity", "R5 By Customer", "R6 By Group (full prior)",
+        "R7 As-of Snapshot", "R7 Party Detail",
+      ]);
     expect(reloaded.getWorksheet("Export Data R1")).toBeUndefined();
     expect(reloaded.getWorksheet("Export Data R2")).toBeUndefined();
     const report1 = reloaded.getWorksheet("Report 1")!;
@@ -161,6 +167,7 @@ describe("Company Reports C1 workbook", () => {
     expect(report1.getCell("H6").value ?? "").toBe("");
     expect(report2.getCell("I2").value).toBe(1_000_000);
     expect(report2.getCell("G5").value ?? "").toBe("");
+    expect(reloaded.getWorksheet("R7 As-of Snapshot")!.getCell("A1").value).toBe("As-of date");
     for (const sheet of reloaded.worksheets) {
       sheet.eachRow((row) => row.eachCell((cell) => {
         const value = cell.value;

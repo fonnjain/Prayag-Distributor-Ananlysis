@@ -270,6 +270,62 @@ async function targetsSource(req: Request): Promise<{
   }
 }
 
+async function hrSfaSources(req: Request): Promise<Array<{
+  key: string;
+  name: string;
+  status: string;
+  detail: string;
+}>> {
+  try {
+    const records = await loadHrSfaDashboard();
+    const values = [...records.values()];
+    const count = (field: keyof (typeof values)[number]) =>
+      values.filter((record) => record[field] != null).length;
+    const workingDays = count("workingDays");
+    const visits = count("totalVisits");
+    const gps = count("totalGpsKm");
+    const leadCounters = count("totalLeadCounters");
+    const ctc = count("ctcMonthly");
+    const costRatio = count("costRatioPct");
+    const hasCoreSfa = workingDays > 0 && visits > 0 && gps > 0 && leadCounters > 0;
+
+    return [
+      {
+        key: "sfa",
+        name: "Field visits (SFA)",
+        status: hasCoreSfa ? "connected" : values.length ? "partial" : "missing",
+        detail: values.length
+          ? `Live SFA data is available for ${values.length} team-member records: working days ${workingDays}, visits ${visits}, GPS kilometres ${gps}, and lead counters ${leadCounters}.`
+          : "The connected dashboard currently contains no SFA records. Visits, working days, GPS kilometres, and lead-counter columns remain blank.",
+      },
+      {
+        key: "payroll",
+        name: "CTC and expenses",
+        status: ctc > 0 || costRatio > 0 ? "partial" : "missing",
+        detail: ctc > 0 || costRatio > 0
+          ? `Monthly CTC is available for ${ctc} records and cost ratio for ${costRatio}. T.A. bill and itemised expense data are not present in the connected source, so those columns remain unavailable.`
+          : "No CTC, cost-ratio, T.A. bill, or itemised expense data is present in the connected source.",
+      },
+    ];
+  } catch (err) {
+    req.log.warn({ err }, "HR/SFA dashboard status check failed");
+    return [
+      {
+        key: "sfa",
+        name: "Field visits (SFA)",
+        status: "missing",
+        detail: "The live SFA source could not be read. Visits, working days, GPS kilometres, and lead-counter columns remain blank.",
+      },
+      {
+        key: "payroll",
+        name: "CTC and expenses",
+        status: "missing",
+        detail: "The live HR source could not be read. CTC, cost-ratio, T.A. bill, and itemised expense columns remain unavailable.",
+      },
+    ];
+  }
+}
+
 // GET /mgmt/unmatched-names?fy=YYYY-YY — order-booking names that no roster
 // member matches, each with its net Sale value and an identity-registry
 // verdict. Purpose: before anyone is asked to fix 58 names by hand, show which
@@ -385,6 +441,7 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
         ordersDetail = `The order booking Drive folder could not be listed: ${err instanceof Error ? err.message : String(err)}`;
       }
     }
+    const hrSfa = await hrSfaSources(req);
     const sources = [
       {
         key: "roster",
@@ -408,20 +465,7 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
         detail: ordersDetail,
       },
       await targetsSource(req),
-      {
-        key: "sfa",
-        name: "Field visits (SFA)",
-        status: "missing",
-        detail:
-          "Visits, working days, GPS kilometres, and lead-counter columns stay blank until the SFA export is connected.",
-      },
-      {
-        key: "payroll",
-        name: "CTC and expenses",
-        status: "missing",
-        detail:
-          "CTC, T.A. bill, and cost-ratio columns stay blank until payroll and expense sheets are connected.",
-      },
+      ...hrSfa,
     ];
     const regions = Object.entries(regionMap()).map(([name, sts]) => ({
       name,
