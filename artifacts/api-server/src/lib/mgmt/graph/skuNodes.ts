@@ -6,7 +6,7 @@
  * Each node carries source, population and cutoff.
  */
 
-import type { GraphNode, MeasureValue } from "./types.js";
+import { sanitizeMetadata, type GraphNode, type MeasureValue } from "./types.js";
 import { getSkuRecommendations } from "../../sku/skuRecommendations.js";
 import { getSkuPushList } from "../../sku/skuPushList.js";
 import {
@@ -23,12 +23,15 @@ import { fiscalMonthsToLabels } from "../primaryPeriod.js";
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function mv(
-  measure: MeasureValue["measure"],
+  measure: Exclude<MeasureValue["measure"], "projection">,
   label: string,
   value: number | null,
   unit: MeasureValue["unit"] = "INR",
 ): MeasureValue {
-  return { measure, label, value, unit };
+  if (unit === "pct") throw new Error("Percentage measures require a structured basis");
+  return value == null
+    ? { measure, label, unit, availability: "unavailable" }
+    : { measure, label, value, unit, availability: "measured" } as MeasureValue;
 }
 
 /** The open (live) fiscal year, derived from the server clock. */
@@ -95,7 +98,7 @@ export async function resolveSkuGaps(fy: string, head?: string): Promise<GraphNo
     parent: head ? `head/${head}/${fy}` : `company/${fy}`,
     children: top.map((r) => `segment/${r.segment}/${fy}`),
     childrenSumToParent: null,
-    detail: {
+    detail: sanitizeMetadata({
       fiscalMonths: result.fiscalMonths,
       topGapSegments: top.map((r) => ({
         rank: r.rank,
@@ -107,7 +110,7 @@ export async function resolveSkuGaps(fy: string, head?: string): Promise<GraphNo
         codesEverSold: r.codesEverSold,
         topGapCodes: r.topGapCodes.slice(0, 5),
       })),
-    },
+    }),
     isGap: false,
   };
 }
@@ -156,7 +159,7 @@ export async function resolveSkuPush(distributorKey: string, fy: string): Promis
     parent: `distributor/${distributorKey}/${fy}`,
     children: [],
     childrenSumToParent: null,
-    detail: {
+    detail: sanitizeMetadata({
       suppressed: result.suppressed,
       suppressReason: result.suppressReason ?? null,
       isFallback: result.isFallback,
@@ -175,7 +178,7 @@ export async function resolveSkuPush(distributorKey: string, fy: string): Promis
             : null,
         })),
       })),
-    },
+    }),
     isGap: false,
   };
 }
@@ -284,7 +287,7 @@ export async function resolveSkuDiscounts(fy: string): Promise<GraphNode> {
     parent: `company/${fy}`,
     children: [],
     childrenSumToParent: null,
-    detail: {
+    detail: sanitizeMetadata({
       primary: {
         measureLabel: primary.measureLabel,
         mrpCoverage: primary.mrpCoverage,
@@ -299,7 +302,7 @@ export async function resolveSkuDiscounts(fy: string): Promise<GraphNode> {
             verification: secondary.verification,
           }
         : { available: false, reason: secondary.reason },
-    },
+    }),
     isGap: false,
   };
 }
@@ -342,7 +345,10 @@ export async function resolveSkuDetail(fy: string): Promise<GraphNode> {
       (fy === openFy()
         ? "FY2026-27 covers Apr–Jun 2026 only (PSCode_3 xlsx drop); later months are absent, not zero."
         : ""),
-    source: "loadSkuFacts level=retailer (secondary_sku_line)",
+    source:
+      "loadSkuFacts level=retailer (secondary_sku_line). " +
+      "PSCode3 is the closed-period SKU NET basis; Product-Wise is the sole " +
+      "August+ CRM source and remains an isolated Basic Order Value ex-GST view.",
     cutoff: cap.available ? period.desc : (cap.reason ?? "not available"),
     flags,
     parent: `company/${fy}`,
@@ -353,6 +359,11 @@ export async function resolveSkuDetail(fy: string): Promise<GraphNode> {
           bySegment: facts.bySegment.slice(0, 12),
           topCodes: facts.byCode.slice(0, 15),
           unmapped: facts.unmapped,
+          perMonthSourceMetadata: result.sourceMetadata ?? {},
+          sourceSeam: {
+            julyControl: "Both sources must reconcile before cross-source conclusions; July control is not implied by schema agreement.",
+            augustProductWise: "isolated; excluded from gross-margin, secondary-discount and multi-month conclusions until parity evidence is approved",
+          },
         }
       : { available: false, reason: cap.reason ?? "not available" },
     isGap: false,

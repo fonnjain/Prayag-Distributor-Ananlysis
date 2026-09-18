@@ -144,3 +144,4 @@
 - [Factory pending priceability](factory-pending-priceability.md) — party commercial joins are exact/fail-closed; dashboard rupees stay separate from REPORT 2 pieces; tank rates use pieces.
 - [Retrospective load provenance](retrospective-load-provenance.md) — metadata repairs must distinguish original load time from later record time and prove protected data unchanged.
 - [AI Sales Plan source-aware RET#](ai-sales-plan-production-identity.md) — retailer identity is source-dependent; Prompt 105 must not query dealer_id alone.
+- [AI graph held-value boundary](ai-graph-held-values.md) — model-facing holds use safe non-numeric reasons; full numeric evidence stays only in the Resolution register.

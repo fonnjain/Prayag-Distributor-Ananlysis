@@ -5,7 +5,7 @@
  * If a figure is not already computed somewhere it becomes a gap node.
  */
 
-import type { GraphNode, MeasureValue } from "./types.js";
+import { MEASURE_LABELS, sanitizeDetailMetadata, sanitizeMetadata, type GraphNode, type MeasureValue } from "./types.js";
 import { MAX_NODES_PER_RESOLVE } from "./types.js";
 import { GAP_NODE_REGISTRY, KNOWN_KEY_SPLITS, findGapNode } from "./gapNodes.js";
 import { loadStateDashboard } from "../stateDashboard.js";
@@ -25,16 +25,35 @@ import {
   resolveSkuDetail,
   likeMonthsWindow,
 } from "./skuNodes.js";
+import { resolveMargin, resolveResolutionRegister } from "./release1Nodes.js";
+import {
+  parseCommercialPath,
+  resolveCommercialSurface,
+} from "./commercialSurfaceNodes.js";
+import {
+  resolveAlertStatus,
+  resolveCategoryRegistry,
+  resolveDataHealth,
+  resolveTop80Snapshot,
+} from "./opsSurfaceNodes.js";
+import {
+  resolveCustomerSkuPenetration,
+  resolvePendingOrders,
+  resolveSecondaryBooking,
+} from "./secondarySurfaceNodes.js";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
 function mv(
-  measure: MeasureValue["measure"],
+  measure: Exclude<MeasureValue["measure"], "projection">,
   label: string,
   value: number | null,
   unit: MeasureValue["unit"] = "INR",
 ): MeasureValue {
-  return { measure, label, value, unit };
+  if (unit === "pct") throw new Error("Percentage measures require a structured basis");
+  return value == null
+    ? { measure, label, unit, availability: "unavailable" }
+    : { measure, label, value, unit, availability: "measured" } as MeasureValue;
 }
 
 function crStr(v: number | null): string {
@@ -213,7 +232,7 @@ async function resolveHead(headName: string, fy: string): Promise<GraphNode> {
     parent: `company/${fy}`,
     children: headMembers.map((m) => `salesperson/${m.name}/${fy}`),
     childrenSumToParent: true,
-    detail,
+    detail: sanitizeMetadata(detail),
     isGap: false,
   };
 }
@@ -298,7 +317,7 @@ async function resolveSalesperson(memberName: string, fy: string): Promise<Graph
     parent: stateHead ? `head/${stateHead}/${fy}` : null,
     children: monthChildren,
     childrenSumToParent: monthChildren.length > 0,
-    detail: {
+    detail: sanitizeMetadata({
       stateHead,
       coverage: payload.coverage,
       concentration: payload.concentration,
@@ -307,7 +326,7 @@ async function resolveSalesperson(memberName: string, fy: string): Promise<Graph
       cost: payload.cost,
       topCustomers: payload.topCustomers,
       achievement: payload.achievement,
-    },
+    }),
     isGap: false,
   };
 }
@@ -477,7 +496,7 @@ async function resolveDistributor(distributorName: string, fy: string): Promise<
     parent: `head/${foundHead}/${fy}`,
     children: [],
     childrenSumToParent: null,
-    detail: {
+    detail: sanitizeMetadata({
       stateHead: foundHead,
       concentration: conc,
       flowGap: flows?.flowGap ?? null,
@@ -485,7 +504,7 @@ async function resolveDistributor(distributorName: string, fy: string): Promise<
       retailerCount: dist.retailerCount,
       activeCount: dist.activeCount,
       dormantCount: dist.dormantCount,
-    },
+    }),
     isGap: false,
   };
 }
@@ -543,8 +562,47 @@ async function resolveLikeMonths(
 // ── Path parser + dispatcher ──────────────────────────────────────────────────
 
 type ResolveResult = { node: GraphNode | null; error: string | null };
+const FY_RE = /^\d{4}-\d{2}$/;
 
-export async function resolvePath(path: string, defaultFy: string): Promise<ResolveResult> {
+/** Final resolver boundary: cached nodes still disclose when they were read. */
+export function normalizeGraphNode(node: GraphNode): GraphNode {
+  const nestedHold = (value: unknown, depth = 0): boolean => {
+    if (depth > 8 || value == null || typeof value !== "object") return false;
+    if (Array.isArray(value)) return value.some((v) => nestedHold(v, depth + 1));
+    const record = value as Record<string, unknown>;
+    if (record.availability === "held" || "hold" in record) return true;
+    return Object.values(record).some((v) => nestedHold(v, depth + 1));
+  };
+  const hasHeld = node.measures.some((m) => m.availability === "held") || nestedHold(node.detail);
+  return {
+    ...node,
+    readTime: node.readTime ?? new Date().toISOString(),
+    category: node.category ?? "Unmapped",
+    availability: node.availability ?? (node.isGap ? "unavailable" : "measured"),
+    detail: node.detail ? sanitizeDetailMetadata(node.detail) : node.detail,
+    ...(hasHeld ? { residual: null } : {}),
+    measures: node.measures.map((measure) => {
+      if (measure.availability === "held") {
+        return {
+          measure: measure.measure, label: MEASURE_LABELS[measure.measure], unit: measure.unit,
+          availability: "held", hold: measure.hold ?? {
+            category: "data quality", reason: "Measure is blocked by an open resolution hold.",
+          },
+        } as MeasureValue;
+      }
+      if (measure.value == null) {
+        return {
+          measure: measure.measure, label: MEASURE_LABELS[measure.measure], unit: measure.unit,
+          availability: measure.availability === "partial" ? "partial" : "unavailable",
+          ...(measure.basis ? { basis: measure.basis } : {}),
+        } as MeasureValue;
+      }
+      return { ...measure, label: MEASURE_LABELS[measure.measure], availability: "measured" as const };
+    }) as MeasureValue[],
+  };
+}
+
+async function resolvePathRaw(path: string, defaultFy: string): Promise<ResolveResult> {
   const trimmed = path.trim();
 
   // Gap nodes — static, no computation.
@@ -555,8 +613,91 @@ export async function resolvePath(path: string, defaultFy: string): Promise<Reso
   }
 
   const parts = trimmed.split("/");
+  const head = parts[0] ?? "";
+  const exact = (n: number, fyIndex = n - 1) => parts.length === n && FY_RE.test(parts[fyIndex] ?? "");
+  const grammarOk =
+    (head === "company" && (exact(2) || (parts.length === 3 && parts[2] === "likemonths" && FY_RE.test(parts[1]!)))) ||
+    (head === "head" && (exact(3) || (parts.length === 4 && parts[3] === "likemonths" && FY_RE.test(parts[2]!)))) ||
+    (head === "salesperson" && (exact(3) || (parts.length === 5 && parts[3] === "month" && FY_RE.test(parts[2]!) && !!parts[4]))) ||
+    (head === "distributor" && exact(3)) || (head === "segment" && exact(3)) ||
+    (head === "sales-deep-dive" && exact(3)) || (head === "distributor-deep-dive" && exact(3)) ||
+    (head === "sku-deep-dive" && exact(2)) || (head === "company-report" && parts.length === 3 && /^[1-7]$/.test(parts[1]!) && FY_RE.test(parts[2]!)) ||
+    (["momentum","growth","targets","coverage","comparison","alerts","data-health","category-registry","secondary-booking","pending-orders"].includes(head) && exact(2)) ||
+    (head === "penetration" && parts.length === 3 && /^RET#\d+$/i.test(parts[1]!) && FY_RE.test(parts[2]!)) ||
+    (head === "margin" && parts.length === 3 && !!parts[1] && (FY_RE.test(parts[2]!) || /^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2}(?:-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2})?$/i.test(parts[2]!))) ||
+    (head === "resolution" && exact(2)) ||
+    (head === "sku" && (
+      (parts.length === 3 && ["discounts","detail"].includes(parts[1]!) && FY_RE.test(parts[2]!)) ||
+      (parts.length === 3 && parts[1] === "gaps" && FY_RE.test(parts[2]!)) ||
+      (parts.length === 4 && parts[1] === "gaps" && FY_RE.test(parts[3]!)) ||
+      (parts.length === 4 && parts[1] === "push" && FY_RE.test(parts[3]!))
+    ));
+  if (!grammarOk && head !== "gap" && head !== "top80") {
+    return { node: null, error: `Invalid bounded path contract / route grammar: "${trimmed}"` };
+  }
 
   try {
+    // Release 1 bounded nodes.
+    if (parts[0] === "resolution") {
+      const fy = parts[1] ?? defaultFy;
+      return { node: await resolveResolutionRegister(fy), error: null };
+    }
+    if (parts[0] === "margin") {
+      const calendar = parts[parts.length - 1]!;
+      const fy = FY_RE.test(calendar)
+        ? calendar
+        : (/^(Jan|Feb|Mar)-/i.test(calendar) ? "2025-26" : "2026-27");
+      const product = parts.length > 2 ? parts.slice(1, -1).join("/") : "PTMT";
+      return { node: await resolveMargin(fy, product, FY_RE.test(calendar) ? "January-April 2026" : calendar), error: null };
+    }
+    // Surface aliases retain the existing verified deep-dive builders.
+    if (parts[0] === "sales-deep-dive") {
+      const fy = parts[parts.length - 1] ?? defaultFy;
+      const name = parts.slice(1, -1).join("/");
+      if (!name) return { node: null, error: "sales-deep-dive requires a member and FY" };
+      return { node: await resolveSalesperson(name, fy), error: null };
+    }
+    if (parts[0] === "distributor-deep-dive") {
+      const fy = parts[parts.length - 1] ?? defaultFy;
+      const name = parts.slice(1, -1).join("/");
+      if (!name) return { node: null, error: "distributor-deep-dive requires a distributor and FY" };
+      return { node: await resolveDistributor(name, fy), error: null };
+    }
+    if (parts[0] === "sku-deep-dive") {
+      const fy = parts[parts.length - 1] ?? defaultFy;
+      return { node: await resolveSkuDetail(fy), error: null };
+    }
+    const commercial = parseCommercialPath(trimmed);
+    if (commercial) return { node: await resolveCommercialSurface(commercial), error: null };
+    if (parts[0] === "alerts" && parts.length === 2) {
+      return { node: await resolveAlertStatus(parts[1]!), error: null };
+    }
+    if (parts[0] === "data-health" && parts.length === 2) {
+      return { node: await resolveDataHealth(parts[1]!), error: null };
+    }
+    if (parts[0] === "category-registry" && parts.length === 2) {
+      return { node: await resolveCategoryRegistry(parts[1]!), error: null };
+    }
+    if (parts[0] === "top80" && parts.length === 2) {
+      return { node: await resolveTop80Snapshot(parts[1], defaultFy), error: null };
+    }
+    if (parts[0] === "secondary-booking" && parts.length === 2) {
+      return { node: await resolveSecondaryBooking(parts[1]!), error: null };
+    }
+    if (parts[0] === "pending-orders" && parts.length === 2) {
+      return { node: await resolvePendingOrders(parts[1]!), error: null };
+    }
+    if (parts[0] === "penetration" && parts.length === 3) {
+      return {
+        node: await resolveCustomerSkuPenetration(parts[1]!, parts[2]!),
+        error: null,
+      };
+    }
+    if (["company-report", "momentum", "growth", "targets", "coverage", "comparison",
+      "alerts", "data-health", "category-registry", "top80", "secondary-booking",
+      "pending-orders", "penetration"].includes(parts[0] ?? "")) {
+      return { node: null, error: `Invalid bounded path contract: "${trimmed}"` };
+    }
     // company/{fy}[/likemonths]
     if (parts[0] === "company") {
       const fy = parts[1] ?? defaultFy;
@@ -641,6 +782,14 @@ export async function resolvePath(path: string, defaultFy: string): Promise<Reso
   }
 }
 
+/** Public resolver boundary applies the A1/A5/A6 contract to every path. */
+export async function resolvePath(path: string, defaultFy: string): Promise<ResolveResult> {
+  if (path.length > 240) return { node: null, error: "Path exceeds the 240-character bound" };
+  if (path.split("/").length > 8) return { node: null, error: "Path exceeds the segment bound" };
+  const result = await resolvePathRaw(path, defaultFy);
+  return result.node ? { ...result, node: normalizeGraphNode(result.node) } : result;
+}
+
 // Resolve a wildcard path, e.g. "head/*/2026-27" → all heads.
 export async function resolveWildcard(
   path: string,
@@ -649,6 +798,15 @@ export async function resolveWildcard(
   const parts = path.split("/");
   const nodes: GraphNode[] = [];
   const errors: { path: string; error: string }[] = [];
+  if (
+    !((parts[0] === "head" || parts[0] === "salesperson") &&
+      parts.length === 3 && parts[1] === "*" && FY_RE.test(parts[2] ?? ""))
+  ) {
+    const r = await resolvePath(path, defaultFy);
+    if (r.node) nodes.push(r.node);
+    else if (r.error) errors.push({ path, error: r.error });
+    return { nodes, errors };
+  }
 
   // head/*/{fy}
   if (parts[0] === "head" && parts[1] === "*") {

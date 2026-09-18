@@ -1024,3 +1024,31 @@ mtime_ms = 1789711472688
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/3c04853a-582a-4c86-868d-1b0f0467c54e/c94c8f2f-6693-4ac1-a4ec-93d632404f80"
 storage_version_token = "1789711565457012"
 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[[outputs]]
+id = "hHHVvhI3TH1mLh-lhVCj6"
+uri = "file://docs/productwise-parity-audit-2026-09-18.md"
+type = "text"
+title = "Product-Wise / PSCode3 Parity Audit"
+description = "Read-only parity assessment, capability inventory, source seam, July control gap, and ordered implementation plan."
+logical_id = "6dac28f7-f956-484d-8c27-eee4aa72a3b3"
+content_hash = "sha256:7d10f0e4f3f1f9c9b89e25ffb48706962a2d664c037ee8b04f85cb5a9db1695f"
+size = 17034
+mtime_ms = 1789724219126
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/6dac28f7-f956-484d-8c27-eee4aa72a3b3/1b02f2d6-98cd-44af-8567-0b62ec0677ec"
+storage_version_token = "1789727889132958"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "ZVV_9BWN8O67QCAXHuvcR"
+uri = "file://docs/prompt115-live-verification-2026-09-18.md"
+type = "text"
+title = "Prompt 115 Live Verification"
+description = "Focused test results, critical safe-failure transcripts, live guard findings, and the incomplete broad-question acceptance inventory."
+logical_id = "5c4bbbea-d29c-4486-baeb-f542b17df36a"
+content_hash = "sha256:3f5018c6add9a9bc70ce44eee4eb3e499fd2d1943a9c5884e12c8038af326b98"
+size = 5484
+mtime_ms = 1789727838401
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/5c4bbbea-d29c-4486-baeb-f542b17df36a/a61f677d-e589-4290-af2b-c5944090320c"
+storage_version_token = "1789727891100018"
+content_type = "text/markdown"

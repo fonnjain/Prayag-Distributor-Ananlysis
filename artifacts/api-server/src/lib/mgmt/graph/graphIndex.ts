@@ -80,6 +80,9 @@ export async function buildGraphIndex(fy: string, period?: string): Promise<Grap
         `sku/push/{distributor}/${fy}`,
         `sku/discounts/${fy}`,
         `sku/detail/${fy}`,
+        `secondary-booking/${fy}`,
+        `pending-orders/${fy}`,
+        `penetration/RET#123/${fy}`,
       ],
     },
     {
@@ -87,6 +90,12 @@ export async function buildGraphIndex(fy: string, period?: string): Promise<Grap
       count: GAP_NODE_REGISTRY.length,
       measuresAvailable: [],
       examplePaths: GAP_NODE_REGISTRY.map((g) => g.path),
+    },
+    {
+      level: "gap",
+      count: 2,
+      measuresAvailable: ["gross_margin", "gross_contribution"],
+      examplePaths: [`resolution/${fy}`, `margin/PTMT/${fy}`],
     },
   ];
 
@@ -111,6 +120,26 @@ export async function buildGraphIndex(fy: string, period?: string): Promise<Grap
   notes.push(
     "Retailer nodes (18,117) are resolved from the secondary register and are only available for " +
     "closed FYs. Live-year retailer detail requires a member working sheet read instead.",
+  );
+  notes.push(
+    "Native bounded nodes: sales-deep-dive/{member}/{fy}, distributor-deep-dive/{name}/{fy}, " +
+    "and sku-deep-dive/{fy} reuse verified deep-dive builders. SKU detail includes per-month " +
+    "source metadata; Product-Wise August+ rows are isolated and excluded from discount and " +
+    "multi-month conclusions until parity evidence is approved.",
+  );
+  notes.push(
+    "Commercial, operational and secondary C/D surfaces resolve through bounded adapters. " +
+    "If an adapter cannot provide a prepared sub-report it returns its own explicit " +
+    "availability and reason; no arithmetic is invented in the graph.",
+  );
+  notes.push(
+    `Adapter paths: company-report/{1..7}/${fy}, momentum/${fy}, growth/${fy}, targets/${fy}, ` +
+    `coverage/${fy}, comparison/${fy}, alerts/${fy}, data-health/${fy}, category-registry/${fy}, ` +
+    `top80/{snapshotId-or-date}.`,
+  );
+  notes.push(
+    "Every measure carries discriminated availability. Held measures contain a hold code/category/reason and never contain a value. " +
+    "Margin uses gross margin/gross contribution terminology; bom_cost is factory cost only.",
   );
   notes.push(
     "Segment / SKU nodes are available for closed FYs AND for FY2026-27 Apr–Jun (PARTIAL — " +

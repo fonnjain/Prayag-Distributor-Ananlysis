@@ -22,9 +22,9 @@ import { currentOpenFy } from "../lib/fyAnchors.js";
 import { AnalyzeSalesBody, AnalyzeSalesResponse } from "@workspace/api-zod";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { buildGraphIndex, graphIndexToPromptText } from "../lib/mgmt/graph/graphIndex.js";
-import { resolvePath, resolveWildcard } from "../lib/mgmt/graph/resolvers.js";
+import { normalizeGraphNode, resolvePath, resolveWildcard } from "../lib/mgmt/graph/resolvers.js";
 import { MAX_NODES_PER_RESOLVE } from "../lib/mgmt/graph/types.js";
-import type { GraphNode } from "../lib/mgmt/graph/types.js";
+import { MEASURE_LABELS, type GraphNode, type MeasureValue } from "../lib/mgmt/graph/types.js";
 
 const router: IRouter = Router();
 
@@ -37,6 +37,9 @@ function stripEmojis(text: string): string {
 
 // Maximum traversal rounds before we force a final answer.
 const MAX_ROUNDS = 5;
+const MAX_TOOL_CALLS = 20;
+const MAX_TOTAL_TRAVERSAL_NODES = 100;
+const MAX_TOTAL_TRAVERSAL_ERRORS = 100;
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -73,6 +76,10 @@ BASIS DISCIPLINE (apply these unprompted, whenever relevant):
 COMPARISONS:
 18. Comparing two entities (head vs head, member vs peers, month vs same month last year, territory vs company) in one answer is expected — resolve both sides' nodes and present them together, stating basis and period for each.
 
+SAFE CLARIFICATIONS:
+19. If a projected year-end question does not name an entity, ask which entity. Do not resolve a wildcard just to list candidates. State that a projection may be reported only from a typed projection measure carrying seasonal-service, observed-month, and calibration metadata; otherwise it is unavailable.
+20. If a member-in-August "sales" question does not name the member, ask for the member and clarify the basis in the same answer: secondary order booking is distributor-to-retailer booking, while primary dispatch is company-to-distributor sale. Never use the unqualified word "sales" as if those were one measure.
+
 HOW TO USE THE GRAPH:
 - Call resolve_nodes with a list of paths to fetch those nodes.
 - Wildcards: "head/*/2026-27" returns all heads (hard cap: ${MAX_NODES_PER_RESOLVE} nodes per call).
@@ -94,7 +101,12 @@ const RESOLVE_NODES_TOOL = {
     "salesperson/Prasun Chatterjee/2026-27/month/Jun, distributor/Jagdamba Traders/2026-27, " +
     "sku/gaps/2026-27, sku/gaps/Anant Singh/2026-27, sku/push/{distributor}/2026-27, " +
     "sku/discounts/2026-27, sku/detail/2026-27, segment/CP/2026-27, " +
-    "gap/live-year-sku, head/*/2026-27 (wildcard). " +
+     "sales-deep-dive/{member}/2026-27, distributor-deep-dive/{name}/2026-27, " +
+     "sku-deep-dive/2026-27, resolution/2026-27, margin/PTMT/2026-27, " +
+     "penetration/2026-27, secondary-booking/2026-27, pending-orders/2026-27, " +
+     "company-report/{1-7}/2026-27, momentum/2026-27, growth/2026-27, targets/2026-27, " +
+     "coverage/2026-27, comparison/2026-27, alerts/2026-27, data-health/2026-27, " +
+     "category-registry/2026-27, top80/{snapshot-date}, gap/live-year-sku, head/*/2026-27 (wildcard). " +
     `Hard cap: ${MAX_NODES_PER_RESOLVE} nodes per call. If truncated, refine your paths.`,
   input_schema: {
     type: "object" as const,
@@ -122,21 +134,29 @@ async function runResolveTool(
   const nodes: GraphNode[] = [];
   const errors: { path: string; error: string }[] = [];
   let truncated = false;
+  if (paths.length > MAX_NODES_PER_RESOLVE) {
+    errors.push({ path: "(request)", error: `Input path cap is ${MAX_NODES_PER_RESOLVE}` });
+    truncated = true;
+  }
 
-  for (const rawPath of paths) {
+  for (const rawPath of paths.slice(0, MAX_NODES_PER_RESOLVE)) {
+    if (rawPath.length > 240 || rawPath.split("/").length > 8) {
+      if (errors.length < MAX_NODES_PER_RESOLVE) errors.push({ path: rawPath, error: "Path exceeds bounded resolver grammar" });
+      continue;
+    }
     if (nodes.length >= MAX_NODES_PER_RESOLVE) { truncated = true; break; }
 
     if (rawPath.includes("/*")) {
       const { nodes: wNodes, errors: wErrors } = await resolveWildcard(rawPath, defaultFy);
       for (const n of wNodes) {
         if (nodes.length >= MAX_NODES_PER_RESOLVE) { truncated = true; break; }
-        nodes.push(n);
+        nodes.push(normalizeGraphNode(n));
       }
-      errors.push(...wErrors);
+      errors.push(...wErrors.slice(0, Math.max(0, MAX_NODES_PER_RESOLVE - errors.length)));
     } else {
       const { node, error } = await resolvePath(rawPath, defaultFy);
-      if (node)  nodes.push(node);
-      if (error) errors.push({ path: rawPath, error });
+      if (node)  nodes.push(normalizeGraphNode(node));
+      if (error && errors.length < MAX_NODES_PER_RESOLVE) errors.push({ path: rawPath, error });
     }
   }
 
@@ -145,53 +165,84 @@ async function runResolveTool(
 
 // ── Numeric guard ─────────────────────────────────────────────────────────────
 
-// Recursively collect every finite number carried in a node's `detail` blob so
-// figures cited from rich detail (push lists, gap segments, discounts) pass the
-// guard just like measure values do.
-function collectDetailNumbers(value: unknown, out: number[], depth = 0): void {
-  if (depth > 6 || value == null) return;
-  if (typeof value === "number") {
-    if (isFinite(value)) out.push(value);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const v of value) collectDetailNumbers(v, out, depth + 1);
-    return;
-  }
-  if (typeof value === "object") {
-    for (const v of Object.values(value as Record<string, unknown>)) {
-      collectDetailNumbers(v, out, depth + 1);
-    }
-  }
-}
-
-function runNumericGuard(
+export function runNumericGuard(
   answer: string,
   nodes: GraphNode[],
 ): { status: "clean" | "unmatched"; unmatched: string[] } {
-  const crPatterns = answer.matchAll(/[\d,]+\.?\d*\s*(?:Cr|Lakh|lakh|cr)\b/g);
   const unmatched: string[] = [];
 
-  const detailNumbers: number[] = [];
+  const approved = { INR: new Set<string>(), pct: new Set<string>(), count: new Set<string>() };
+  const normalizeToken = (token: string) => token.toLowerCase()
+    .replace(/(?:₹|rs\.?|inr)/g, "").replace(/[,\s]/g, "")
+    .replace(/(\d+)\.00(?=\s*[a-z%]|$)/g, "$1");
+  const indian = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  const add = (unit: keyof typeof approved, token: string) => approved[unit].add(normalizeToken(token));
+  const typed: MeasureValue[] = [];
+  const collectTyped = (value: unknown, depth = 0): void => {
+    if (depth > 8 || value == null || typeof value !== "object") return;
+    if (!Array.isArray(value)) {
+      const candidate = value as Record<string, unknown>;
+      if (typeof candidate.measure === "string" && Object.prototype.hasOwnProperty.call(MEASURE_LABELS, candidate.measure) &&
+          ["INR", "count", "pct"].includes(String(candidate.unit)) &&
+          ["measured", "partial"].includes(String(candidate.availability)) && Number.isFinite(candidate.value)) {
+        typed.push(candidate as unknown as MeasureValue);
+      }
+      for (const child of Object.values(candidate)) collectTyped(child, depth + 1);
+    } else for (const child of value) collectTyped(child, depth + 1);
+  };
+  const addMeasureTokens = (m: MeasureValue) => {
+    if (m.value == null) return;
+    if (m.unit === "INR") {
+      for (const marker of ["₹", "Rs ", "INR "]) add("INR", `${marker}${indian(m.value)}`);
+      for (const [div, suffixes] of [[1e3, ["K", "thousand"]], [1e5, ["L", "Lakh"]], [1e7, ["Cr", "crore"]]] as const) {
+        const rounded = (m.value / div).toFixed(2).replace(/\.00$/, "");
+        for (const suffix of suffixes) {
+          add("INR", `₹${rounded}${suffix}`); add("INR", `Rs ${rounded}${suffix}`); add("INR", `INR ${rounded}${suffix}`); add("INR", `${rounded}${suffix}`);
+        }
+      }
+    } else if (m.unit === "pct") {
+      add("pct", `${m.value}%`); add("pct", `${m.value.toFixed(2).replace(/\.00$/, "")}%`);
+    } else {
+      add("count", String(m.value)); add("count", indian(m.value));
+    }
+  };
   for (const n of nodes) {
-    if (n.detail) collectDetailNumbers(n.detail, detailNumbers);
+    for (const m of n.measures) addMeasureTokens(m);
+    collectTyped(n.detail);
   }
-
-  for (const match of crPatterns) {
-    const raw = match[0].replace(/[,\s]/g, "");
-    const numStr = raw.replace(/(?:Cr|Lakh|lakh|cr)/i, "");
-    const num = parseFloat(numStr);
-    if (!isFinite(num)) continue;
-
-    const inRupees = raw.toLowerCase().includes("cr") ? num * 1e7 : num * 1e5;
-    const close = (v: number) =>
-      Math.abs(v - inRupees) / Math.max(Math.abs(inRupees), 1) < 0.02;
-    // Allow 2% tolerance; match measure values first, then detail values.
-    const found =
-      nodes.some((n) =>
-        n.measures.some((m) => m.value != null && m.unit === "INR" && close(m.value)),
-      ) || detailNumbers.some(close);
-    if (!found) unmatched.push(match[0]);
+  for (const m of typed) addMeasureTokens(m);
+  const protectedAnswer = answer
+    .replace(/\b(?:company|head|salesperson|distributor|segment|sku|margin|resolution|penetration|top80|gap|company-report|momentum|growth|targets|coverage|comparison|alerts|data-health|category-registry|secondary-booking|pending-orders)\/[^\s,.;]+/gi, "")
+    .replace(/\b(?:FY\s*)?20\d{2}\s*[-–—]\s*\d{2}\b/gi, "")
+    .replace(/\b20\d{2}[/-]\d{1,2}[/-]\d{1,2}\b/g, "")
+    .replace(/\b[A-Za-z][A-Za-z_-]*#\d+\b/g, "");
+  for (const match of protectedAnswer.matchAll(
+    /(?<![\w#])(?:₹|Rs\.?|INR)?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(Cr|crore|L|lakh|K|thousand|%)?(?![\w])/gi,
+  )) {
+    const raw = match[0].trim();
+    const start = match.index ?? 0;
+    const context = protectedAnswer.slice(Math.max(0, start - 16), start + raw.length + 16);
+    const after = protectedAnswer.slice(start + raw.length);
+    const isNumericDisplay = /₹|rs\.?|inr|%|[a-z]/i.test(raw) || /[,.]/.test(raw);
+    if (/^\s*(?:st|nd|rd|th)\b/i.test(after) || (!isNumericDisplay && /^\s*\./.test(after))) continue;
+    // Only an exact date/FY/ID token is metadata, never an arbitrary nearby number.
+    if (/^(?:20\d{2}-\d{2}|20\d{2}[/-]\d{1,2}[/-]\d{1,2})$/.test(raw) ||
+        /(?:^|\s)FY\s*20\d{2}-\d{2}(?:\s|$)/i.test(context) ||
+        /(?:^|[\s(])[A-Za-z][A-Za-z_-]*#\d+(?:\s|$)/.test(context)) continue;
+    const num = Number(match[1].replace(/,/g, ""));
+    if (!Number.isFinite(num)) continue;
+    const suffix = (match[2] ?? "").toLowerCase();
+    const normalized = normalizeToken(raw);
+    const hasCurrency = /₹|rs\.?|inr/i.test(raw);
+    const isInrSuffix = /^(cr|crore|l|lakh|k|thousand)$/i.test(suffix);
+    const surroundingUnit = /\b(?:customers?|items?|retailers?|distributors?|heads?|members?|rows?|codes?|rupees?|rs\.?|inr|cr|crore|lakh|k|%)\b/i.test(context);
+    if (/^\d{4}$/.test(match[1]!) && num >= 1900 && num <= 2100 &&
+        !hasCurrency && !suffix && !surroundingUnit) continue;
+    const token = normalized;
+    const unit: keyof typeof approved = suffix === "%" ? "pct" : (hasCurrency || isInrSuffix ? "INR" : "count");
+    if (!approved[unit].has(token)) {
+      unmatched.push(raw);
+    }
   }
 
   return unmatched.length === 0
@@ -237,11 +288,13 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const messages: any[] = [{ role: "user", content: question }];
     const allNodes: GraphNode[] = [];
+    let totalTraversalErrors = 0;
+    let totalToolCalls = 0;
     let finalAnswer = "";
     let round = 0;
 
     // Multi-round traversal loop.
-    while (round < MAX_ROUNDS) {
+    while (round < MAX_ROUNDS && !finalAnswer) {
       round++;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -268,6 +321,11 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
       const toolResults: unknown[] = [];
 
       for (const toolCall of toolCalls) {
+        totalToolCalls++;
+        if (totalToolCalls > MAX_TOOL_CALLS) {
+          finalAnswer = "Traversal limit reached before a bounded answer could be assembled.";
+          break;
+        }
         if (toolCall["name"] !== "resolve_nodes") {
           toolResults.push({
             type: "tool_result",
@@ -282,6 +340,14 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
         const callFy = (toolInput["fy"] as string | undefined) ?? defaultFy;
         const result = await runResolveTool(paths, callFy);
 
+        if (allNodes.length + result.nodes.length > MAX_TOTAL_TRAVERSAL_NODES) {
+          result.nodes = result.nodes.slice(0, Math.max(0, MAX_TOTAL_TRAVERSAL_NODES - allNodes.length));
+          result.truncated = true;
+        }
+        totalTraversalErrors += result.errors.length;
+        if (totalTraversalErrors > MAX_TOTAL_TRAVERSAL_ERRORS) {
+          result.errors = result.errors.slice(0, Math.max(0, MAX_TOTAL_TRAVERSAL_ERRORS - (totalTraversalErrors - result.errors.length)));
+        }
         allNodes.push(...result.nodes);
 
         toolResults.push({
@@ -322,14 +388,44 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
       finalAnswer = blocksText(finalContent);
     }
 
-    // Numeric guard.
-    const guard = runNumericGuard(finalAnswer, allNodes);
-    const guardNote =
-      guard.status === "unmatched" && guard.unmatched.length > 0
-        ? `\n\n> **Numeric guard**: ${guard.unmatched.length} figure(s) could not be verified against a graph node: ${guard.unmatched.join(", ")}. Treat with caution.`
-        : "";
+    // Numeric guard. One bounded rewrite is allowed so the caller receives a
+    // useful safe answer when the first draft performs prohibited arithmetic.
+    // The rewrite sees the same traversal and is guarded identically.
+    let guard = runNumericGuard(finalAnswer, allNodes);
+    if (guard.status === "unmatched" && guard.unmatched.length > 0) {
+      messages.push({ role: "assistant", content: [{ type: "text", text: finalAnswer }] });
+      messages.push({
+        role: "user",
+        content:
+          "Your draft was rejected because it contains numeric claims that are not typed measures in the resolved nodes. " +
+          `Unsupported displays: ${JSON.stringify(guard.unmatched.slice(0, 50))}. ` +
+          "Rewrite the answer once. Remove every unsupported figure and every calculation. " +
+          "You may still compare or rank approved measures already returned. " +
+          "If the requested difference, ratio, projection, or total is not an approved typed measure, say that it is unavailable rather than calculating it. " +
+          "Keep node-path citations and the Traversal section.",
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const retryResp = await (anthropic.messages.create as any)({
+        model: "claude-sonnet-4-6",
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages,
+      });
+      const retryContent: AnyBlock[] = Array.isArray(retryResp.content) ? retryResp.content : [];
+      finalAnswer = blocksText(retryContent);
+      guard = runNumericGuard(finalAnswer, allNodes);
+    }
+    // A model answer containing an unsupported figure must never reach the
+    // caller. Warnings were explicitly rejected by Prompt 115 A7.
+    if (guard.status === "unmatched" && guard.unmatched.length > 0) {
+      res.status(422).json({
+        error: "Numeric guard rejected the answer: one or more figures were not present in resolved graph nodes.",
+        unmatched: guard.unmatched,
+      });
+      return;
+    }
 
-    const cleanAnswer = stripEmojis(finalAnswer + guardNote);
+    const cleanAnswer = stripEmojis(finalAnswer);
 
     const data = AnalyzeSalesResponse.parse({
       answer: cleanAnswer || "I could not generate an answer for that question.",

@@ -60,8 +60,18 @@ router.post("/graph/resolve", async (req: Request, res: Response): Promise<void>
   const allNodes: ResolveResponse["nodes"] = [];
   const allErrors: ResolveResponse["errors"] = [];
   let truncated = false;
+  if (paths.length > MAX_NODES_PER_RESOLVE) {
+    allErrors.push({ path: "(request)", error: `Input paths capped at ${MAX_NODES_PER_RESOLVE}` });
+    truncated = true;
+  }
 
-  for (const rawPath of paths) {
+  for (const rawPath of paths.slice(0, MAX_NODES_PER_RESOLVE)) {
+    if (typeof rawPath !== "string" || rawPath.length > 240 || rawPath.split("/").length > 8) {
+      if (allErrors.length < MAX_NODES_PER_RESOLVE) {
+        allErrors.push({ path: String(rawPath), error: "Path exceeds bounded resolver grammar" });
+      }
+      continue;
+    }
     if (allNodes.length >= MAX_NODES_PER_RESOLVE) {
       truncated = true;
       break;
@@ -75,11 +85,11 @@ router.post("/graph/resolve", async (req: Request, res: Response): Promise<void>
         if (allNodes.length >= MAX_NODES_PER_RESOLVE) { truncated = true; break; }
         allNodes.push(n);
       }
-      allErrors.push(...errors);
+      allErrors.push(...errors.slice(0, MAX_NODES_PER_RESOLVE - allErrors.length));
     } else {
       const { node, error } = await resolvePath(rawPath, defaultFy);
       if (node)  allNodes.push(node);
-      if (error) allErrors.push({ path: rawPath, error });
+      if (error && allErrors.length < MAX_NODES_PER_RESOLVE) allErrors.push({ path: rawPath, error });
     }
   }
 
