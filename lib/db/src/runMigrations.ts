@@ -5921,6 +5921,182 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
           AND raised_by = 'Prompt 96';
     `,
   },
+  {
+    id: "124_prompt108_resolution_amendments",
+    sql: `
+      -- Prompt 108 follows two read-only evidence reports.  Amend only rows
+      -- that are still open so a later administrator decision is never
+      -- overwritten when this migration is replayed.
+      UPDATE resolution_item
+         SET title = 'Three WCT codes need their own MRP entries',
+             category = 'master data',
+             scope_product = 'WCT-3LL-05, WCT-3LL-07, WCT-3LL-10',
+             reason = 'WCT and WT are distinct products selling concurrently. Remove the WCT-to-WT candidate mappings and price the three WCT codes independently.',
+             evidence = '[Source: development sale_line_current, source=sheets, current rows through 17 September 2026; Prompt 107 report, 18 September 2026] WCT began in June 2026 while WT continued at full volume through September. The three WCT codes sold Rs 1,21,53,183.03 from June through September. There were 21 same-customer/same-month WCT-versus-WT intersections across 16 customers. Similar prices and customers explain the false edit-distance candidate, but simultaneous sales disprove a rename.',
+             value_at_stake = 12153183.03,
+             owner = 'Prayag',
+             priority = 'high'::resolution_priority,
+             updated_at = now()
+       WHERE code = 'P4'
+         AND status = 'open';
+
+      UPDATE resolution_item
+         SET title = 'Price 328 steady authority-gap sellers before 542 declining sellers',
+             category = 'master data',
+             scope_product = 'FY2026-27 sold codes absent or unpriced in the active MRP authority',
+             reason = 'Prioritise the 328 steady sellers for pricing, then decide whether 542 declining sellers need prices or controlled retirement. Keep the 70 already-discontinued sellers as a separate population.',
+             evidence = '[Source: production sale_line_current joined to the active MRP authority, current rows through 17 September 2026; Prompt 106 report, 18 September 2026] 870 codes / Rs 11,03,42,437.59 split into 328 steady sellers / Rs 5,18,51,757.65 and 542 declining sellers / Rs 5,84,90,679.94. Declining means August quantity was zero or below 70% of the May-July monthly average. Separately, the Drive-reviewed master classification contains 70 already-discontinued sellers worth Rs 20.15 lakh.',
+             value_at_stake = 110342437.59,
+             owner = 'Prayag',
+             priority = 'high'::resolution_priority,
+             updated_at = now()
+       WHERE code = 'P3'
+         AND status = 'open';
+
+      UPDATE resolution_item
+         SET title = 'Confirm BEA-103A and BS-28 remain active after discontinuation',
+             category = 'master data',
+             scope_product = 'BEA-103A, BS-28',
+             reason = 'Only two of the 31 FY2026-27 post-discontinuation sellers remained active in August; confirm whether their discontinuation records are wrong.',
+             evidence = '[Source: production sale_line_current and Prayag_MRP_Authoritative_v2_01Sep2026 workbook; Prompt 107 report, 18 September 2026] The 31 codes sold Rs 11,37,661.52 after 1 April. Twenty-eight stopped by June. BEA-103A sold 30 pieces / Rs 1,12,203 total FY value with its latest sale on 31 August; BS-28 sold 10 pieces in August / Rs 22,864 total FY value. BS-65 had a two-piece July tail and no August sale.',
+             value_at_stake = 135067,
+             owner = 'Prayag',
+             priority = 'low'::resolution_priority,
+             updated_at = now()
+       WHERE code = 'P7'
+         AND status = 'open';
+
+      UPDATE resolution_item
+         SET title = 'Correct the 64 PEA prices to the 10 August 2026 revision date',
+             reason = 'Correct the master metadata: the 64 PEA rows say Revised on 10th Aug, 2026 while 1 February is the list-version date.',
+             evidence = '[Source: Prayag authoritative MRP workbook and production/development sale_line_current; Prompt 106 and Prompt 108 evidence reviews, 18 September 2026] All 64 rows carry the 10 August revision note. None of the exact codes sold from February through August 2026; 14 first appear in September and PEA-44B has no sale. There is no financial impact in the disputed interval.',
+             value_at_stake = 0,
+             owner = 'Prayag price team',
+             priority = 'low'::resolution_priority,
+             updated_at = now()
+       WHERE code = 'P23'
+         AND status = 'open';
+
+      UPDATE resolution_item
+         SET title = 'Codes 20, 25 and 32 are invalid master rows, not live products',
+             reason = 'Remove codes 20, 25 and 32 from the website because Prayag marked all three Invalid Input and none has sales.',
+             evidence = '[Source: authoritative MRP workbook excluded_do_not_load and production/development sale_line_current; Prompt 108 evidence review, 18 September 2026] These are the only three rows marked Invalid Input by Prayag. None sells. Removing them from the website loses no recorded sales.',
+             value_at_stake = 0,
+             priority = 'low'::resolution_priority,
+             status = 'answered',
+             resolved_on = DATE '2026-09-18',
+             resolved_by = 'Prompt 108 evidence review',
+             resolution_note = 'Answered from Prayag master evidence: codes 20, 25 and 32 are invalid input rows and should not be shown as live products. No sale exposure exists.',
+             updated_at = now()
+       WHERE code = 'P21'
+         AND status = 'open';
+
+      UPDATE resolution_item
+         SET title = 'Eight PS codes are absent from the master, not recorded as discontinued',
+             reason = 'Record the eight PS codes as absent from all held master sheets rather than claiming a discontinuation record.',
+             evidence = '[Source: Prayag authoritative MRP workbook and production/development sale_line_current; Prompt 107 and Prompt 108 evidence reviews, 18 September 2026] PS1106, PS1606, PS5157, PS5163, PS5171, PS5657, PS5763 and PS7506 appear in no held master sheet and have no exact-code FY2025-26 or FY2026-27 sales.',
+             value_at_stake = 0,
+             priority = 'low'::resolution_priority,
+             status = 'answered',
+             resolved_on = DATE '2026-09-18',
+             resolved_by = 'Prompt 108 evidence review',
+             resolution_note = 'Corrected: the eight PS codes are absent from the held master rather than present in its discontinued list, and no exact sales were found in FY2025-26 or FY2026-27.',
+             updated_at = now()
+       WHERE code = 'P29'
+         AND status = 'open';
+
+      UPDATE resolution_item
+         SET title = 'Why did the monthly-row check miss Ravi and Shiv''s May orders?',
+             category = 'data quality',
+             reason = 'The original no-order-booking premise was false. Check the process that produced it and decide whether Ravi Upadhyay and Shiv Kumar should have plan rows.',
+             evidence = '[Source: development secondary_order_line, person and member_targets; Prompt 107 report, 18 September 2026] No exact FY2025-26 activity was found. In FY2026-27 Ravi Upadhyay has 3 rows / Rs 11,405 on 29 May and Shiv Kumar has 24 rows / Rs 57,883 on 30 May. Neither exact name has a person or member_targets row. Shiv Kumar Patel is a different person and was excluded.',
+             value_at_stake = 69288,
+             owner = 'internal, then Prayag sales management',
+             priority = 'medium'::resolution_priority,
+             updated_at = now()
+       WHERE code = 'P39'
+         AND status = 'open';
+
+      UPDATE resolution_item
+         SET title = '“Unchanged — carried forward” is not a reliable pricing label',
+             reason = 'Do not use the status label as a price-change rule because it frequently accompanies changed prices.',
+             evidence = '[Source: Drive/MRP master reconciliation supplied in Prompt 108, 18 September 2026] The label appears on 2,175 rows; 500 have a changed price, with differences up to 89.1% (FR-24 +89.1%, FS-24 +82.5%, F-71 +72.5%).',
+             value_at_stake = 0,
+             priority = 'low'::resolution_priority,
+             status = 'answered',
+             resolved_on = DATE '2026-09-18',
+             resolved_by = 'Prompt 108 Drive/MRP review',
+             resolution_note = 'Answered: the label is unreliable and must not be used to infer whether price changed.',
+             updated_at = now()
+       WHERE code = 'P24'
+         AND status = 'open';
+
+      INSERT INTO resolution_item
+        (code, type, title, category, fiscal_year, scope_product, reason,
+         evidence, value_at_stake, raised_on, raised_by, owner, priority,
+         status, blocks_api)
+      VALUES
+        ('P48', 'PENDING',
+         'Colour-aware MRP resolution is a latent defect, not a measured exposure',
+         'data quality', '2026-27', '118 products with ivory prices above base',
+         'Make the line-level MRP resolver select the approved colour price when an explicit sale colour exists, and leave missing or unknown colour unresolved rather than silently applying white.',
+         '[Source: Prayag_MRP_Authoritative_v2_01Sep2026 workbook joined to production sale_line_current through 17 September 2026; Prompt 107 report, 18 September 2026] 118 products carry ivory prices 10.0%-48.1% above base, median +19.7%; 107 sold Rs 5,55,84,548.39. Production records 106 selling codes as WHITE and one code as unknown dot; IVORY has zero rows. Measurable correction today is Rs 0.00 and 0.00 percentage points. The current resolver is code-level and would silently use white if an ivory row appeared.',
+         0, DATE '2026-09-18', 'Prompt 108',
+         'internal, then Prayag if colour capture is wrong', 'medium',
+         'open', FALSE)
+      ON CONFLICT (code) DO NOTHING;
+
+      INSERT INTO resolution_item_relationship (source_code, target_code, relation)
+      SELECT 'P48', 'P26', 'ask-supported-by'::resolution_relation_type
+       WHERE EXISTS (SELECT 1 FROM resolution_item WHERE code = 'P26')
+      ON CONFLICT (source_code, target_code, relation) DO NOTHING;
+
+      DO $do$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P4'
+             AND status = 'open'
+             AND title = 'Three WCT codes need their own MRP entries'
+             AND evidence NOT ILIKE '%maps to WT%'
+             AND value_at_stake = 12153183.03
+        ) THEN
+          RAISE EXCEPTION 'P4 WCT correction is incomplete';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P48'
+             AND type = 'PENDING'
+             AND status = 'open'
+             AND blocks_api = FALSE
+             AND value_at_stake = 0
+             AND evidence ILIKE '%IVORY has zero rows%'
+        ) THEN
+          RAISE EXCEPTION 'P48 colour-risk entry is incomplete';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P7'
+             AND priority = 'low'::resolution_priority
+             AND scope_product = 'BEA-103A, BS-28'
+        ) THEN
+          RAISE EXCEPTION 'P7 discontinued-code reduction is incomplete';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P23'
+             AND priority = 'low'::resolution_priority
+             AND value_at_stake = 0
+        ) THEN
+          RAISE EXCEPTION 'P23 PEA correction is incomplete';
+        END IF;
+        IF (SELECT COUNT(*) FROM resolution_item WHERE code IN ('P21','P24','P29') AND status = 'answered') <> 3 THEN
+          RAISE EXCEPTION 'Prompt 108 answered-item closures are incomplete';
+        END IF;
+      END
+      $do$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
