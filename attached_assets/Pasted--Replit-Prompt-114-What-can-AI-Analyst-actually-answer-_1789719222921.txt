@@ -1,0 +1,187 @@
+# Replit Prompt 114 — What can AI Analyst actually answer?
+
+**Date:** 18 September 2026
+**Scope:** Read-only throughout. Change nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Why.** AI Analyst was built months ago. Since then the app has gained three
+fiscal years of secondary order booking, the six-master category registry, the
+Resolution register, GP margin, effective-dated MRP, the peer-set computations,
+the seasonal calibration, and the pending-order attribution hierarchy.
+
+**It is reportedly not working well.** Before adding anything, establish what it
+can reach today and what it cannot.
+
+---
+
+## Section A — what it is
+
+```
+Read-only.
+
+A1. WHAT IS AI ANALYST? Print its implementation - the route, the builder,
+    the model call, and what a request and response look like end to end.
+
+    Is it a fixed-question interface, free text, or a payload-driven
+    narrative generator?
+
+A2. WHAT DATA CAN IT REACH? Print every table, view or computed measure it
+    can query, and everything it cannot.
+
+    The critical question: does it query the database, or is it handed a
+    prepared payload? Those are very different capabilities.
+
+A3. IF IT IS PAYLOAD-DRIVEN, print the payload schema. Field by field,
+    what it contains and from which source.
+
+A4. WHAT QUESTIONS CAN IT ANSWER TODAY? Give ten real examples that work,
+    with their actual answers.
+
+A5. WHAT HAPPENS WHEN IT CANNOT ANSWER? Does it say so, guess, or produce
+    a plausible but unsupported answer?
+
+    The AI Reports surface was found leaking raw payload paths -
+    [performance.totalOB], [identity.workingDays] - with "5 of 205 tokens
+    could not be matched". Does AI Analyst have the same failure mode?
+
+A6. WHEN WAS IT LAST CHANGED? If its payload was fixed before the category
+    registry, the Resolution register or GP margin existed, it cannot see
+    them.
+```
+
+---
+
+## Section B — what it is missing
+
+```
+Read-only. For each, state: REACHABLE TODAY, REACHABLE WITH WORK, or NOT
+REACHABLE.
+
+Everything below exists in the app now and did not when AI Analyst was
+built.
+
+B1. SECONDARY ORDER BOOKING - three fiscal years, 866,201 rows,
+    Rs 548 Cr. Retailer and distributor identity on the Product-Wise rows.
+
+B2. THE SIX-MASTER CATEGORY REGISTRY - 10,417 assignments, six masters, 31
+    sub-categories, with Unmapped explicit.
+
+B3. THE RESOLUTION REGISTER - holds and pending items, with blocks_api.
+    Can AI Analyst see that PTMT January-April margin is held? If not, it
+    could narrate a figure the app itself refuses to show.
+
+B4. GP MARGIN - margin_fact, FY2025-26 complete, FY2026-27 to June, with
+    the PTMT hold.
+
+B5. EFFECTIVE-DATED MRP - mrp_history for closed periods, mrp_synced for
+    the open FY, and the not-offered exclusion rule.
+
+B6. THE SEASONAL CALIBRATION - Q4 is 34.56% of the year. Can it project
+    correctly, or would it annualise linearly?
+
+B7. PEER SETS AND CUSTOMER-SKU PENETRATION - the Prompt 105 shared
+    computations.
+
+B8. THE PENDING-ORDER ATTRIBUTION HIERARCHY - head, member, unassigned,
+    disputed, with reconciliation.
+
+B9. THE TOP-80 SNAPSHOT - 564 codes, Rs 112.00 Cr, frozen and dated.
+
+B10. THE PARITY AND FRESHNESS SIGNALS - MRP coverage, unpriced-code counts,
+     environment parity.
+```
+
+---
+
+## Section C — the questions it should be able to answer
+
+```
+Read-only. For each, say whether AI Analyst can answer it today, and if
+not, what is missing.
+
+These are questions a management team would actually ask.
+
+PERFORMANCE
+  C1  Which state heads are ahead of plan and which are behind, and by how
+      much?
+  C2  Is the business growing? Show the monthly shape, not just the YTD
+      figure.
+  C3  Which members' order booking is not converting into dispatch?
+  C4  What is our projected year-end, seasonally adjusted?
+
+PRODUCT
+  C5  Which categories are growing and which are shrinking?
+  C6  Which products are we selling that we cannot price?
+  C7  Where is our margin concentrated, and where is it thin?
+  C8  Which SKUs are sold by only one or two retailers?
+
+CUSTOMER
+  C9  Which retailers stopped buying this year?
+  C10 Which distributors have pending orders with no assigned member?
+  C11 Which customers buy narrowly compared with their peers?
+
+RISK
+  C12 What figures are currently unreliable, and why?
+  C13 Where is our revenue concentrated?
+  C14 What data are we missing, and what is it worth?
+
+C12 and C14 are the interesting ones. The Resolution register holds
+exactly that, and if AI Analyst cannot read it, the app knows something
+its analyst does not.
+```
+
+---
+
+## Section D — the shape of a fix
+
+```
+Recommend, do not build.
+
+D1. Is AI Analyst's problem THE PAYLOAD - it cannot see enough - or THE
+    PROMPT, it can see enough and does not use it well?
+
+    Those need different fixes and the distinction should come from
+    evidence, not assumption.
+
+D2. Should it query, or be handed a payload? A payload is safe and
+    bounded. Query access is far more capable and far more dangerous -
+    it could read held data, or compute a figure the app deliberately
+    suppresses.
+
+    Recommend, with the Resolution register in mind.
+
+D3. WHAT WOULD IT COST to give it the ten capabilities in Section B? Rank
+    them by value against effort.
+
+D4. WHAT MUST IT NEVER DO?
+      narrate a held figure - H1 PTMT margin, any blocks_api item
+      annualise linearly
+      present order booking as sales
+      state a percentage without its basis
+      infer a category for an unmapped code
+      treat an unavailable figure as zero
+
+    Those are the operating rules. Can they be enforced in the payload, or
+    only in the prompt? Payload enforcement is stronger.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- **A2 is the question everything turns on.** A payload-driven analyst can only
+  answer what someone anticipated. A querying analyst can answer what it is asked.
+  The failure mode described — "not working well" — usually means the first.
+- **B3 matters more than it sounds.** If AI Analyst cannot see the Resolution
+  register, it can confidently narrate PTMT margin for January to April, a figure
+  the app itself refuses to display and which we know is overstated by roughly 21
+  points.
+- **C12 and C14 are the best test.** "What is currently unreliable and why" is
+  answerable from the register alone, and it is exactly what a management team
+  should be able to ask.
+- **D4 is the durable part.** Six prohibitions, all from the operating rules. If
+  they can be enforced in the payload rather than the prompt, they survive a model
+  change.

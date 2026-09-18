@@ -68,6 +68,14 @@ type FactsResponse = {
     unmapped: { codeCount: number; value: number; valueShare: number };
     summary: { totalCodes: number; totalQty: number; totalNet: number; segmentsBought: number };
   } | null;
+  sourceMetadata?: Record<string, {
+    source: string;
+    valueBasis: string;
+    completeness: "complete" | "partial" | "unavailable";
+    identityCoverage: number | null;
+    included: boolean;
+    exclusionReason?: string;
+  }[]>;
 };
 
 // ── Page ───────────────────────────────────────────────────────────────────────
@@ -104,6 +112,9 @@ export default function SkuPage() {
   const [overviewData, setOverviewData] = useState<FactsResponse | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [augRows, setAugRows] = useState<Array<Record<string, unknown>>>([]);
+  const [augTotal, setAugTotal] = useState(0);
+  const [augViewError, setAugViewError] = useState<string | null>(null);
 
   // Fetch state — drill
   const [drillData, setDrillData] = useState<FactsResponse | null>(null);
@@ -165,6 +176,17 @@ export default function SkuPage() {
       .finally(() => { if (!cancelled) setOverviewLoading(false); });
     return () => { cancelled = true; };
   }, [fy, level, period.monthFrom, period.monthTo, scopeHead, filterQuery]);
+
+  useEffect(() => {
+    if (level !== "retailer") {
+      setAugRows([]);
+      return;
+    }
+    fetch(`${BASE}/api/sku/retailer-aug26?limit=100&offset=0`)
+      .then((r) => r.ok ? r.json() as Promise<{ rows?: Array<Record<string, unknown>>; pagination?: { total: number } }> : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then((d) => { setAugRows(d.rows ?? []); setAugTotal(d.pagination?.total ?? 0); })
+      .catch((e: Error) => setAugViewError(e.message));
+  }, [level]);
 
   // ── Fetch drill (single segment) ─────────────────────────────────────────────
 
@@ -668,6 +690,16 @@ export default function SkuPage() {
         )}
 
         {section === "overview" && (
+          level === "retailer" && overviewData?.sourceMetadata && (
+            <div className="mb-4 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+              <p className="font-semibold">Monthly source metadata</p>
+              {Object.entries(overviewData.sourceMetadata).map(([month, entries]) => entries.map((meta) => (
+                <p key={`${month}-${meta.source}`}><b>{month}</b>: {meta.source} · {meta.valueBasis} · {meta.completeness} · {meta.included ? "included" : `excluded${meta.exclusionReason ? ` — ${meta.exclusionReason}` : ""}`} · identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}</p>
+              )))}
+            </div>
+          )
+        )}
+        {section === "overview" && (
           <SkuOverview
             rows={overviewRows}
             loading={overviewLoading}
@@ -675,6 +707,23 @@ export default function SkuPage() {
             unmapped={overviewData?.facts?.unmapped ?? null}
             summary={overviewData?.facts?.summary ?? null}
           />
+        )}
+        {section === "overview" && level === "retailer" && (
+          <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/40">
+            <h3 className="text-sm font-semibold">August 2026 · isolated retailer × item view</h3>
+            <p className="mt-1 text-xs text-muted-foreground">Source: Product-Wise CRM order booking, August 2026</p>
+            <p className="text-xs text-muted-foreground">Value: Basic Order Value, ex-GST</p>
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Not comparable with PSCode3 SKU NET without reconciliation</p>
+            {augViewError ? <p className="mt-2 text-xs text-destructive">{augViewError}</p> : (
+              <div className="mt-3 max-h-64 overflow-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="border-b text-left"><th className="p-1">Retailer</th><th className="p-1">Product</th><th className="p-1">Qty</th><th className="p-1">Basic value (ex-GST)</th></tr></thead>
+                  <tbody>{augRows.slice(0, 100).map((row, index) => <tr key={`${String(row.dealer_id)}-${String(row.product_code)}-${index}`} className="border-b last:border-0"><td className="p-1">{String(row.customer_name ?? row.dealer_id ?? "")}</td><td className="p-1">{String(row.product_code ?? "")}</td><td className="p-1">{String(row.qty ?? "")}</td><td className="p-1">{String(row.basic_order_value ?? "")}</td></tr>)}</tbody>
+                </table>
+                <p className="mt-2 text-muted-foreground">Showing first {augRows.length} retailer × item rows of {augTotal} total.</p>
+              </div>
+            )}
+          </div>
         )}
 
         {section === "drill" && drillSegment && (

@@ -113,6 +113,8 @@ export type SkuSegmentFact = {
 
 export type SkuFactsResult = {
   capability: SkuCapability;
+  /** Per-month lineage; never infer a common basis across a source seam. */
+  sourceMetadata?: Record<string, SkuSourceMetadata[]>;
   /**
    * Present only for level='retailer' + scope='head': how the state head was
    * expanded to register member names, incl. PS-code vocabulary mismatches.
@@ -151,6 +153,15 @@ export type SkuFactsResult = {
    * undefined = check was not run (level is not 'retailer').
    */
   coverageWarning?: import("../secondary/skuCoverageGuard.js").CoverageWarning | null;
+};
+
+export type SkuSourceMetadata = {
+  source: string;
+  valueBasis: string;
+  completeness: "complete" | "partial" | "unavailable";
+  identityCoverage: number | null;
+  included: boolean;
+  exclusionReason?: string;
 };
 
 // ── Capability detection ──────────────────────────────────────────────────────
@@ -507,6 +518,7 @@ export async function getSecondarySkuFacts(
     FROM secondary_sku_line sku
     LEFT JOIN item_master im ON im.code = sku.item_code
     WHERE sku.fy = ${fy}
+       AND sku.source <> 'productwise_xlsx'
       AND sku.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
       ${scopeFilter}
       ${segmentFilter}
@@ -534,6 +546,7 @@ export async function getSecondarySkuFacts(
       SUM(sku.net_amount::numeric)::text AS unbought_value
     FROM secondary_sku_line sku
     WHERE 1=1
+       AND sku.source <> 'productwise_xlsx'
       ${scopeFilter}
       ${segmentFilter}
       ${fiscalMonthFilter}
@@ -743,6 +756,8 @@ export type SkuTrendResult = {
    * quantifies that so readers know the comparison basis changed.
    */
   channelMovers: SkuChannelMoverPair[] | null;
+  sourceMetadata?: Record<string, SkuSourceMetadata[]>;
+  excludedMonths?: Record<string, string>;
 };
 
 export type SkuTrendParams = {
@@ -778,6 +793,8 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
 
   let monthly: SkuTrendMonthRow[];
   let fyTotalsRaw: RawFyRow[];
+  let sourceMetadata: Record<string, SkuSourceMetadata[]> = {};
+  let excludedMonths: Record<string, string> = {};
 
   if (level === "retailer") {
     const scopeFilter =
@@ -798,6 +815,7 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
           SUM(sku.net_amount::numeric)::text       AS net
         FROM secondary_sku_line sku
         WHERE sku.item_code IS NOT NULL AND sku.item_code <> ''
+          AND sku.source <> 'productwise_xlsx'
           ${monthFilterFor(sql`sku.month_label`)}
           ${scopeFilter} ${segFilter}
         GROUP BY sku.fy, sku.month_label, COALESCE(sku.segment_canon, 'Unmapped')
@@ -811,6 +829,7 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
           SUM(sku.net_amount::numeric)::text       AS net
         FROM secondary_sku_line sku
         WHERE sku.item_code IS NOT NULL AND sku.item_code <> ''
+          AND sku.source <> 'productwise_xlsx'
           ${monthFilterFor(sql`sku.month_label`)}
           ${scopeFilter} ${segFilter}
         GROUP BY sku.fy, COALESCE(sku.segment_canon, 'Unmapped')
@@ -824,6 +843,29 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
       net: parseFloat(r.net) || 0,
     }));
     fyTotalsRaw = fyRes.rows;
+    const sourceRows = await db.execute<{ month_label: string; source: string; rows: string; identified: string }>(sql`
+      SELECT month_label, source, COUNT(*)::text AS rows,
+             COUNT(*) FILTER (WHERE dealer_id IS NOT NULL OR retailer_id IS NOT NULL)::text AS identified
+        FROM secondary_sku_line
+       GROUP BY month_label, source
+    `);
+    for (const row of sourceRows.rows) {
+      const rows = Number(row.rows);
+      const meta: SkuSourceMetadata = {
+        source: row.source === "productwise_xlsx" ? "Product-Wise CRM order booking" : "PSCode3 secondary SKU register",
+        valueBasis: row.source === "productwise_xlsx" ? "Basic Order Value, ex-GST" : "SKU NET (Sub Total)",
+        completeness: row.source === "productwise_xlsx" ? "partial" : "complete",
+        identityCoverage: rows ? Number(row.identified) / rows : null,
+        included: row.source !== "productwise_xlsx",
+        exclusionReason: row.source === "productwise_xlsx"
+          ? "Product-Wise order booking is isolated and not comparable with PSCode3 SKU NET."
+          : undefined,
+      };
+      sourceMetadata[row.month_label] = [...(sourceMetadata[row.month_label] ?? []), meta];
+      if (row.source === "productwise_xlsx") {
+        excludedMonths[row.month_label] = "Product-Wise order booking is isolated and not comparable with PSCode3 SKU NET.";
+      }
+    }
   } else {
     const trendProjectHead = sql`AND (sl.head_canon IS NULL OR sl.head_canon != ${PROJECT_HEAD_CANON})`;
     const levelFilter =
@@ -1005,7 +1047,7 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
   const everSold: Record<string, number> = {};
   for (const [seg, cnt] of everSoldMap) everSold[seg] = cnt;
 
-  return { level, fys, fyMonths, everSold, monthly, fyTotals, fyNetTotals, channelMovers };
+  return { level, fys, fyMonths, everSold, monthly, fyTotals, fyNetTotals, channelMovers, sourceMetadata, excludedMonths };
 }
 
 // ── Main entry point ──────────────────────────────────────────────────────────
@@ -1040,6 +1082,7 @@ export async function loadSkuFacts(
   }
 
   let facts: SkuFactsResult["facts"];
+  let sourceMetadata: Record<string, SkuSourceMetadata[]> | undefined;
   let headResolution: SecondaryHeadResolution | null = null;
   let coverageWarning: SkuFactsResult["coverageWarning"] = undefined;
 
@@ -1053,6 +1096,46 @@ export async function loadSkuFacts(
       if (headResolution) headKeys = headResolution.matchedKeys;
     }
     facts = await getSecondarySkuFacts({ fy, monthLabels, scope, scopeId, segment, headKeys });
+    const provenance = await db.execute<{
+      month_label: string; source: string; rows: string; identified: string;
+    }>(sql`
+      SELECT month_label, source, COUNT(*)::text AS rows,
+             COUNT(*) FILTER (WHERE dealer_id IS NOT NULL OR retailer_id IS NOT NULL)::text AS identified
+        FROM secondary_sku_line
+       WHERE fy = ${fy}
+         AND month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
+       GROUP BY month_label, source
+       ORDER BY month_label
+    `);
+    sourceMetadata = {};
+    for (const r of provenance.rows) {
+      const rows = Number(r.rows);
+      const meta: SkuSourceMetadata = {
+        source: r.source === "productwise_xlsx"
+          ? "Product-Wise CRM order booking"
+          : "PSCode3 secondary SKU register",
+        valueBasis: r.source === "productwise_xlsx"
+          ? "Basic Order Value, ex-GST"
+          : "SKU NET (Sub Total)",
+        completeness: rows > 0 && r.source === "productwise_xlsx" ? "partial" : rows > 0 ? "complete" : "unavailable",
+        identityCoverage: rows > 0 ? Number(r.identified) / rows : null,
+        included: r.source !== "productwise_xlsx",
+        exclusionReason: r.source === "productwise_xlsx"
+          ? "Product-Wise order booking is isolated and not comparable with PSCode3 SKU NET."
+          : undefined,
+      };
+      sourceMetadata[r.month_label] = [...(sourceMetadata[r.month_label] ?? []), meta];
+    }
+    for (const month of monthLabels) {
+      sourceMetadata[month] ??= [{
+        source: "No retailer SKU source loaded",
+        valueBasis: "Unavailable",
+        completeness: "unavailable",
+        identityCoverage: null,
+        included: false,
+        exclusionReason: "No source loaded for this month.",
+      }];
+    }
 
     // ── Synchronous PSCode2 coverage check ────────────────────────────────────
     // Runs IN the request path (not fire-and-forget) so the coverageWarning
@@ -1099,5 +1182,5 @@ export async function loadSkuFacts(
     );
   }
 
-  return { capability, facts, headResolution, coverageWarning };
+  return { capability, facts, headResolution, coverageWarning, sourceMetadata };
 }

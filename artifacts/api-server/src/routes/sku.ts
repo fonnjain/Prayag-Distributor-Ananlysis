@@ -48,6 +48,9 @@ import {
 import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
 import { isAdminToken } from "../lib/adminAuth.js";
 import { WipeGuardAbortError } from "../lib/sku/skuWipeGuard.js";
+import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
+import { AUG26_RETAILER_VIEW } from "../lib/sku/sourceSeam.js";
 import {
   getPrimaryDiscountByCode,
   getSecondaryDiscountByCode,
@@ -210,6 +213,7 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
        * undefined/absent = level is not 'retailer'.
        */
       coverageWarning: result.coverageWarning ?? undefined,
+      sourceMetadata: result.sourceMetadata ?? undefined,
       facts: result.facts,
     };
   };
@@ -220,7 +224,7 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
     const payload =
       scope === "company" && !segment && !entityFilter
         ? await serveWithSnapshot({
-            key: `sku-facts|${fy}|${level}|${monthFrom}-${monthTo}`,
+            key: `sku-facts-v5-source-metadata|${fy}|${level}|${monthFrom}-${monthTo}`,
             ttlMs: SKU_SNAPSHOT_TTL_MS,
             build,
             log: req.log,
@@ -230,6 +234,41 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
   } catch (err) {
     req.log.error({ err, fy, level }, "sku facts failed");
     res.status(500).json({ error: "Could not load SKU facts." });
+  }
+});
+
+// Isolated Product-Wise CRM booking view. This endpoint deliberately does not
+// feed SKU facts, trends, recommendations, discount, or breadth calculations.
+router.get("/sku/retailer-aug26", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const limitRaw = Number(req.query.limit ?? 100);
+    const offsetRaw = Number(req.query.offset ?? 0);
+    const limit = Number.isFinite(limitRaw) ? Math.min(500, Math.max(1, Math.floor(limitRaw))) : 100;
+    const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.floor(offsetRaw)) : 0;
+    const result = await db.execute(sql`
+      SELECT dealer_id, customer_name, product_code,
+             SUM(qty)::text AS qty, SUM(basic_order_value)::text AS basic_order_value,
+             MAX(segment_canon) AS segment_canon, MAX(cp_code) AS cp_code, MAX(cp_name) AS cp_name,
+             COUNT(*) OVER()::int AS total_count
+        FROM secondary_order_line
+       WHERE fiscal_year = '2026-27'
+         AND order_datetime >= TIMESTAMPTZ '2026-08-01 00:00:00+05:30'
+         AND order_datetime <  TIMESTAMPTZ '2026-09-01 00:00:00+05:30'
+       GROUP BY dealer_id, customer_name, product_code
+       ORDER BY customer_name, product_code, dealer_id
+       LIMIT ${limit} OFFSET ${offset}
+    `);
+    const rows = result.rows as Array<Record<string, unknown>>;
+    const total = Number(rows[0]?.total_count ?? 0);
+    res.json({
+      ...AUG26_RETAILER_VIEW,
+      excludedFrom: ["B3", "secondary discount", "multi-month gap", "multi-month breadth", "trends", "recommendations"],
+      pagination: { limit, offset, total, hasMore: offset + rows.length < total },
+      rows: rows.map(({ total_count: _totalCount, ...row }) => row),
+    });
+  } catch (err) {
+    req.log.error({ err }, "isolated Aug-26 retailer Product-Wise view failed");
+    res.status(500).json({ error: "Could not load the isolated August Product-Wise view." });
   }
 });
 
@@ -523,7 +562,7 @@ router.get("/sku/trend", async (req: Request, res: Response): Promise<void> => {
     const result =
       scope === "company" && !segment && !monthNames
         ? await serveWithSnapshot({
-            key: `sku-trend-v4|${level}`,
+             key: `sku-trend-v5-source-metadata|${level}`,
             ttlMs: SKU_SNAPSHOT_TTL_MS,
             build,
             log: req.log,
@@ -881,6 +920,13 @@ router.get("/sku/export", async (req: Request, res: Response): Promise<void> => 
       ["Scope", scope === "company" ? "Company-wide" : `${scope}: ${scopeId}`],
       ["Months (fiscal)", `${monthFrom}–${monthTo}`],
       ["NET source", netSource],
+      ["Per-month source metadata", level === "retailer"
+        ? Object.entries(result.sourceMetadata ?? {}).flatMap(([month, entries]) =>
+            entries.map((meta) =>
+              `${month}: ${meta.source}; ${meta.valueBasis}; ${meta.completeness}; ${meta.included ? "included" : `excluded${meta.exclusionReason ? ` (${meta.exclusionReason})` : ""}`}; identity ${(meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`)}`,
+            ),
+          ).join(" | ") || "No source metadata"
+        : "Not applicable — primary invoice source"],
       ["State Head filter", entityFilter?.heads?.length ? entityFilter.heads.join(", ") : "All"],
       ["State filter", entityFilter?.states?.length ? entityFilter.states.join(", ") : "All"],
       ["Distributor filter", entityFilter?.customers?.length ? entityFilter.customers.join(", ") : "All"],

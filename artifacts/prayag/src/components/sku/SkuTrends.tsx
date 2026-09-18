@@ -61,6 +61,15 @@ export type TrendData = {
   fyTotals: TrendFyRow[];
   fyNetTotals: Record<string, number>;
   channelMovers?: TrendChannelMoverPair[] | null;
+  sourceMetadata?: Record<string, {
+    source: string;
+    valueBasis: string;
+    completeness: "complete" | "partial" | "unavailable";
+    identityCoverage: number | null;
+    included: boolean;
+    exclusionReason?: string;
+  }[]>;
+  excludedMonths?: Record<string, string>;
 };
 
 interface Props {
@@ -155,6 +164,8 @@ export default function SkuTrends({ data }: Props) {
   const lineData = useMemo(() =>
     fyMonths.map((fm) => {
       const point: Record<string, string | number> = { fyMonth: fm };
+      const meta = data.sourceMetadata?.[fm];
+      if (meta) point.__source = meta.map((entry) => `${entry.source} · ${entry.valueBasis}`).join(" | ");
       for (const seg of activeSegments) {
         const row = monthlyByKey.get(`${fm}|${seg}`);
         if (row) {
@@ -225,6 +236,19 @@ export default function SkuTrends({ data }: Props) {
 
   return (
     <div className="space-y-6">
+      {data.level === "retailer" && (Object.keys(data.sourceMetadata ?? {}).length > 0 || Object.keys(data.excludedMonths ?? {}).length > 0) && (
+        <div className="rounded-md border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+          <p className="font-semibold">Monthly source basis</p>
+          <div className="mt-1 space-y-1">
+            {Object.entries(data.sourceMetadata ?? {}).flatMap(([month, entries]) => entries.map((meta) => (
+              <p key={`${month}-${meta.source}`}><b>{month}</b>: {meta.source} · {meta.valueBasis} · {meta.completeness} · {meta.included ? "included" : `excluded${meta.exclusionReason ? ` — ${meta.exclusionReason}` : ""}`} · identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}</p>
+            )))}
+            {Object.entries(data.excludedMonths ?? {}).map(([month, reason]) => (
+              <p key={month} className="font-medium"><b>{month}</b>: excluded — {reason}</p>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Segment selector */}
       <div className="space-y-1">
@@ -284,6 +308,10 @@ export default function SkuTrends({ data }: Props) {
             />
             <Tooltip
               formatter={(val: number, name: string) => [`${val}%`, name]}
+              labelFormatter={(label: string) => {
+                const meta = data.sourceMetadata?.[label]?.map((entry) => `${entry.source} · ${entry.valueBasis}${entry.included ? "" : " · excluded"}`).join(" | ");
+                return meta ? `${label} · ${meta}` : label;
+              }}
               contentStyle={{
                 fontSize: 12,
                 background: isDark ? "#1e1e2e" : "#fff",

@@ -41,6 +41,22 @@ booking is `secondary_order_line` basic order value. Secondary SKU value is the
 Product-Wise register NET amount. Head-month plan, ordered, and received are
 separate `secondary_head_month` measures.
 
+**Secondary SKU source seam:** every retailer×item payload, chart, tooltip, and
+export carries source, value basis, completeness, and identity coverage for
+each month. A source change is visible and is never treated as a continuous
+comparable series by default.
+
+August 2026 Product-Wise retailer×item data may be shown only as an isolated
+view labelled:
+
+- `Source: Product-Wise CRM order booking, August 2026`
+- `Value: Basic Order Value, ex-GST`
+- `Not comparable with PSCode3 SKU NET without reconciliation`
+
+Until a reconciliation contract exists, that August Product-Wise view is
+excluded from B3, secondary discount, and every multi-month gap or breadth
+conclusion.
+
 **Implemented not-offered behaviour:** a closed-period sale with no
 effective-dated MRP row is excluded from discount and realisation calculations.
 Current MRP is never substituted for a past period. A product with no price in
@@ -67,6 +83,14 @@ Projections are not actuals and never overwrite source figures.
 Use stable source identifiers before normalized names. Secondary RET#/DIST#
 identity comes from `secondary_order_line`; `secondary_sku_line` has neither.
 Exact-code absence and resolver-aware matching are different bases.
+
+When both tables are fed from the same source, the tables themselves do not
+create a retailer×item divergence. Production July 2026 PSCode3 reconciles
+exactly: 32,378 retailer×item pairs and Rs 22,34,36,806 on both
+`secondary_order_line.basic_order_value` and
+`secondary_sku_line.net_amount`. Any future difference must first be treated
+as a source difference, not a table difference. Source: production database,
+July 2026 PSCode3 reconciliation accepted 18 September 2026.
 
 ## 9. Grouping vocabularies
 
