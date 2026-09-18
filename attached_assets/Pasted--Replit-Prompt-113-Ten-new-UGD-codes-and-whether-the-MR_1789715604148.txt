@@ -1,0 +1,176 @@
+# Replit Prompt 113 — Ten new UGD codes, and whether the MRP sync took them
+
+**Date:** 18 September 2026
+**Scope:** A and B read-only. C is a register entry. D is a rules update.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## What arrived
+
+Ten new codes, a **new series**, effective **10 August 2026**:
+
+| Code | Range | Product | MRP |
+|---|---|---|---:|
+| U-11CS … U-16CS | SN-8, six sizes | UGD Self Fit Pipe 6 MTR | ₹2,987 – ₹25,230 |
+| U-11BS … U-14BS | SN-4, four sizes | UGD Self Fit Pipe 6 MTR | ₹2,196 – ₹7,368 |
+
+**They were added to the MRP app yesterday.** So the question is whether this app
+has them — it should, and if not, that is a sync defect.
+
+**Three gaps found:**
+
+**Not in the 1 September MRP master snapshot.**
+**Not in the grouping master** — and there is no `UGD`, `UNDERGROUND` or `DRAIN`
+Item Type at all. This is a new **series**, not a new size in an existing one.
+The only other `U-` code is `U-37`, typed UPVC, so the prefix does not resolve
+them either.
+**No sales yet** through 2 September — which is why nothing has surfaced.
+
+**And the count difference matches.** P021 found Competition at **6,119** active
+priced products against the app's cached **6,109** — a difference of exactly
+**ten**.
+
+---
+
+## Section A — did the sync take them?
+
+```
+Read-only.
+
+The MRP refresh runs five minutes after production startup, then every 24
+hours, from https://prayag-price.com/api/v1/products. The codes were added
+to the pricing app YESTERDAY. At least one scheduled run should have
+happened since.
+
+A1. IS THE ACTIVE mrp_synced GENERATION CARRYING THESE TEN CODES?
+
+      U-11CS U-12CS U-13CS U-14CS U-15CS U-16CS
+      U-11BS U-12BS U-13BS U-14BS
+
+    Print each, present or absent, with its MRP and effective date if
+    present.
+
+A2. WHEN DID THE ACTIVE GENERATION FETCH? Print its source fetch
+    timestamp, source row count and active row count.
+
+    If the fetch predates the pricing-app update, the sync simply has not
+    run yet and the answer is "wait for the next cycle". If it postdates
+    it and the codes are absent, that is a defect.
+
+A3. mrp_sync_status - last_success_at and last_error. Has a refresh failed
+    since the codes were added?
+
+    NOTE THE SCHEMA LIMIT: failed generations roll back, and only the
+    latest error is retained. So a run history shows successes, not a
+    complete ledger.
+
+A4. ROW COUNT RECONCILIATION. Competition reported 6,119 active priced
+    products on 18 September; the app's cached count was 6,109.
+
+    Are these ten the difference? Print the active cache count now, and
+    the source row count the last fetch declared.
+
+A5. IF THEY ARE ABSENT DESPITE A LATER FETCH, why? Candidates:
+      pagination - the fetch is paginated at 500; a boundary problem would
+        drop a tail
+      division or series filtering at fetch time
+      validation rejecting the rows - duplicate code, invalid MRP
+      the declared-total check passing while rows were short
+
+    A5 matters more than the ten codes. A sync that silently drops new
+    products would do it again.
+```
+
+---
+
+## Section B — they cannot be categorised
+
+```
+Read-only.
+
+B1. CONFIRM: none of the ten appears in the grouping master, and no Item
+    Type contains UGD, UNDERGROUND or DRAIN.
+
+B2. SO WHAT HAPPENS WHEN THEY SELL? Trace it:
+      do they appear in Products with a group?
+      do they fall into Unmapped?
+      does any surface show them at all?
+
+    Currently Unmapped is 16 Composite lines at Rs 2,41,571. These ten
+    would join it the moment they sell.
+
+B3. IS THERE ANY AUTOMATIC FALLBACK? If a sold code has no registry
+    assignment, does the app infer a category from series, prefix or MRP
+    division - or does it go straight to Unmapped?
+
+    The MRP master would have them in division "Pipes & Fittings", series
+    "UGD Pipe". If the registry can seed from MRP division and series, that
+    is a route; if not, say so.
+
+B4. HAVE THEY SOLD SINCE 2 SEPTEMBER? sale_line_current and
+    secondary_order_line, Sep-26. If yes, they are already in Unmapped and
+    this is urgent rather than preventive.
+```
+
+---
+
+## Section C — the register entry
+
+```
+Add as PENDING, owner Prayag.
+
+  NEW UGD PIPE SERIES NEEDS A CATEGORY ASSIGNMENT
+
+  reason    Ten new codes - U-11CS to U-16CS and U-11BS to U-14BS, UGD
+            Self Fit Pipe 6 MTR - carry prices effective 10 August 2026 but
+            have no Item Type in the grouping master. There is no UGD,
+            UNDERGROUND or DRAIN Item Type at all; this is a new series.
+  effect    They will report as Unmapped the moment they sell.
+  ask       An Item Type for the UGD Pipe series, and its master category.
+            Underground drainage sits naturally alongside SWR under
+            PLUMBING, but that is a business decision.
+  priority  high - preventive. Cheaper before first sale than after.
+```
+
+---
+
+## Section D — the rule this establishes
+
+```
+Add to PRAYAG_OPERATING_RULES.md.
+
+  A NEW SERIES IN A PRICE LIST NEEDS A GROUPING-MASTER ENTRY BEFORE FIRST
+  SALE.
+
+  A new SIZE in an existing series inherits its Item Type. A new SERIES has
+  none, and lands in Unmapped with nothing to flag it - the code simply
+  appears in a total that does not add up by category.
+
+  Evidence: ten UGD Self Fit Pipe codes arrived with prices effective
+  10 August 2026 and no Item Type. Caught before first sale.
+
+  CHECK ON EVERY MRP REFRESH: any code in the active catalogue with no
+  grouping-master entry. Report it, do not wait for a sale.
+
+D1. Is that check buildable now? It is a set difference between the active
+    MRP cache and the grouping master, and it would have caught this
+    without anyone looking.
+
+    Recommend where it belongs - Data Health alongside the unpriced-code
+    check, which is the same question in the opposite direction.
+```
+
+---
+
+## Notes
+
+- **A5 is the important question, not the ten codes.** If the sync ran after the
+  pricing app was updated and these are still absent, something is silently
+  dropping new products — and it will do it again.
+- **D1 is the check that pays for itself.** The unpriced-code check finds sold
+  codes with no price. This is the mirror: priced codes with no category. Both are
+  set differences and neither needs a person to notice.
+- **This is the first gap caught before it caused a problem.** Everything else this
+  month was found afterwards. Worth keeping that property.

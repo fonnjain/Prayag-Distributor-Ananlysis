@@ -1,0 +1,187 @@
+# Replit Prompt 112 — Act on P021
+
+**Date:** 18 September 2026
+**Follows:** P021, whose findings are accepted. Every reconciliation in it checks
+to the rupee.
+**Scope:** A is a rules update. B and C build. D is a register update.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## What P021 settled
+
+**Zero transit loss.** Not one code is present in the Competition catalogue and
+absent from this app's cache. All 871 exact-code gaps are genuinely absent from
+Competition. **Q7 is Prayag's to fix, not ours.**
+
+**The not-offered rule is already implemented.** A closed-period sale with no
+effective-dated MRP row is excluded by the join; current MRP is never
+substituted.
+
+**814 versus 870 was a definition difference, not a discrepancy.** 54 codes and
+₹1.56 Cr of it is exact-code versus resolver-aware counting; only 2 codes and
+₹11.25 lakh is real movement.
+
+**And the refresh is scheduled**, not restart-only: five minutes after startup,
+then every 24 hours, with transactional activation and rollback on failure.
+
+---
+
+## Section A — record all of it in the operating rules
+
+```
+Update PRAYAG_OPERATING_RULES.md. These are exactly the facts that get
+re-derived.
+
+A1. ADD TO SECTION 1 - the MRP path:
+
+      source     https://prayag-price.com/api/v1/products, paginated 500
+      schedule   5 minutes after production startup, then every 24 hours
+      storage    immutable mrp_sync_generation -> mrp_synced +
+                 mrp_synced_division, activated only after all writes
+      failure    transaction rolls back, prior generation keeps serving,
+                 error in mrp_sync_status.last_error
+      history    closed periods use effective-dated mrp_history; the open
+                 FY uses active mrp_synced
+
+A2. ADD A NEW RULE - counting basis must be stated.
+
+      "Unpriced code counts differ by BASIS. Exact-code absence and
+       resolver-unresolved are different measures and must never be
+       compared without saying which is which. 814 vs 870 was a definition
+       difference of 54 codes / Rs 1.56 Cr, not data movement."
+
+A3. ADD TO SECTION 4 - confirm the not-offered rule as IMPLEMENTED
+    BEHAVIOUR, not a requirement:
+
+      "A closed-period sale with no effective-dated MRP row is EXCLUDED
+       from discount and realisation calculations. Current MRP is never
+       substituted for a past period. A product with no price in a period
+       was not offered in that period."
+
+A4. CORRECT SECTION 14. The unpriced figure is Rs 11.06 Cr exact-code /
+    Rs 9.49 Cr unresolved, not Rs 11.03 Cr. And state that 55 of the 871
+    resolve through existing formatting rules.
+
+A5. ADD TO SECTION 12 - the annex problem, again:
+
+      "The 70-code discontinued annex is no longer retained, so the
+       Rs 7.69 Cr residue is arithmetic subtraction, not a row-level
+       classification. Same limitation as P30, P40 and P49."
+```
+
+---
+
+## Section B — the freshness indicator
+
+```
+Code change. P021 D1, accepted as specified.
+
+B1. A COMPACT INDICATOR on every price-derived page, and a detailed panel
+    in Data Health.
+
+    Show: last successful fetch, age in hours, active row count, source row
+    count, sold-code coverage, unpriceable count and value, latest error.
+
+B2. THRESHOLDS as recommended:
+      Current   under 30 hours with reconciled counts
+      Warning   30-48 hours, or count disagreement
+      Critical  over 48 hours, no active generation, or latest refresh
+                failed
+
+B3. The authenticated sync-status response already carries everything
+    needed - active generation, source fetch timestamp, source row count,
+    provenance completeness, last success, latest error, in-progress
+    state. Surface it; do not rebuild it.
+
+B4. NOTE THE SCHEMA LIMIT ON THE PANEL. mrp_sync_generation records only
+    successful generations; failed transactions roll back, and
+    mrp_sync_status keeps only last_error. So a run history shows
+    successes, not a complete success/failure ledger.
+
+    Say so on the panel rather than implying the history is complete.
+```
+
+---
+
+## Section C — the unpriced-code check and coverage floor
+
+```
+Code change. P021 D2 and D3, accepted.
+
+C1. STANDING UNPRICED-CODE CHECK, showing BOTH measures separately, never
+    combined:
+      exact authority gap           871 codes / Rs 11,05,90,833.82
+      unresolved after normalisation 816 codes / Rs  9,49,25,358.94
+
+    Place it in Data Health, the dashboard header, and every discount or
+    realisation report.
+
+    Warn above 1% of selected sales value. Critical above 5%, or where an
+    unpriced product sold in each of the latest three complete months.
+
+    RANK STEADY SELLERS FIRST. The current top five are:
+      WCT-3LL-10  Rs 52,40,468  last sold Sep-26
+      WCT-3LL-05  Rs 45,80,827  last sold Sep-26
+      924XD       Rs 22,30,370  last sold Aug-26
+      Q724MB      Rs 19,97,114  last sold Sep-26
+      WT-4LWP-07  Rs 15,45,900  last sold Sep-26
+
+C2. COVERAGE FLOOR, consistent with the 75% rule already agreed for cost
+    roll-ups:
+
+      at or above 75% value coverage - show the metric WITH covered and
+        excluded values beside it
+      below 75% - suppress the headline discount or realisation figure and
+        show "insufficient MRP coverage"
+      never treat a period without an effective price as zero-priced sales
+      always state excluded sales value and code count beside the metric
+
+C3. The excluded-value-per-FY figure cannot currently be produced - the
+    external API neither returns nor persists it. If C2 requires it,
+    persist it as a coverage result at calculation time rather than
+    recomputing on demand.
+```
+
+---
+
+## Section D — register updates
+
+```
+D1. P3 - add the P021 measurement with its date and basis, keeping the
+    earlier ones. It now carries four dated figures. State the BASIS on
+    each: 814 was resolver-unresolved, 870 and 871 are exact-code.
+
+D2. ADD a PENDING entry for the 816 unresolved codes at Rs 9.49 Cr, owner
+    PRAYAG - not internal. P021 established zero transit loss, so these
+    are products Prayag sells and has not priced.
+
+    Note that CP and Sink were the largest groups in the earlier
+    classification, and that the product-group breakdown cannot be
+    reproduced from the external endpoint.
+
+D3. RAISE Q19b's PRIORITY. WCT-3LL-10 at Rs 52.40 lakh and WCT-3LL-05 at
+    Rs 45.81 lakh are the two largest unpriced codes in the whole
+    population, both still selling in September. That is Rs 98 lakh of the
+    Rs 9.49 Cr in two codes.
+
+D4. RESOLVE the not-offered question. It was raised as a requirement and
+    P021 confirms it is already implemented correctly. Close it with the
+    evidence.
+```
+
+---
+
+## Notes
+
+- **Section A is the point.** P021 answered four things that have each been
+  re-derived more than once. If they do not reach the rules file, they will be
+  re-derived again.
+- **A2 is the one I would not skip.** Two figures have circulated as though one
+  were wrong, and they were measuring different things. Stating the basis prevents
+  the next argument.
+- **C1's two-measure rule matters.** Combining exact-code absence with
+  resolver-unresolved produces a number that is wrong on both definitions.
+- **D3 changes the Prayag ask.** Two WCT codes are ₹98 lakh of the gap. Pricing
+  those two is a bigger win than any other single action on the list.
