@@ -25,23 +25,56 @@
 ### Production acceptance result
 
 The deployed retailer-specific acceptance checks do **not** pass with the
-current production data.
+current Prompt 105 query, but the production data does contain source-specific
+RET# values.
 
 - Production browser navigation to `/ai-sales-plan` reached the live login
   page. The configured bootstrap login returned HTTP 401, so no authenticated
   browser state was claimed as verified.
 - **Source:** production browser test against `https://prayag-sales.com`.
-- More importantly, the production Replit database contains:
-  - FY2025–26: **379,439** `secondary_sku_line` rows, **0 RET#** in `dealer_id`,
-    and **0 DIST#** in `cp_code`.
-  - FY2026–27: **123,326** `secondary_sku_line` rows, **0 RET#** in `dealer_id`,
-    and **0 DIST#** in `cp_code`.
+- The original Prompt 108 check queried `dealer_id` and `cp_code`:
+  - FY2025–26: **379,439** `secondary_sku_line` rows, **0 nonblank
+    `dealer_id`**, and **0 nonblank `cp_code`**.
+  - FY2026–27: **123,326** `secondary_sku_line` rows, **0 nonblank
+    `dealer_id`**, and **0 nonblank `cp_code`**.
 - **Source:** production Replit PostgreSQL read replica,
   `secondary_sku_line`, queried on 18 September 2026.
 
-The Prompt 105 retailer selector requires non-null `dealer_id`. Consequently,
-production cannot currently return a retailer for Tab 1, so these requested
-states cannot be honestly confirmed on the deployed screen:
+That zero result did not prove RET# was absent. A field-by-field production
+query established:
+
+- FY2025–26 Sheets source:
+  - `retailer_id` is nonblank on **52,515** rows, but all 52,515 values are
+    numeric order serials and **0** match the RET# format.
+  - `retailer` matches RET# on all **379,439** rows, representing
+    **9,078 distinct RET# values**.
+- FY2026–27 PSCode 3 source:
+  - `retailer_id` matches RET# on all **123,326** rows, representing
+    **6,194 distinct RET# values**.
+  - `dealer_id` and `cp_code` are null on all rows.
+- **Source:** production `secondary_sku_line`, grouped by `fy` and `source`,
+  queried on 18 September 2026.
+
+There was no data change between P44 and the zero query. The columns differed:
+P44 counted nonblank `retailer_id`; the zero query counted `dealer_id`. P44's
+FY2025–26 wording was itself inaccurate because its 52,515 values are numeric
+order serials, not RET#.
+
+The authoritative RET# field is source-dependent:
+
+- FY2025–26 Sheets source: validated RET# from `retailer`;
+- FY2026–27 PSCode 3 source: validated RET# from `retailer_id`;
+- Product-Wise CRM source: validated RET# from `dealer_id`, also copied into
+  `retailer_id` by its loader.
+
+`dealer_id` and `cp_code` were introduced by migration
+`075_productwise_secondary_sku_seam` for Product-Wise CRM rows and intentionally
+remain null on legacy rows.
+
+Prompt 105 requires non-null `dealer_id`, so it queries the wrong fixed field
+for the frozen production populations. Consequently production cannot
+currently return a retailer for Tab 1, and these requested states cannot yet
+be confirmed on the deployed screen:
 
 1. a retailer with a real STOPPED list;
 2. a retailer below the 10-SKU / 3-month threshold with flags suppressed;
@@ -57,8 +90,8 @@ The UI and API source do implement those contracts:
 - **Source:** `AiSalesPlanPage.tsx` and `aiSalesPlanShared.ts`.
 
 This is source verification only, not a substitute for deployed acceptance.
-The production RET#/DIST# population must be loaded through the approved
-source-load process before Tab 1 can be accepted.
+Prompt 105 must use a validated, source-aware RET# expression before Tab 1 can
+be accepted. The evidence does not support a production RET# reload.
 
 ### Tab 5 frozen state-versus-India basis
 

@@ -6097,6 +6097,89 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
       $do$;
     `,
   },
+  {
+    id: "125_prompt108_identity_and_missing_annexes",
+    sql: `
+      -- Correct P44's field-level claim.  The earlier wording counted a
+      -- nonblank source column, not validated RET# values, and Prompt 105
+      -- subsequently queried a different Product-Wise-only field.
+      UPDATE resolution_item
+         SET title = 'RET# field is source-dependent; fixed-column queries are unsafe',
+             reason = 'Use source-aware retailer identity. FY2025-26 Sheets rows carry RET# in retailer; FY2026-27 PSCode 3 rows carry RET# in retailer_id; dealer_id is reserved for Product-Wise CRM rows and is null in the frozen production populations.',
+             evidence = '[Source: production secondary_sku_line read-only query, 18 September 2026] FY2025-26: 379,439 rows; retailer_id is nonblank on 52,515 rows but all 52,515 values are numeric order serials and zero match RET#; retailer matches RET# on all 379,439 rows, with 9,078 distinct values. FY2026-27 PSCode 3: 123,326 rows; retailer_id matches RET# on all 123,326 rows, with 6,194 distinct values; dealer_id and cp_code are null on all rows. [Source: schema migration 075_productwise_secondary_sku_seam] dealer_id and cp_code were added for Product-Wise CRM Aug-26-onward rows and intentionally remain null for legacy rows. No data change produced the zero result: Prompt 105 queried dealer_id, while the P44 assertion counted nonblank retailer_id and mislabeled the FY2025-26 numeric serials as RET#.',
+             owner = 'internal',
+             priority = 'high'::resolution_priority,
+             updated_at = now()
+       WHERE code = 'P44'
+         AND status = 'open';
+
+      UPDATE resolution_item
+         SET evidence = CASE
+               WHEN evidence ILIKE '%exact frozen 130-name annex is not retained%'
+                 THEN evidence
+               ELSE evidence || ' [Source: Prompt 108 annex-lineage review, 18 September 2026] The exact frozen 130-name annex is not retained. The 52 current unresolved distributor names were drawn from current development identity tables, not joined back to the historic 130. Membership overlap is unquantifiable; do not present the 52 as a reconciliation of the original 130.'
+             END,
+             updated_at = now()
+       WHERE code = 'P30'
+         AND status = 'open';
+
+      UPDATE resolution_item
+         SET evidence = CASE
+               WHEN evidence ILIKE '%exact frozen 58-name annex is not retained%'
+                 THEN evidence
+               ELSE evidence || ' [Source: Prompt 108 annex-lineage review, 18 September 2026] The exact frozen 58-name annex and roster comparison are not retained. Current aliases, off-roll labels and departed-import persons cannot reconstruct the historic membership. Membership overlap is unquantifiable; do not create or send a replacement reconciliation from current tables.'
+             END,
+             updated_at = now()
+       WHERE code = 'P40'
+         AND status = 'open';
+
+      INSERT INTO resolution_item
+        (code, type, title, category, reason, evidence, value_at_stake,
+         raised_on, raised_by, owner, priority, status, blocks_api)
+      VALUES
+        ('P49', 'PENDING',
+         'Frozen 130-name and 58-name annexes are missing; overlap cannot be reconciled',
+         'data quality',
+         'Do not promise, construct or send a reconciliation of the historic 130 distributor names or 58 staff names from current identity tables. Recover the dated frozen annexes before any name-level comparison.',
+         '[Source: Prompt 106 and Prompt 107 reports reviewed under Prompt 108, 18 September 2026] The current 52 unresolved distributor names come from current development retailer_distributor and distributor_identity tables; they are not a proven subset of the historic 130 blank-code distributor annex. The exact frozen 130-name/value annex is missing, so overlap is unquantifiable. The exact frozen 58-name roster comparison is also missing; only its aggregate of 25,575 FY2025-26 order-booking rows / Rs 13.51 Cr is retained, so its current overlap is unquantifiable. A current-table reconstruction would answer a different question and must not be sent as confirmation.',
+         NULL, DATE '2026-09-18', 'Prompt 108 annex-lineage review',
+         'internal', 'high', 'open', FALSE)
+      ON CONFLICT (code) DO NOTHING;
+
+      INSERT INTO resolution_item_relationship (source_code, target_code, relation)
+      VALUES
+        ('P49', 'P30', 'ask-supported-by'::resolution_relation_type),
+        ('P49', 'P40', 'ask-supported-by'::resolution_relation_type)
+      ON CONFLICT (source_code, target_code, relation) DO NOTHING;
+
+      DO $do$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P44'
+             AND priority = 'high'::resolution_priority
+             AND evidence ILIKE '%retailer matches RET# on all 379,439 rows%'
+             AND evidence ILIKE '%No data change produced the zero result%'
+        ) THEN
+          RAISE EXCEPTION 'P44 source-aware RET# correction is incomplete';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P49'
+             AND type = 'PENDING'
+             AND status = 'open'
+             AND blocks_api = FALSE
+             AND evidence ILIKE '%overlap is unquantifiable%'
+        ) THEN
+          RAISE EXCEPTION 'P49 missing-annex entry is incomplete';
+        END IF;
+        IF (SELECT COUNT(*) FROM resolution_item_relationship WHERE source_code = 'P49' AND target_code IN ('P30','P40') AND relation = 'ask-supported-by') <> 2 THEN
+          RAISE EXCEPTION 'P49 annex relationships are incomplete';
+        END IF;
+      END
+      $do$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
