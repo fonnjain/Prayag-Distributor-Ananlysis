@@ -1,0 +1,73 @@
+PSCode3 is discontinued. Product-Wise is the sole source from August 2026.
+
+THE REQUIREMENT: everything we could do with PSCode3, we must be able to
+do with the new CRM data. Nothing is lost because the source changed.
+
+Read-only. Answer as a parity audit, not a gap report.
+
+1. ENUMERATE EVERY CAPABILITY PSCode3 SUPPORTS. Every surface,
+   calculation, alert and export that reads secondary_sku_line. Be
+   exhaustive - retailer detail, breadth, gaps, push, peer penetration,
+   B3, secondary discount, segment spread, win-back, trends, exports.
+
+2. FOR EACH, STATE WHETHER PRODUCT-WISE CAN SUPPORT IT:
+     YES - same or better. Product-Wise carries more identity than
+       PSCode3 did.
+     YES WITH WORK - name the work precisely.
+     NO - and prove it, field by field. Not "different source" but
+       "requires field X, which does not exist and cannot be derived".
+
+   The burden is on NO. Assume parity is achievable until a specific
+   field proves otherwise.
+
+3. THE TWO CANDIDATE GAPS - mrp and gross_amount.
+
+   Secondary discount uses gross x (1 - disc) = NET from the register.
+   Product-Wise has neither column.
+
+   BUT: primary discount already joins EFFECTIVE-DATED MRP to item codes -
+   mrp_history for closed periods, mrp_synced for the open FY, with the
+   not-offered exclusion.
+
+   CAN THE SAME JOIN SERVE SECONDARY DISCOUNT? product_code joins to the
+   MRP catalogue exactly as sale_line.code does.
+
+   If yes, secondary discount survives the source change and there is NO
+   capability loss at all. Test it against July, where both sources exist
+   and reconcile at Rs 22,34,36,806.
+
+4. WHAT PRODUCT-WISE ADDS that PSCode3 could not do:
+     GST type, rate and amount - was never available
+     employee ID and reporting manager - a second route to head
+       attribution, which the alert routing defect needed
+     dealer mobile, district, city, pincode - finer geography, and H4
+       records retailer geography at only 46.27% resolved
+     channel partner name and CP code on every row
+     order status - approved versus pending
+
+   Print what becomes newly possible. The source change may be a net gain.
+
+5. HEAD AND STATE ATTRIBUTION. PSCode3 carried canonical head and state
+   directly. Product-Wise carries cp_code, employee ID and reporting
+   manager.
+
+   Can canonical head and state be derived? If cp_code resolves through
+   the distributor registry, and employee ID through person_registry,
+   attribution may be stronger than before - two independent routes rather
+   than one stored value.
+
+6. THE SEAM. Even at full parity, pre-August is PSCode3 net_amount and
+   post-August is basic_order_value ex-GST.
+
+   July is the only month with both, reconciling exactly. Does that prove
+   the two value bases are the same measure, or only that the schemas
+   agree?
+
+   If the bases differ, the seam must be disclosed in every multi-month
+   series. If they are the same measure, say so with the evidence.
+
+7. THE PLAN. Given 1-6, what is required for full parity, in order, with
+   effort against value. Name anything that genuinely cannot be
+   reproduced.
+
+Report only. Build nothing yet.
