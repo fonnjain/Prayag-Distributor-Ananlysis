@@ -143,3 +143,4 @@
 - [Pending attribution availability](pending-attribution-availability.md) — assignment and conflict evidence are one atomic basis; if either fails, preserve source quantities but withhold coverage and attributed export.
 - [Factory pending priceability](factory-pending-priceability.md) — party commercial joins are exact/fail-closed; dashboard rupees stay separate from REPORT 2 pieces; tank rates use pieces.
 - [Retrospective load provenance](retrospective-load-provenance.md) — metadata repairs must distinguish original load time from later record time and prove protected data unchanged.
+- [AI Sales Plan production identity prerequisite](ai-sales-plan-production-identity.md) — retailer tabs cannot be accepted until production secondary SKU rows carry RET#/DIST# identity.
