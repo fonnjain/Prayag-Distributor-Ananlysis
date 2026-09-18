@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completeLikeMonthNames, historyFlag, lookupFrozenStateKey, median, targetAnchoredQuintile } from "./aiSalesPlanShared";
+import { completeLikeMonthNames, historyFlag, isValidDistId, isValidRetId, lookupFrozenStateKey, median, targetAnchoredQuintile } from "./aiSalesPlanShared";
 
 describe("Prompt 105 shared computation pure rules", () => {
   it("anchors quintile on target and applies floor", () => {
@@ -23,5 +23,12 @@ describe("Prompt 105 shared computation pure rules", () => {
     const names = completeLikeMonthNames(["Apr-26", "May-26", "Jul-26"]);
     expect(names.has("aug")).toBe(false);
     expect(names.has("jul")).toBe(true);
+  });
+  it("accepts only the correct RET# and DIST# identity prefixes", () => {
+    expect(isValidRetId("RET#54782")).toBe(true);
+    expect(isValidRetId("DIST#54782")).toBe(false);
+    expect(isValidDistId("DIST#34")).toBe(true);
+    expect(isValidDistId("DIS#34")).toBe(false);
+    expect(isValidDistId("RET#31724")).toBe(false);
   });
 });

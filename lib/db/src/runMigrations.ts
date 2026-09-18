@@ -6180,6 +6180,36 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
       $do$;
     `,
   },
+  {
+    id: "126_prompt105_identity_source_correction",
+    sql: `
+      UPDATE resolution_item
+         SET title = 'Prompt 105 identity comes from the order register, not the SKU mirror',
+             reason = 'Use secondary_order_line.dealer_id as RET# identity for Prompt 105. Use a valid secondary_order_line.cp_code as DIST# when available and cp_name as the explicit legacy fallback. Keep secondary_sku_line only for item-level quantity and NET history, joined to the order-register RET# identity.',
+             evidence = '[Source: production secondary_order_line, read-only query on 18 September 2026] FY2026-27 identity coverage by India month: Apr 21,613 rows / 2,216 RET# / 0 CP codes; May 31,266 / 2,992 / 0; Jun 36,300 / 3,578 / 0; Jul 34,147 / 3,297 / 0; Aug 28,185 / 2,832 / 169 nonblank CP-code values. Every FY2026-27 row has a valid RET# in dealer_id. The Product-Wise August population has 28,185 nonblank cp_code rows and Rs 19,57,88,289 basic order value. Two malformed CP-code values exist: DIS#34, 2 rows / 1 retailer / Rs 11,190; and RET#31724, 3 rows / 2 retailers / Rs 5,857. All dealer_id values have a valid RET# prefix. [Source split] secondary_order_line supplies retailer/distributor/member/state identity and basic-order-value cohort sizing for April-August 2026; secondary_sku_line supplies item_code, qty and net_amount history for full FY2025-26 and loaded FY2026-27 SKU months. No production identity reload is required.',
+             owner = 'internal',
+             priority = 'high'::resolution_priority,
+             updated_at = now()
+       WHERE code = 'P44'
+         AND status = 'open';
+
+      DO $do$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'P44'
+             AND status = 'open'
+             AND title = 'Prompt 105 identity comes from the order register, not the SKU mirror'
+             AND evidence ILIKE '%secondary_order_line supplies retailer/distributor/member/state identity%'
+             AND evidence ILIKE '%DIS#34%'
+             AND evidence ILIKE '%RET#31724%'
+        ) THEN
+          RAISE EXCEPTION 'P44 Prompt 105 source correction is incomplete';
+        END IF;
+      END
+      $do$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

@@ -226,7 +226,7 @@ function WhatTheyBuyTab({ computeData, fy }: { computeData: SharedComputeRespons
         </CardHeader>
         <CardContent>
           <div className="text-[10px] text-muted-foreground mb-3 font-mono uppercase tracking-wider">
-            SOURCE: secondary_sku_line | PERIOD: {fy} | COVERAGE: {renderStructuredData(computeData.coverage)} | BASIS: {computeData.computations.peerSet?.basis || 'N/A'}
+            IDENTITY: secondary_order_line.dealer_id / valid cp_code | SKU HISTORY: secondary_sku_line.qty / net_amount | PERIOD: FY25-26 full year + FY26-27 loaded SKU months | COVERAGE: {renderStructuredData(computeData.coverage)} | BASIS: {computeData.computations.peerSet?.basis || 'N/A'}
           </div>
 
           <div className="bg-muted/40 border rounded-md p-3 mb-4 text-xs text-muted-foreground">

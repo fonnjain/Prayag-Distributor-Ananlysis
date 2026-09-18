@@ -15,6 +15,10 @@ const MIN_PEERS = 5;
 const FY = /^\d{4}-\d{2}$/;
 const basisNames = new Set(["same-distributor", "same-state", "national"]);
 const num = (v: unknown) => Number(v ?? 0) || 0;
+const VALID_RET_ID = /^RET#\d+$/i;
+const VALID_DIST_ID = /^DIST#\d+$/i;
+export const isValidRetId = (value: unknown) => typeof value === "string" && VALID_RET_ID.test(value.trim());
+export const isValidDistId = (value: unknown) => typeof value === "string" && VALID_DIST_ID.test(value.trim());
 export const median = (xs: number[]) => {
   if (!xs.length) return null;
   const a = [...xs].sort((x, y) => x - y);
@@ -52,29 +56,52 @@ type Retailer = { id: string; distributor: string | null; cp_code?: string | nul
 
 async function peerSet(retailer: string, fy: string, basis: string, state?: string) {
   const target = await pool.query<any>(
-    `SELECT DISTINCT dealer_id id,
-            cp_code, distributor, state_canon state
-       FROM secondary_sku_line WHERE fy=$1 AND dealer_id=$2`,
+    `SELECT dealer_id id,
+            ARRAY_AGG(DISTINCT cp_code) FILTER (WHERE cp_code ~ '^DIST#[0-9]+$') cp_codes,
+            ARRAY_AGG(DISTINCT cp_name) FILTER (WHERE NULLIF(BTRIM(cp_name),'') IS NOT NULL) distributors,
+            ARRAY_AGG(DISTINCT state) FILTER (WHERE NULLIF(BTRIM(state),'') IS NOT NULL) states,
+            COALESCE(SUM(basic_order_value),0)::float value
+       FROM secondary_order_line
+      WHERE fiscal_year=$1 AND dealer_id=$2
+      GROUP BY dealer_id`,
     [fy, retailer],
   );
-  if (!target.rows[0]) return { error: "Requested RET# is not present in secondary_sku_line." };
-  const valueResult = await pool.query<{ value: number }>(
-    `SELECT COALESCE(SUM(net_amount),0)::float value FROM secondary_sku_line WHERE fy=$1 AND dealer_id=$2`, [fy, retailer]);
-  const t = { ...target.rows[0], value: Number(valueResult.rows[0]?.value ?? 0), cpCodes: [...new Set(target.rows.map((r) => r.cp_code).filter(Boolean))], states: [...new Set(target.rows.map((r) => r.state).filter(Boolean))] };
+  if (!target.rows[0]) return { error: "Requested RET# is not present in secondary_order_line." };
+  const targetRow = target.rows[0];
+  const t = {
+    ...targetRow,
+    value: Number(targetRow.value ?? 0),
+    cpCodes: (targetRow.cp_codes ?? []).filter(isValidDistId),
+    distributors: (targetRow.distributors ?? []).filter(Boolean),
+    states: (targetRow.states ?? []).filter(Boolean),
+    cp_code: targetRow.cp_codes?.find(isValidDistId) ?? null,
+    distributor: targetRow.distributors?.[0] ?? null,
+    state: targetRow.states?.[0] ?? null,
+  };
   if (basis === "same-state" && !state && t.states.length !== 1) return { error: "Requested same-state cohort is ambiguous; provide canonical state." };
   const params: unknown[] = [fy, retailer];
-  const where = basis === "same-distributor"
-    ? (t.cpCodes.length ? "AND cp_code=ANY($3::text[])" : "AND distributor=ANY($3::text[])")
-    : basis === "same-state" ? "AND state_canon=$3" : "";
-  if (where) params.push(basis === "same-distributor" ? t.cpCodes : (state ?? t.states[0]));
+  const match = basis === "same-distributor"
+    ? (t.cpCodes.length ? "cp_code=ANY($3::text[])" : "cp_name=ANY($3::text[])")
+    : basis === "same-state" ? "state=$3" : "TRUE";
+  if (basis !== "national") {
+    params.push(basis === "same-distributor" ? (t.cpCodes.length ? t.cpCodes : t.distributors) : (state ?? t.states[0]));
+  }
   const rows = await pool.query<any>(
-    `SELECT dealer_id id,
-            ARRAY_AGG(DISTINCT cp_code) FILTER (WHERE cp_code IS NOT NULL) cp_codes,
-            ARRAY_AGG(DISTINCT distributor) FILTER (WHERE distributor IS NOT NULL) distributors,
-            ARRAY_AGG(DISTINCT state_canon) FILTER (WHERE state_canon IS NOT NULL) states,
-            COALESCE(SUM(net_amount),0)::float value
-       FROM secondary_sku_line WHERE fy=$1 ${where}
-       GROUP BY 1 HAVING dealer_id<>$2`,
+    `WITH matched_ids AS (
+       SELECT DISTINCT dealer_id
+         FROM secondary_order_line
+        WHERE fiscal_year=$1 AND ${match}
+     )
+     SELECT sol.dealer_id id,
+            ARRAY_AGG(DISTINCT sol.cp_code) FILTER (WHERE sol.cp_code ~ '^DIST#[0-9]+$') cp_codes,
+            ARRAY_AGG(DISTINCT sol.cp_name) FILTER (WHERE NULLIF(BTRIM(sol.cp_name),'') IS NOT NULL) distributors,
+            ARRAY_AGG(DISTINCT sol.state) FILTER (WHERE NULLIF(BTRIM(sol.state),'') IS NOT NULL) states,
+            COALESCE(SUM(sol.basic_order_value),0)::float value
+       FROM secondary_order_line sol
+       JOIN matched_ids matched ON matched.dealer_id=sol.dealer_id
+      WHERE sol.fiscal_year=$1
+      GROUP BY sol.dealer_id
+     HAVING sol.dealer_id<>$2`,
     params,
   );
   const raw = rows.rows.filter((r) => r.id).map((r) => ({ ...r, cp_code: r.cp_codes?.[0] ?? null, distributor: r.distributors?.[0] ?? null, state: r.states?.[0] ?? null }));
@@ -95,12 +122,23 @@ async function penetration(peers: Retailer[], fy: string, periods: string[]) {
   if (!peers.length) return [];
   const ids = peers.map((p) => p.id);
   const q = await pool.query(
-    `WITH per_peer AS (
-       SELECT dealer_id, item_code, SUM(qty)::double precision qty, SUM(net_amount)::double precision value
-         FROM secondary_sku_line
-        WHERE fy=$1 AND dealer_id=ANY($2::text[])
+    `WITH identity AS (
+       SELECT DISTINCT fiscal_year, dealer_id
+         FROM secondary_order_line
+        WHERE fiscal_year=$1 AND dealer_id=ANY($2::text[])
+     ), per_peer AS (
+       SELECT identity.dealer_id, sku.item_code,
+              SUM(sku.qty)::double precision qty, SUM(sku.net_amount)::double precision value
+         FROM secondary_sku_line sku
+         JOIN identity ON identity.fiscal_year=sku.fy
+          AND identity.dealer_id=COALESCE(
+            CASE WHEN BTRIM(sku.dealer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.dealer_id) END,
+            CASE WHEN BTRIM(sku.retailer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer_id) END,
+            CASE WHEN BTRIM(sku.retailer) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer) END
+          )
+        WHERE sku.fy=$1
           AND ($3::text[] IS NULL OR month_label=ANY($3::text[]))
-        GROUP BY dealer_id, item_code
+         GROUP BY identity.dealer_id, sku.item_code
      )
      SELECT item_code code, COUNT(*)::int buyers,
             percentile_cont(.5) WITHIN GROUP (ORDER BY qty) median_qty,
@@ -117,15 +155,15 @@ async function penetration(peers: Retailer[], fy: string, periods: string[]) {
 async function secondaryCoverage(fy: string) {
   const frozen = await pool.query<{ month_label: string; frozen: boolean }>(
     `SELECT month_label, BOOL_AND(frozen_at IS NOT NULL) frozen FROM secondary_sku_line WHERE fy=$1 GROUP BY month_label`, [fy]);
-  const result = await pool.query<{ month: number; through: string | null; completeness: string | null }>(
-    `SELECT EXTRACT(MONTH FROM (order_datetime AT TIME ZONE 'Asia/Kolkata'))::int month,
+  const result = await pool.query<{ month_no: number; through: string | null; completeness: string | null }>(
+    `SELECT EXTRACT(MONTH FROM (order_datetime AT TIME ZONE 'Asia/Kolkata'))::int AS month_no,
             MAX((order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text through,
             CASE WHEN BOOL_AND(LOWER(period_completeness)='complete') THEN 'complete'
                  WHEN COUNT(*) > 0 THEN 'partial' ELSE 'unavailable' END completeness
        FROM secondary_order_line WHERE fiscal_year=$1 GROUP BY 1 ORDER BY 1`, [fy],
   );
   const rows = result.rows;
-  const loaded = rows.filter((r) => r.completeness !== "unavailable").map((r) => ({ month: Number(r.month), through: r.through, state: r.completeness }));
+  const loaded = rows.filter((r) => r.completeness !== "unavailable").map((r) => ({ month: Number(r.month_no), through: r.through, state: r.completeness }));
   // This is intentionally an observation of the order register, not a date
   // based guess. An absent month remains unavailable even if the calendar has
   // advanced beyond it.
@@ -178,9 +216,21 @@ async function top80Demand(state: string | undefined) {
 
 async function customerComparison(retailer: string, completeMonths: string[]) {
   const q = await pool.query(
-    `SELECT item_code code, fy, month_label, SUM(qty)::float qty, SUM(net_amount)::float value
-       FROM secondary_sku_line WHERE dealer_id=$1 AND fy IN ('2025-26','2026-27')
-       GROUP BY item_code, fy, month_label`, [retailer]);
+    `WITH identity AS (
+       SELECT DISTINCT fiscal_year, dealer_id
+         FROM secondary_order_line
+        WHERE dealer_id=$1 AND fiscal_year IN ('2025-26','2026-27')
+     )
+     SELECT sku.item_code code, sku.fy, sku.month_label,
+            SUM(sku.qty)::float qty, SUM(sku.net_amount)::float value
+       FROM secondary_sku_line sku
+       JOIN identity ON identity.fiscal_year=sku.fy
+        AND identity.dealer_id=COALESCE(
+          CASE WHEN BTRIM(sku.dealer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.dealer_id) END,
+          CASE WHEN BTRIM(sku.retailer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer_id) END,
+          CASE WHEN BTRIM(sku.retailer) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer) END
+        )
+      GROUP BY sku.item_code, sku.fy, sku.month_label`, [retailer]);
   const by = new Map<string, Record<string, { qty: number; value: number; months: number }>>();
   const loadedCurrent = new Set<string>(completeMonths);
   for (const r of q.rows) {
@@ -210,10 +260,21 @@ async function customerComparison(retailer: string, completeMonths: string[]) {
       flag: historyFlag(prior.qty, cLike.qty, pLike.qty, !limited) };
   });
   const population = await pool.query<{ eligible: string; limited: string }>(
-    `WITH r AS (
-       SELECT dealer_id id,
-              COUNT(DISTINCT item_code)::int skus, COUNT(DISTINCT month_label)::int months
-       FROM secondary_sku_line WHERE fy = '2025-26' GROUP BY 1
+    `WITH identity AS (
+       SELECT DISTINCT dealer_id
+         FROM secondary_order_line
+        WHERE fiscal_year='2025-26'
+     ), r AS (
+       SELECT identity.dealer_id id,
+              COUNT(DISTINCT sku.item_code)::int skus, COUNT(DISTINCT sku.month_label)::int months
+         FROM secondary_sku_line sku
+         JOIN identity ON identity.dealer_id=COALESCE(
+           CASE WHEN BTRIM(sku.dealer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.dealer_id) END,
+           CASE WHEN BTRIM(sku.retailer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer_id) END,
+           CASE WHEN BTRIM(sku.retailer) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer) END
+         )
+        WHERE sku.fy='2025-26'
+        GROUP BY identity.dealer_id
      ) SELECT COUNT(*) FILTER (WHERE skus >= 10 AND months >= 3)::int eligible,
               COUNT(*) FILTER (WHERE skus < 10 OR months < 3)::int limited FROM r`,
     [],
@@ -235,20 +296,22 @@ router.get("/ai-sales-plan/options", async (req, res): Promise<void> => {
   if (q.length > 120 || member.length > 120) { res.status(400).json({ error: "q and member must be at most 120 characters" }); return; }
   try {
     const params: unknown[] = [fy];
-    const conditions = ["fy=$1", "dealer_id IS NOT NULL"];
-    if (member) { params.push(member); conditions.push(`COALESCE(NULLIF(head_canon,''),NULLIF(head_raw,''))=$${params.length}`); }
+    const conditions = ["fiscal_year=$1", "dealer_id ~ '^RET#[0-9]+$'"];
+    if (member) { params.push(member); conditions.push(`sales_user_name=$${params.length}`); }
     if (q) {
       params.push(`%${q}%`);
       conditions.push(`(dealer_id ILIKE $${params.length}
-        OR COALESCE(retailer,'') ILIKE $${params.length})`);
+        OR COALESCE(customer_name,'') ILIKE $${params.length})`);
     }
     params.push(cap + 1);
     const retailers = await pool.query(
       `SELECT dealer_id id,
-              MAX(retailer) display, MAX(COALESCE(NULLIF(head_canon,''),NULLIF(head_raw,''))) member,
-              MAX(state_canon) state, MAX(cp_code) dist_id, MAX(distributor) distributor,
+              MAX(customer_name) display, MAX(sales_user_name) member,
+              MAX(state) state,
+              MAX(cp_code) FILTER (WHERE cp_code ~ '^DIST#[0-9]+$') dist_id,
+              MAX(cp_name) distributor,
               COUNT(*) OVER()::int total_count
-         FROM secondary_sku_line WHERE ${conditions.join(" AND ")}
+         FROM secondary_order_line WHERE ${conditions.join(" AND ")}
         GROUP BY 1 ORDER BY 2 NULLS LAST, 1 LIMIT $${params.length}`, params);
     const rows = retailers.rows.slice(0, cap).map((r) => ({
       id: r.id, retailer: r.display ?? r.id, member: r.member ?? null,
@@ -256,23 +319,23 @@ router.get("/ai-sales-plan/options", async (req, res): Promise<void> => {
       distributorId: r.dist_id ?? null,
     }));
 
-    // Members are canonical keys, never display-name merged. When a member
-    // filter is supplied this remains a one-option canonical lookup.
+    // The order source supplies the recorded sales-user name beside RET#.
+    // Filtering stays exact and never merges similar names.
     const memberParams: unknown[] = [fy];
-    const memberWhere = ["fy=$1", "COALESCE(NULLIF(head_canon,''),NULLIF(head_raw,'')) IS NOT NULL"];
-    if (q) { memberParams.push(`%${q}%`); memberWhere.push(`COALESCE(NULLIF(head_canon,''),NULLIF(head_raw,'')) ILIKE $${memberParams.length}`); }
-    if (member) { memberParams.push(member); memberWhere.push(`COALESCE(NULLIF(head_canon,''),NULLIF(head_raw,''))=$${memberParams.length}`); }
+    const memberWhere = ["fiscal_year=$1", "NULLIF(BTRIM(sales_user_name),'') IS NOT NULL"];
+    if (q) { memberParams.push(`%${q}%`); memberWhere.push(`sales_user_name ILIKE $${memberParams.length}`); }
+    if (member) { memberParams.push(member); memberWhere.push(`sales_user_name=$${memberParams.length}`); }
     memberParams.push(cap + 1);
     const members = await pool.query(
-      `SELECT COALESCE(NULLIF(head_canon,''),NULLIF(head_raw,'')) id,
-              MAX(head_raw) display, COUNT(DISTINCT dealer_id)::int retailer_count,
+      `SELECT sales_user_name id,
+              sales_user_name display, COUNT(DISTINCT dealer_id)::int retailer_count,
               COUNT(*) OVER()::int total_count
-         FROM secondary_sku_line WHERE ${memberWhere.join(" AND ")}
+         FROM secondary_order_line WHERE ${memberWhere.join(" AND ")}
         GROUP BY 1 ORDER BY 2 NULLS LAST, 1 LIMIT $${memberParams.length}`, memberParams);
     const memberRows = members.rows.slice(0, cap).map((r) => ({ id: r.id, member: r.display ?? r.id, retailerCount: Number(r.retailer_count) }));
     const totalRetailers = Number(retailers.rows[0]?.total_count ?? rows.length);
     const totalMembers = Number(members.rows[0]?.total_count ?? memberRows.length);
-    const coverage = { source: "secondary_sku_line (dealer_id RET#; head_canon; state_canon; cp_code DIST#)", period: fy,
+    const coverage = { source: "secondary_order_line (dealer_id RET#; valid cp_code DIST# with cp_name fallback; sales_user_name; state)", period: fy,
       requested: { q: q || null, member: member || null }, cap, retailer: { returned: rows.length, truncated: retailers.rows.length > cap },
       member: { returned: memberRows.length, truncated: members.rows.length > cap },
       totals: { retailers: totalRetailers, members: totalMembers } };
@@ -307,7 +370,7 @@ router.get("/ai-sales-plan/shared-compute", async (req, res): Promise<void> => {
     }
     return;
   }
-  if (!retailer || !/^RET#?[\w-]+$/i.test(retailer)) { res.status(400).json({ error: "retailer RET# is required for retailer-dependent computations" }); return; }
+  if (!isValidRetId(retailer)) { res.status(400).json({ error: "a valid retailer RET# is required for retailer-dependent computations" }); return; }
   try {
     const peers = await peerSet(retailer, fy, basis, state);
     if ("error" in peers) { res.status(404).json({ error: peers.error }); return; }
@@ -319,7 +382,7 @@ router.get("/ai-sales-plan/shared-compute", async (req, res): Promise<void> => {
       rawSize: peers.raw.length, refinedSize: selected.length, basis, excludedSelf: retailer,
       refinement: peers.raw.length > 40 ? "annual-value-quintile" : "none",
       quintile: peers.quintile,
-      basisMetadata: meta("secondary_sku_line (RET#/DIST# identity)", fy, peers.raw.length, peers.raw.length, { basis }),
+      basisMetadata: meta("secondary_order_line dealer_id + valid cp_code/cp_name identity; basic_order_value quintile", fy, peers.raw.length, peers.raw.length, { basis }),
     };
     const periods = typeof req.query.periods === "string" ? req.query.periods.split(",").map((x) => x.trim()).filter(Boolean) : [];
     const need = (name: string) => requested.some((r) => r.toLowerCase() === name.toLowerCase());
@@ -329,21 +392,44 @@ router.get("/ai-sales-plan/shared-compute", async (req, res): Promise<void> => {
     ]);
     const customer = need("customerSku") ? await customerComparison(retailer, orderCoverage.completeMonths) : null;
     const customerCodes = need("adjacency") ? await pool.query<{ item_code: string }>(
-      `SELECT DISTINCT item_code FROM secondary_sku_line WHERE fy=$1 AND dealer_id=$2`, [fy, retailer]) : { rows: [] };
+      `WITH identity AS (
+         SELECT DISTINCT fiscal_year, dealer_id
+           FROM secondary_order_line WHERE fiscal_year=$1 AND dealer_id=$2
+       )
+       SELECT DISTINCT sku.item_code
+         FROM secondary_sku_line sku
+         JOIN identity ON identity.fiscal_year=sku.fy
+          AND identity.dealer_id=COALESCE(
+            CASE WHEN BTRIM(sku.dealer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.dealer_id) END,
+            CASE WHEN BTRIM(sku.retailer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer_id) END,
+            CASE WHEN BTRIM(sku.retailer) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer) END
+          )`, [fy, retailer]) : { rows: [] };
     const codeSet = new Set(customerCodes.rows.map((r) => r.item_code));
     const touched = categories.filter((c) => assignments.some((a) => a.subcategory === c && codeSet.has(a.item_code)));
     const computations = {
       peerSet: peerBasis,
       penetration: selected.length < MIN_PEERS ? unavailable("minimum peer size not met", "secondary_sku_line", fy, { basis }) : {
-        availability: "value", value: penetrationRows, basis: meta("secondary_sku_line.qty + net_amount", periods.join(",") || fy, selected.length, selected.length, { peerBasis: basis }),
+        availability: "value", value: penetrationRows, basis: meta("secondary_sku_line.qty + net_amount joined to secondary_order_line.dealer_id", periods.join(",") || fy, selected.length, selected.length, { peerBasis: basis }),
       },
       adjacency: need("adjacency") ? { availability: "value", value: { touched, absent: categories.filter((c) => !touched.includes(c)), registryVersion: registry.version, registryCoverage: `${assignments.length} assignments / ${categories.length} categories`, unmappedCodes: [...codeSet].filter((c) => !assignments.some((a) => a.item_code === c)), categoryLevelOnly: true, pipeFittingsSplit: "unavailable — registry has no code-level split" }, basis: meta("config/prompt68-category-registry.json", fy, codeSet.size, codeSet.size) } : unavailable("not requested", "config/prompt68-category-registry.json", fy),
       top80: need("top80") || need("demand") ? await top80Demand(state) : unavailable("not requested", "frozen metrics", fy),
-      customerSku: customer ? { availability: "value", value: customer.items, history: customer.history, basis: meta("secondary_sku_line.qty + net_amount", "FY2025-26 vs FY2026-27 loaded months", 1, 1) } : unavailable("not requested", "secondary_sku_line", fy),
+      customerSku: customer ? { availability: "value", value: customer.items, history: customer.history, basis: meta("secondary_sku_line.qty + net_amount joined to secondary_order_line.dealer_id", "FY2025-26 full year vs FY2026-27 loaded SKU months", 1, 1) } : unavailable("not requested", "secondary_sku_line", fy),
     };
     const aliases: Record<string, string> = { peer: "peerSet", peers: "peerSet", penetration: "penetration", "customer-sku": "customerSku", adjacency: "adjacency", category: "adjacency", top80: "top80", demand: "top80" };
     const selectedComputations = Object.fromEntries(Object.entries(computations).filter(([key]) => requested.some((r) => (aliases[r.toLowerCase()] ?? r) === key)));
-    res.json({ retailer, fy, requestedComputations: requested, source: "read-only shared computations", period: fy, coverage: {
+    res.json({ retailer, fy, requestedComputations: requested, source: "read-only split-source computations", period: fy, coverage: {
+      identity: {
+        source: "secondary_order_line",
+        fields: { retailer: "dealer_id", distributor: "valid cp_code, otherwise cp_name", member: "sales_user_name", state: "state" },
+        period: fy === "2026-27" ? "April-August 2026" : fy,
+        valueBasis: "basic_order_value",
+      },
+      skuHistory: {
+        source: "secondary_sku_line",
+        fields: { item: "item_code", quantity: "qty", value: "net_amount" },
+        period: "FY2025-26 full year and FY2026-27 loaded SKU months",
+        identityJoin: "validated RET# matched to secondary_order_line.dealer_id",
+      },
       secondaryOrderCoverage: orderCoverage,
       periodStates: fy === "2025-26"
         ? { fiscalYear: "FY25-26", complete: true, completeMonths: orderCoverage.completeMonths, partialMonths: [], unavailableMonths: [] }
