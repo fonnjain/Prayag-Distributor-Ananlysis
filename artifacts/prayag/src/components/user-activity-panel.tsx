@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Loader2, ArrowLeft, Clock, MousePointer2, Layout, Activity } from "lucide-react";
+import { Loader2, ArrowLeft, Clock, MousePointer2, Layout, Activity, Download } from "lucide-react";
 import { useActivityReport, useUsers, type ManagedUser } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -151,6 +151,8 @@ export function UserActivityPanel({
   const [rangePreset, setRangePreset] = useState("7");
   const [to, setTo] = useState(today);
   const [from, setFrom] = useState(() => addIndiaDays(today, -6));
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const { data: usersData } = useUsers({ q: "", status: "all", role: "all" });
   const users = usersData?.users ?? [];
   const rangeError = dateRangeError(from, to);
@@ -169,6 +171,36 @@ export function UserActivityPanel({
     const end = indiaDate(new Date());
     setTo(end);
     setFrom(addIndiaDays(end, -(days - 1)));
+  };
+
+  const handleExport = async () => {
+    if (rangeError || isExporting) return;
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      const params = new URLSearchParams({ from, to });
+      if (selectedUserId !== null) params.set("userId", String(selectedUserId));
+      const response = await fetch(`/api/auth/activity/export?${params.toString()}`, { credentials: "include" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: `Export failed (HTTP ${response.status})` }));
+        throw new Error(body.error || "Export failed");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `User_Activity_${from}_to_${to}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Unable to export activity.");
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const filters = (
@@ -209,11 +241,18 @@ export function UserActivityPanel({
     return (
       <div className="flex flex-col h-full overflow-hidden animate-in fade-in duration-200">
          <div className="p-4 border-b flex flex-col gap-3 shrink-0 bg-muted/20">
-           <div>
-             <h2 className="text-sm font-medium">Organization Activity Summary</h2>
-             <p className="text-xs text-muted-foreground">Showing user activity from {from} to {to}</p>
+           <div className="flex flex-wrap items-start justify-between gap-3">
+             <div>
+               <h2 className="text-sm font-medium">Organization Activity Summary</h2>
+               <p className="text-xs text-muted-foreground">Showing all users with recorded activity from {from} to {to}</p>
+             </div>
+             <Button size="sm" variant="outline" onClick={handleExport} disabled={Boolean(rangeError) || isLoading || isExporting || summaries.length === 0}>
+               {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+               Export All Users
+             </Button>
            </div>
            {filters}
+           {exportError && <p className="text-xs text-destructive">{exportError}</p>}
          </div>
          
          <div className="flex-1 overflow-auto bg-background">
@@ -279,20 +318,27 @@ export function UserActivityPanel({
   return (
     <div className="flex flex-col h-full overflow-hidden animate-in slide-in-from-right-4 duration-300">
        <div className="p-4 border-b flex flex-col gap-3 shrink-0 bg-muted/20">
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="icon" onClick={() => onUserSelect(null)} className="h-8 w-8 shrink-0">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <h2 className="text-sm font-semibold flex items-center gap-2">
-              {summary ? summary.displayName : <span className="w-24 h-4 bg-muted animate-pulse rounded block"></span>}
-            </h2>
-            <div className="text-xs text-muted-foreground">
-              {summary ? summary.email : "Loading details..."}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="icon" onClick={() => onUserSelect(null)} className="h-8 w-8 shrink-0">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div>
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                {summary ? summary.displayName : <span className="w-24 h-4 bg-muted animate-pulse rounded block"></span>}
+              </h2>
+              <div className="text-xs text-muted-foreground">
+                {summary ? summary.email : "Loading details..."}
+              </div>
             </div>
           </div>
+          <Button size="sm" variant="outline" onClick={handleExport} disabled={Boolean(rangeError) || isLoading || isExporting || !summary}>
+            {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Export User Activity
+          </Button>
         </div>
          {filters}
+         {exportError && <p className="text-xs text-destructive">{exportError}</p>}
       </div>
 
       <div className="flex-1 overflow-auto bg-background p-4 md:p-6 space-y-6">
