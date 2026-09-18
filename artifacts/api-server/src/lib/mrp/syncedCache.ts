@@ -228,10 +228,31 @@ export async function authoritativeMrpStatus(): Promise<Record<string, unknown>>
        WHERE s.singleton = true`,
   );
   const row = rows[0];
+  const activeRowCount = row?.generation_id
+    ? Number((await pool.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM mrp_synced WHERE generation_id = $1",
+      [row.generation_id],
+    )).rows[0]?.count ?? 0)
+    : 0;
+  const ageHours = row?.source_fetched_at
+    ? Math.max(0, (Date.now() - new Date(row.source_fetched_at).getTime()) / 3600000)
+    : null;
+  const countReconciled = activeRowCount === Number(row?.source_row_count ?? 0);
+  const freshness = !row?.generation_id || row?.last_error
+    ? "critical"
+    : ageHours != null && ageHours > 48
+      ? "critical"
+      : ageHours != null && ageHours >= 30 || !countReconciled
+        ? "warning"
+        : "current";
   return {
     activeGeneration: row?.generation_id ?? null,
     sourceFetchedAt: row?.source_fetched_at ?? null,
     sourceRowCount: row?.source_row_count == null ? 0 : Number(row.source_row_count),
+    activeRowCount,
+    countReconciled,
+    ageHours,
+    freshness,
     provenanceComplete: row?.provenance_complete ?? false,
     lastSuccessAt: row?.last_success_at ?? null,
     lastError: row?.last_error ?? null,

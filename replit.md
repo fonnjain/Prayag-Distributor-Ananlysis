@@ -1,5 +1,16 @@
 # Prayag India — Sales Intelligence
 
+**Canonical rules required first:** read [`PRAYAG_OPERATING_RULES.md`](./PRAYAG_OPERATING_RULES.md) before answering any data question, writing any query, or building any surface. It takes precedence over recollection.
+
+## Canonical table map
+
+- primary sale / dispatch — `sale_line_current`
+- secondary order booking — `secondary_order_line` (RET# + DIST# here)
+- secondary SKU history — `secondary_sku_line` (no RET#/DIST#)
+- brand/segment mirror — `secondary_register_line` (no item code)
+- head monthly plan — `secondary_head_month`
+- margin — `margin_fact` (to June 2026 only)
+
 A mobile-first dashboard over live Google Sheets sales data: sales trends, growth analytics, coverage, order momentum, an AI Analyst, and a data-health reconciliation panel.
 
 ## Run & Operate

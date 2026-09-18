@@ -1133,6 +1133,7 @@ function extraManifest(id: string, fy: string): string[] {
     ]);
   }
   if (id === "secondary_pipeline") return ["secondary_pipeline_freshness"];
+  if (id === "mrp_grouping") return ["mrp_active_without_grouping"];
   if (id === "sku_canary") {
     const completed = completedMonthLabels(currentOpenFy(), new Date());
     return [
@@ -1145,6 +1146,46 @@ function extraManifest(id: string, fy: string): string[] {
   }
   if (id === "productwise_freshness") return ["productwise_month_immutability"];
   return [];
+}
+
+async function runMrpGroupingGroup(): Promise<CheckGroup> {
+  try {
+    const result = await pool.query<{ count: string; sample_codes: string[] }>(
+      `WITH current_taxonomy AS (
+         SELECT DISTINCT ON (item_code) item_code
+         FROM canonical_item_category_registry
+         WHERE effective_to IS NULL
+         ORDER BY item_code, effective_from DESC
+       ), missing AS (
+         SELECT s.item_code FROM mrp_synced s
+         LEFT JOIN current_taxonomy r ON r.item_code = s.item_code
+         WHERE s.generation_id = (SELECT generation_id FROM mrp_sync_generation WHERE is_active = true LIMIT 1)
+           AND s.mrp IS NOT NULL AND r.item_code IS NULL
+       )
+       SELECT (SELECT COUNT(*) FROM missing)::text AS count,
+              COALESCE((SELECT array_agg(item_code ORDER BY item_code) FROM (SELECT item_code FROM missing ORDER BY item_code LIMIT 20) sample), '{}') AS sample_codes`,
+    );
+    const count = Number(result.rows[0]?.count ?? 0);
+    const samples = result.rows[0]?.sample_codes ?? [];
+    return finalizeCheckGroup({
+      id: "mrp_grouping",
+      label: "MRP mirror — active priced codes without grouping",
+      available: true,
+      checks: [{
+        key: "mrp_active_without_grouping", label: "Active MRP codes have local taxonomy assignments",
+        unit: "count", expected: 0, actual: count, deltaPct: null,
+        status: count === 0 ? "pass" : "warn",
+        note: `Grouping is checked only against canonical_item_category_registry in the active ${process.env.NODE_ENV ?? "configured"} database; MRP division, series and prefix are never inferred. Sample missing codes: ${samples.join(", ") || "none"}.`,
+      }],
+    }, extraManifest("mrp_grouping", "2025-26"));
+  } catch (error) {
+    return finalizeCheckGroup({
+      id: "mrp_grouping", label: "MRP mirror — active priced codes without grouping", available: true,
+      checks: [{ key: "mrp_active_without_grouping", label: "Active MRP codes have local taxonomy assignments",
+        unit: "count", expected: 0, actual: null, deltaPct: null, status: "pending",
+        note: `Not evaluated: ${error instanceof Error ? error.message : String(error)}` }],
+    }, extraManifest("mrp_grouping", "2025-26"));
+  }
 }
 
 export async function runTruncationGroup(): Promise<CheckGroup> {
@@ -1193,7 +1234,7 @@ export async function runFrozenAnchorGroup(): Promise<CheckGroup> {
 }
 
 export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
-  const [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline, skuCanary, productWiseFreshness] =
+  const [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline, skuCanary, productWiseFreshness, mrpGrouping] =
     await Promise.all([
       runTruncationGroup(),
       runReportLogicGroup(fy),
@@ -1204,6 +1245,7 @@ export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
       runSecondaryPipelineGroup(),
       runSkuCanaryGroup(),
       runProductWiseFreshnessGroup(),
+      runMrpGroupingGroup(),
     ]);
   return [
     truncation,
@@ -1215,5 +1257,6 @@ export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
     secondaryPipeline,
     skuCanary,
     productWiseFreshness,
+    mrpGrouping,
   ];
 }

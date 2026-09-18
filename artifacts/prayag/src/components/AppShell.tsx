@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAuth } from "@/data/auth-context";
+import { MrpFreshnessIndicator } from "@/components/mrp/MrpFreshnessIndicator";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -444,6 +445,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <span className="font-semibold text-sm">
             {navGroups.flatMap((g) => g.items).find((i) => i.id === activeItemId)?.label ?? "Prayag India"}
           </span>
+          <MrpFreshnessIndicator />
           {mobileOpen && (
             <button
               type="button"
@@ -456,6 +458,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         </div>
 
         {/* Page content */}
+        <div className="hidden border-b px-5 py-1.5 md:flex justify-end"><MrpFreshnessIndicator /></div>
         <main className="flex-1 overflow-auto">{children}</main>
       </div>
     </div>

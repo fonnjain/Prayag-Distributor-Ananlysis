@@ -7,6 +7,7 @@ import { RefreshCw, CheckCircle, AlertTriangle, XCircle, Clock, Minus, Download,
 import { cn } from "@/lib/utils";
 import { useDashboard } from "@/data/dashboard-context";
 import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
+import { MrpFreshnessIndicator } from "@/components/mrp/MrpFreshnessIndicator";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -420,6 +421,8 @@ export default function DataHealth() {
 
   return (
     <div className="flex flex-col gap-4">
+      <MrpFreshnessIndicator detailed />
+      <MrpCoveragePanel />
       {/* Controls */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1">
@@ -778,6 +781,37 @@ export default function DataHealth() {
         <span>Pending: expected unavailable</span>
         <span>Skip: no anchor or not probed</span>
       </div>
+    </div>
+  );
+}
+
+function MrpCoveragePanel() {
+  const [data, setData] = useState<{
+    selectedSalesValue: number;
+    exactAuthorityGap: { codes: number; value: number; pct: number; status: string };
+    resolverUnresolved: { codes: number; value: number; pct: number; status: string };
+    soldCodeCoverage: { pricedCodes: number; soldCodes: number; valueCovered: number; valueSelected: number };
+    latestThreeCompleteMonths: string[];
+    steadySellers: Array<{ code: string; value: number; lastSold: string | null; soldInLatestThreeCompleteMonths: boolean }>;
+  } | null>(null);
+  useEffect(() => {
+    fetch(`${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/mrp/coverage`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : null).then((v) => setData(v)).catch(() => undefined);
+  }, []);
+  if (!data) return null;
+  const money = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  return (
+    <div className="rounded-md border bg-card p-4">
+      <h3 className="font-semibold text-sm">MRP coverage — unpriced-code checks</h3>
+      <p className="text-xs text-muted-foreground mt-1">Selected sales value: {money(data.selectedSalesValue)}. Measures are separate by basis.</p>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 text-sm">
+        <div><b>Exact authority gap — {data.exactAuthorityGap.status}</b><div className="text-muted-foreground">{data.exactAuthorityGap.codes} codes · {money(data.exactAuthorityGap.value)} ({(data.exactAuthorityGap.pct * 100).toFixed(2)}%)</div></div>
+        <div><b>Resolver-unresolved — {data.resolverUnresolved.status}</b><div className="text-muted-foreground">{data.resolverUnresolved.codes} codes · {money(data.resolverUnresolved.value)} ({(data.resolverUnresolved.pct * 100).toFixed(2)}%)</div></div>
+      </div>
+      <div className="mt-2 text-xs text-muted-foreground">Sold-code coverage: {data.soldCodeCoverage.pricedCodes}/{data.soldCodeCoverage.soldCodes} codes · {money(data.soldCodeCoverage.valueCovered)} / {money(data.soldCodeCoverage.valueSelected)} value. Latest complete months: {data.latestThreeCompleteMonths.join(", ") || "none"}.</div>
+      {data.exactAuthorityGap.status === "critical" && <div className="mt-1 text-xs text-destructive">Critical: an exact-gap code sold in each of the latest three complete months.</div>}
+      {data.steadySellers.length > 0 && <div className="mt-2"><b className="text-xs">Top unpriced steady sellers</b>{data.steadySellers.map((seller) => <div key={seller.code} className="flex justify-between text-xs text-muted-foreground"><span>{seller.code} · last sold {seller.lastSold ?? "—"}</span><span>{money(seller.value)}</span></div>)}</div>}
+      <p className="mt-2 text-xs text-muted-foreground">Source: sale_line_current and active mrp_synced for the open FY; closed FY uses effective-dated mrp_history at each sale invoice date. Warning above 1%; critical above 5% or latest-three-month steady selling. No current-MRP substitution.</p>
     </div>
   );
 }

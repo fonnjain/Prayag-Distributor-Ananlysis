@@ -39,6 +39,7 @@ export type PrimaryDiscount = {
   codes: DiscountCodeRow[];
   widestGaps: DiscountCodeRow[];
   mrpCoverage: { rowsWithMrp: number; rowsTotal: number };
+  coverage?: { coveredValue: number; excludedValue: number; coveragePct: number; coveredCodes: number; excludedCodes: number; sufficient: boolean; headlineSuppressed: boolean };
   projectExclusion: { basis: string; bridgedCustomers: number; note: string };
 };
 
@@ -202,6 +203,11 @@ export default function SkuDiscounts({ fy, channel, monthFrom, monthTo, periodLa
             <span className="font-medium text-foreground">Primary</span> · {primary.measureLabel}
           </p>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 mt-1 text-xs text-muted-foreground">
+            {primary.coverage && <span className={primary.coverage.sufficient ? "" : "font-semibold text-destructive"}>
+              {primary.coverage.sufficient
+                ? `Value coverage ${(primary.coverage.coveragePct * 100).toFixed(1)}% · covered ₹${primary.coverage.coveredValue.toLocaleString("en-IN")} · excluded ₹${primary.coverage.excludedValue.toLocaleString("en-IN")} · excluded codes ${primary.coverage.excludedCodes}`
+                : "insufficient MRP coverage"}
+            </span>}
             <span>
               MRP coverage:{" "}
               <span className="font-medium text-foreground tabular-nums">
@@ -218,12 +224,16 @@ export default function SkuDiscounts({ fy, channel, monthFrom, monthTo, periodLa
         </div>
 
         {/* Widest gaps first — variance emphasis */}
-        <VarianceBlock
+        {primary.coverage?.headlineSuppressed ? (
+          <div className="px-4 py-5 text-sm text-destructive font-medium">
+            insufficient MRP coverage — excluded value ₹{primary.coverage.excludedValue.toLocaleString("en-IN")} ({primary.coverage.excludedCodes} codes)
+          </div>
+        ) : <VarianceBlock
           title="Widest gaps"
           subtitle="codes where distributors pay wildly different discounts off list"
           rows={primary.widestGaps}
           emptyLabel="No wide-gap codes."
-        />
+        />}
 
         {/* Per-code table */}
         <CodeBlock

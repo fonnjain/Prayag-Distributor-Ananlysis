@@ -14,6 +14,8 @@ import { pool } from "@workspace/db";
 import { loadMrpFiles } from "../lib/mrp/loader.js";
 import { isAdminToken } from "../lib/adminAuth.js";
 import { resolveProductCode, buildResolverIndex } from "../lib/sku/productCodeResolver.js";
+import { currentOpenFy, fyMonthLabels } from "../lib/fyAnchors.js";
+import { latestThreeCompleteFyMonths, coverageSeverity, rankSteadySellers } from "../lib/mrp/coverage.js";
 import {
   authoritativeMrpStatus,
   refreshAuthoritativeMrpCache,
@@ -370,6 +372,93 @@ router.get("/mrp/sync-status", async (_req, res) => {
     res.json(await authoritativeMrpStatus());
   } catch (err) {
     res.status(500).json({ error: "Failed to load MRP sync status" });
+  }
+});
+
+// The two unpriced measures intentionally use different bases. Exact authority
+// gaps are literal code absence; unresolved is after the documented resolver.
+router.get("/mrp/coverage", async (req, res) => {
+  try {
+    const fy = typeof req.query.fy === "string" ? req.query.fy : "2026-27";
+    if (!/^\d{4}-\d{2}$/.test(fy)) {
+      res.status(400).json({ error: "fy must be YYYY-YY" }); return;
+    }
+    const isOpen = fy === currentOpenFy();
+    const supported = fyMonthLabels(fy);
+    const generationId = await activeSyncedGeneration();
+    const [sales, mrp] = await Promise.all([
+      pool.query<{ code: string; value: string; last_sold: string | null; last_sold_date: string | null; months: string[]; priced: boolean }>(
+        `WITH sale_rows AS (
+           SELECT sl.code, sl.amount::numeric amount, sl.month_label, sl.invoice_date,
+             ${isOpen
+               ? `EXISTS (SELECT 1 FROM mrp_synced m WHERE m.generation_id = $2 AND m.item_code = sl.code AND m.mrp IS NOT NULL)`
+               : `EXISTS (SELECT 1 FROM mrp_history h WHERE h.item_code = sl.code AND h.mrp IS NOT NULL
+                    AND h.effective_from <= COALESCE(sl.invoice_date::date, CURRENT_DATE)
+                    AND (h.effective_to IS NULL OR h.effective_to > COALESCE(sl.invoice_date::date, CURRENT_DATE)))`
+             } AS priced
+           FROM sale_line_current sl
+           WHERE sl.fy = $1 AND sl.code IS NOT NULL AND sl.code <> ''
+             AND sl.amount IS NOT NULL AND sl.amount > 0
+             AND sl.month_label = ANY($3)
+         )
+         SELECT code, COALESCE(SUM(amount),0)::text value,
+                MAX(invoice_date)::text last_sold_date,
+                (array_agg(month_label ORDER BY invoice_date DESC NULLS LAST, month_label DESC))[1] last_sold,
+                array_agg(DISTINCT month_label) months, bool_or(priced) priced
+         FROM sale_rows GROUP BY code`, isOpen ? [fy, generationId, supported] : [fy, null, supported],
+      ),
+      pool.query<{ item_code: string }>(
+        isOpen && generationId
+          ? "SELECT item_code FROM mrp_synced WHERE generation_id = $1 AND mrp IS NOT NULL"
+          : `SELECT DISTINCT item_code FROM mrp_history
+             WHERE mrp IS NOT NULL
+               AND effective_from <= make_date(substring($1,1,4)::int + 1, 3, 31)
+               AND (effective_to IS NULL OR effective_to > make_date(substring($1,1,4)::int, 4, 1))`,
+        isOpen && generationId ? [generationId] : [],
+      ),
+    ]);
+    const masterCodes = mrp.rows.map((r) => r.item_code);
+    const { has, codes } = buildResolverIndex(masterCodes);
+    let selectedValue = 0;
+    let exactValue = 0;
+    let unresolvedValue = 0;
+    let exactCodes = 0;
+    let unresolvedCodes = 0;
+    // The three-month window is calendar-driven, not data-driven. If a whole
+    // month has no rows it must not cause an older month to be substituted.
+    const completeMonths = latestThreeCompleteFyMonths(supported);
+    const steady = [];
+    for (const row of sales.rows) {
+      const value = Number(row.value) || 0;
+      selectedValue += value;
+      const exactGap = !row.priced;
+      if (exactGap) { exactCodes++; exactValue += value; }
+      const unresolved = resolveProductCode(row.code, has, codes).method === "unresolved";
+      if (unresolved) {
+        unresolvedCodes++; unresolvedValue += value;
+      }
+      if (unresolved && completeMonths.length === 3 && completeMonths.every((month) => row.months.includes(month))) {
+        steady.push({ code: row.code, value, lastSold: row.last_sold_date ?? row.last_sold, soldInLatestThreeCompleteMonths: true });
+      }
+    }
+    const rankedSteady = rankSteadySellers(steady);
+    const source = isOpen
+      ? "sale_line_current + active mrp_synced (open FY)"
+      : "sale_line_current + effective-dated mrp_history at each sale invoice_date (closed FY)";
+    res.json({
+      fy, source, periodBasis: isOpen ? "active generation" : "effective-dated historical MRP; current MRP never substituted",
+      basis: { exact: "literal authority code absence", unresolved: "normalised resolver absence" },
+      selectedSalesValue: selectedValue,
+      soldCodeCoverage: { pricedCodes: sales.rows.filter((r) => r.priced).length, soldCodes: sales.rows.length, valueCovered: selectedValue - exactValue, valueSelected: selectedValue },
+      latestThreeCompleteMonths: completeMonths,
+      exactAuthorityGap: { codes: exactCodes, value: exactValue, pct: selectedValue ? exactValue / selectedValue : 0, status: coverageSeverity(selectedValue ? exactValue / selectedValue : 0, rankedSteady.length > 0), criticalReason: rankedSteady.length ? "unpriced code sold in each latest three complete months" : null },
+      resolverUnresolved: { codes: unresolvedCodes, value: unresolvedValue, pct: selectedValue ? unresolvedValue / selectedValue : 0, status: coverageSeverity(selectedValue ? unresolvedValue / selectedValue : 0), criticalReason: null },
+      steadySellers: rankedSteady.slice(0, 10),
+      thresholds: { warningPct: 0.01, criticalPct: 0.05, coverageFloor: 0.75 },
+    });
+  } catch (err) {
+    req.log?.error({ err }, "mrp coverage error");
+    res.status(500).json({ error: "Failed to compute MRP coverage" });
   }
 });
 

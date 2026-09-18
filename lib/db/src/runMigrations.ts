@@ -6210,6 +6210,77 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
       $do$;
     `,
   },
+  {
+    id: "127_prompt112_113_rules_register_updates",
+    sql: `
+      -- Prompt 112/113. Conditional writes preserve administrator edits and
+      -- make replay safe. No production data is written by this source change.
+      UPDATE resolution_item
+         SET evidence = evidence || ' [P021, 18 September 2026: prior dated measurements retained. 814 is resolver-unresolved; 870 and 871 are exact-code. Exact-code basis is 871 codes / Rs 11,05,90,833.82; resolver-unresolved basis is 816 codes / Rs 9,49,25,358.94. Source: production reconciliation against sale_line_current and active MRP authority.]',
+             updated_at = now()
+       WHERE code = 'P3' AND status = 'open'
+         AND evidence NOT LIKE '%P021, 18 September 2026%';
+
+      INSERT INTO resolution_item
+        (code,type,title,category,fiscal_year,scope_product,reason,evidence,
+         value_at_stake,raised_on,raised_by,owner,priority,status,blocks_api)
+      VALUES
+        ('P3-P021-UNRESOLVED','PENDING','Price the 816 resolver-unresolved sold codes',
+         'master data','2026-27','816 sold codes unresolved after MRP-code normalisation',
+         'Prayag must price the resolver-unresolved products. P021 established zero transit loss; these are products Prayag sells and has not priced.',
+         '[Source: production reconciliation, P021 accepted 18 September 2026] 816 resolver-unresolved codes / Rs 9,49,25,358.94. CP and Sink were the largest groups in the earlier classification. The product-group breakdown cannot be reproduced from the external pricing endpoint. Basis: resolver-unresolved, not exact-code absence.',
+         94925358.94,DATE '2026-09-18','P021','Prayag','high'::resolution_priority,'open',FALSE)
+      ON CONFLICT (code) DO NOTHING;
+
+      INSERT INTO resolution_item_relationship (source_code,target_code,relation)
+      SELECT 'P3-P021-UNRESOLVED','P3','derived-from'::resolution_relation_type
+       WHERE EXISTS (SELECT 1 FROM resolution_item WHERE code='P3')
+      ON CONFLICT (source_code,target_code,relation) DO NOTHING;
+
+      -- Q19b is not a stable row in the current register. P4 is the retained
+      -- WCT item; raise it without inventing a closure.
+      UPDATE resolution_item
+         SET priority='high'::resolution_priority,
+             evidence = CASE WHEN evidence LIKE '%P021 Q19b priority%' THEN evidence
+               ELSE evidence || ' [P021 Q19b priority, 18 September 2026: WCT-3LL-10 Rs 52,40,468 and WCT-3LL-05 Rs 45,80,827 were the two largest resolver-unresolved sellers, both sold in Sep-26. Source: production sale_line_current joined to active MRP authority. Existing WCT item retained; no closure inferred.]' END,
+             updated_at=now()
+       WHERE code='P4' AND status='open';
+
+      INSERT INTO resolution_item
+        (code,type,title,category,reason,evidence,value_at_stake,
+         raised_on,raised_by,owner,priority,status,blocks_api,resolved_on,resolved_by,resolution_note)
+      VALUES
+        ('P021-NOT-OFFERED','PENDING','Closed-period unpriced sales are not offered',
+         'data quality',
+         'Close the discount-and-realisation not-offered requirement confirmed by P021.',
+         '[Source: P021 accepted 18 September 2026; production/development application code and effective-dated MRP history] A closed-period sale with no effective-dated MRP row is excluded from discount and realisation calculations. Current MRP is never substituted for a past period. A product with no price in a period was not offered in that period.',
+         0,DATE '2026-09-18','P021','internal','low'::resolution_priority,'answered',FALSE,
+         DATE '2026-09-18','P021','Requirement resolved as implemented behaviour; evidence retained.')
+      ON CONFLICT (code) DO NOTHING;
+
+      INSERT INTO resolution_item
+        (code,type,title,category,scope_product,reason,evidence,value_at_stake,
+         raised_on,raised_by,owner,priority,status,blocks_api)
+      VALUES
+        ('UGD-PIPE-SERIES-CATEGORY','PENDING','NEW UGD PIPE SERIES NEEDS A CATEGORY ASSIGNMENT',
+         'master data',
+         'U-11CS,U-12CS,U-13CS,U-14CS,U-15CS,U-16CS,U-11BS,U-12BS,U-13BS,U-14BS',
+         'Ten new UGD Self Fit Pipe 6 MTR codes carry prices effective 10 August 2026 but have no Item Type in the grouping master. There is no UGD, UNDERGROUND, or DRAIN Item Type; this is a new series.',
+         '[Source: production mrp_sync_generation and mrp_synced, fetched 18 September 2026; development cache fetched 20 August 2026; grouping master in item_master and sku_taxonomy_override] Production active cache contains all ten codes with prices Rs 2,196–Rs 25,230 and effective date 10 August 2026. No code has a grouping assignment. No primary sale_line_current or secondary_order_line Sep-26 rows exist for the ten codes in either database. They will report as Unmapped when they sell. Category assignment is a Prayag business decision; Underground drainage may sit alongside SWR under PLUMBING but is not assigned here.',
+         0,DATE '2026-09-18','Prompt 113','Prayag','high'::resolution_priority,'open',FALSE)
+      ON CONFLICT (code) DO NOTHING;
+
+      DO $verify$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM resolution_item WHERE code='P3-P021-UNRESOLVED' AND type='PENDING' AND owner='Prayag' AND value_at_stake=94925358.94 AND blocks_api=FALSE)
+          THEN RAISE EXCEPTION 'Prompt 112 unresolved-code entry is incomplete'; END IF;
+        IF NOT EXISTS (SELECT 1 FROM resolution_item WHERE code='P021-NOT-OFFERED' AND status='answered' AND resolved_on=DATE '2026-09-18')
+          THEN RAISE EXCEPTION 'Prompt 112 not-offered closure is incomplete'; END IF;
+        IF NOT EXISTS (SELECT 1 FROM resolution_item WHERE code='UGD-PIPE-SERIES-CATEGORY' AND type='PENDING' AND priority='high'::resolution_priority AND owner='Prayag')
+          THEN RAISE EXCEPTION 'Prompt 113 UGD entry is incomplete'; END IF;
+      END $verify$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

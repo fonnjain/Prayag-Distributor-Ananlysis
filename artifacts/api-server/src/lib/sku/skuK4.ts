@@ -189,6 +189,11 @@ export type PrimaryDiscountResult = {
   codes: DiscountCodeRow[];
   widestGaps: DiscountCodeRow[];
   mrpCoverage: { rowsWithMrp: number; rowsTotal: number };
+  coverage: {
+    coveredValue: number; excludedValue: number; coveragePct: number;
+    coveredCodes: number; excludedCodes: number;
+    floor: number; sufficient: boolean; headlineSuppressed: boolean;
+  };
   projectExclusion: ProjectExclusionMeta;
 };
 
@@ -301,14 +306,15 @@ export async function getPrimaryDiscountByCode(
     `);
 
     const cov = await db.execute(sql`
-      SELECT COUNT(*)::int AS total
+      SELECT COUNT(*)::int AS total, COUNT(DISTINCT sl.code)::int AS total_codes,
+             COALESCE(SUM(sl.amount::float8),0)::float8 AS total_value
       FROM sale_line_current sl
       WHERE sl.fy = ${fy}
         AND sl.qty::float8 > 0
         AND sl.amount::float8 > 0
         AND ${chanFilter} ${monthFilter}
     `);
-    const covRow = cov.rows[0] as { total: number };
+    const covRow = cov.rows[0] as { total: number; total_codes: number; total_value: number };
 
     let rowsWithMrp = 0;
     const codes: DiscountCodeRow[] = (rows.rows as Record<string, unknown>[])
@@ -334,6 +340,9 @@ export async function getPrimaryDiscountByCode(
       .sort((a, b) => b.spread - a.spread)
       .slice(0, 25);
 
+    const coveredValue = codes.reduce((sum, row) => sum + row.net, 0);
+    const excludedValue = Math.max(0, Number(covRow.total_value ?? 0) - coveredValue);
+    const coveragePct = Number(covRow.total_value ?? 0) > 0 ? coveredValue / Number(covRow.total_value) : 0;
     return {
       measureLabel:
         useCurrentAuthority
@@ -341,7 +350,15 @@ export async function getPrimaryDiscountByCode(
           : "Discount off effective-dated historical MRP for the selected period (current MRP is not retroactively applied). NOT margin.",
       fy,
       channel,
+      // Below the agreed 75% value floor, retain row detail but suppress the
+      // headline metric so incomplete MRP cannot be presented as a result.
       codes: codes.slice(0, 500),
+      coverage: {
+        coveredValue, excludedValue, coveragePct, floor: 0.75,
+        coveredCodes: codes.length, excludedCodes: Math.max(0, Number(covRow.total_codes ?? 0) - codes.length),
+        sufficient: coveragePct >= 0.75,
+        headlineSuppressed: coveragePct < 0.75,
+      },
       widestGaps,
       mrpCoverage: { rowsWithMrp, rowsTotal: covRow.total },
       projectExclusion: projectExclusionMeta(projSet),
