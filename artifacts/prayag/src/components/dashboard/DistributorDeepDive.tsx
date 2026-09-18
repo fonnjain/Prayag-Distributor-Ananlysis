@@ -503,6 +503,28 @@ const CONCENTRATION_THRESHOLD = 60;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+function isDistributorDeepDiveResult(value: unknown): value is DistributorDeepDiveResult {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Partial<DistributorDeepDiveResult>;
+  return typeof row.fy === "string"
+    && Array.isArray(row.stateHeads)
+    && Array.isArray(row.distributors)
+    && Array.isArray(row.sharedRetailers)
+    && typeof row.partyObTotal === "number"
+    && typeof row.membersLoaded === "number"
+    && typeof row.membersNotMapped === "number";
+}
+
+function isDistributorDirectory(value: unknown): value is DistributorDirectory {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Partial<DistributorDirectory>;
+  return typeof row.fy === "string"
+    && typeof row.basisLabel === "string"
+    && Array.isArray(row.states)
+    && Array.isArray(row.heads)
+    && Array.isArray(row.distributors);
+}
+
 function pct(n: number | null): string {
   if (n === null) return "--";
   return trunc2(n) + "%";
@@ -2172,8 +2194,17 @@ export default function DistributorDeepDive() {
         );
         return;
       }
-      const json: DistributorDeepDiveResult = await res.json();
+      const json: unknown = await res.json();
       if (seq !== reqSeq.current) return;
+      if (!res.ok) {
+        const message = typeof json === "object" && json !== null && "error" in json
+          ? String((json as { error: unknown }).error)
+          : `Distributor Deep Dive request failed (${res.status})`;
+        throw new Error(message);
+      }
+      if (!isDistributorDeepDiveResult(json)) {
+        throw new Error("Distributor Deep Dive returned an incomplete response. Retry the section.");
+      }
       setData(json);
       // Snapshot served while the server rebuilds in the background — silently
       // refetch (no loading spinner) until the fresh figures land, max 3 tries.
@@ -2187,8 +2218,9 @@ export default function DistributorDeepDive() {
           try {
             const r2 = await fetch(url);
             if (seq !== reqSeq.current || !r2.ok) return;
-            const j2: DistributorDeepDiveResult = await r2.json();
+            const j2: unknown = await r2.json();
             if (seq !== reqSeq.current) return;
+            if (!isDistributorDeepDiveResult(j2)) return;
             if (j2.refreshing) {
               retryTimer.current = setTimeout(silentRefetch, 60_000);
             } else {
@@ -2215,18 +2247,43 @@ export default function DistributorDeepDive() {
   // Load the cross-head distributor directory (drives the filter chain).
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 90_000);
     setDir(null);
     setDirError(null);
-    fetch(`${API}/mgmt/distributor-directory?fy=${encodeURIComponent(fy)}`)
+    fetch(`${API}/mgmt/distributor-directory?fy=${encodeURIComponent(fy)}`, {
+      signal: controller.signal,
+    })
       .then(async (res) => {
-        if (!res.ok) throw new Error(`Directory load failed (${res.status})`);
-        const json: DistributorDirectory = await res.json();
+        const json: unknown = await res.json();
+        if (!res.ok) {
+          const message = typeof json === "object" && json !== null && "error" in json
+            ? String((json as { error: unknown }).error)
+            : `Directory load failed (${res.status})`;
+          throw new Error(message);
+        }
+        if (!isDistributorDirectory(json)) {
+          throw new Error("The distributor directory returned an incomplete response.");
+        }
         if (!cancelled) setDir(json);
       })
-      .catch((err) => {
-        if (!cancelled) setDirError(err instanceof Error ? err.message : "Directory load failed");
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setDirError(
+            err instanceof DOMException && err.name === "AbortError"
+              ? "The distributor directory is taking too long to build. Retry, or switch back to the current fiscal year."
+              : err instanceof Error ? err.message : "Directory load failed",
+          );
+        }
+      })
+      .finally(() => {
+        window.clearTimeout(timeout);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [fy]);
 
   // Reload whenever global FY or period filter changes.

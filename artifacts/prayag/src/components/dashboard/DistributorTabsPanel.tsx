@@ -107,6 +107,28 @@ type PushTab = {
   };
 };
 
+type UnavailablePayload = {
+  fy: string;
+  tab: string;
+  availability: "unavailable";
+  value: null;
+  exclusions?: Array<{
+    title?: string;
+    reason?: string;
+    scopeLabel?: string;
+    resolutionUrl?: string;
+    coverage?: {
+      heldPeriods?: string[];
+      availablePeriods?: string[];
+    };
+    hold?: {
+      title?: string;
+      reason?: string;
+      resolutionUrl?: string;
+    };
+  }>;
+};
+
 // ── Shared bits ───────────────────────────────────────────────────────────────
 
 function useApi<T>(url: string | null): { data: T | null; error: string | null; loading: boolean } {
@@ -116,17 +138,37 @@ function useApi<T>(url: string | null): { data: T | null; error: string | null; 
   useEffect(() => {
     if (!url) { setData(null); setError(null); return; }
     let live = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 90_000);
     setLoading(true); setError(null); setData(null);
-    fetch(url)
+    fetch(url, { signal: controller.signal })
       .then(async (r) => {
-        const j = await r.json();
+        const contentType = r.headers.get("content-type") ?? "";
+        if (!contentType.includes("application/json")) {
+          throw new Error(`The server returned an invalid response (HTTP ${r.status}).`);
+        }
+        const j = await r.json() as T & { error?: string };
         if (!live) return;
-        if (!r.ok || j.error) setError(j.error ?? `HTTP ${r.status}`);
+        if (!r.ok || j.error) setError(j.error ?? `Request failed (HTTP ${r.status})`);
         else setData(j);
       })
-      .catch((e) => live && setError(e.message))
-      .finally(() => live && setLoading(false));
-    return () => { live = false; };
+      .catch((e: unknown) => {
+        if (!live) return;
+        setError(
+          e instanceof DOMException && e.name === "AbortError"
+            ? "This analysis is taking too long. Retry, or choose a narrower period or distributor."
+            : e instanceof Error ? e.message : "The analysis could not be loaded.",
+        );
+      })
+      .finally(() => {
+        window.clearTimeout(timeout);
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [url]);
   return { data, error, loading };
 }
@@ -141,6 +183,47 @@ function Spinner({ label }: { label: string }) {
 
 function Source({ children }: { children: React.ReactNode }) {
   return <span className="text-[11px] text-muted-foreground italic">source: {children}</span>;
+}
+
+function isUnavailablePayload(value: unknown): value is UnavailablePayload {
+  return typeof value === "object"
+    && value !== null
+    && (value as { availability?: unknown }).availability === "unavailable";
+}
+
+function UnavailableNotice({ data }: { data: UnavailablePayload }) {
+  const exclusion = data.exclusions?.[0];
+  const title = exclusion?.hold?.title ?? exclusion?.title ?? "This figure is currently unavailable";
+  const reason = exclusion?.hold?.reason ?? exclusion?.reason;
+  const resolutionUrl = exclusion?.hold?.resolutionUrl ?? exclusion?.resolutionUrl;
+  const heldPeriods = exclusion?.coverage?.heldPeriods ?? [];
+  const availablePeriods = exclusion?.coverage?.availablePeriods ?? [];
+
+  return (
+    <div
+      className="rounded-lg border border-amber-500/40 bg-amber-50/70 p-4 text-sm text-amber-900 dark:bg-amber-900/10 dark:text-amber-200"
+      data-testid={`tab-${data.tab}-unavailable`}
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="space-y-1">
+          <p className="font-semibold">{title}</p>
+          {reason && <p>{reason}</p>}
+          {heldPeriods.length > 0 && (
+            <p className="text-xs">
+              Held period: {heldPeriods.join(", ")}. Unheld periods: {availablePeriods.join(", ") || "none"}.
+            </p>
+          )}
+          <p className="text-xs">
+            The tab is withheld rather than treating unavailable data as zero.
+            {resolutionUrl && (
+              <> Review the item in <a className="underline font-medium" href={resolutionUrl}>Resolution</a>.</>
+            )}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Card({ title, value, sub, testId }: { title: string; value: string; sub?: React.ReactNode; testId?: string }) {
@@ -281,11 +364,12 @@ function BothReadings() {
 }
 
 export function SecondaryTabView({ fy, scope, recon, monthsParam = "" }: { fy: string; scope: string; recon: DistributorRecon | null; monthsParam?: string }) {
-  const { data, error, loading } = useApi<SecondaryTab>(
+  const { data, error, loading } = useApi<SecondaryTab | UnavailablePayload>(
     `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&${scope}&tab=secondary${monthsParam}`);
   if (loading) return <Spinner label="Reading the secondary order-booking register…" />;
   if (error) return <div className="text-sm text-destructive">{error}</div>;
   if (!data) return null;
+  if (isUnavailablePayload(data)) return <UnavailableNotice data={data} />;
   const maxMonth = Math.max(1, ...data.monthly.map((m) => m.net));
   return (
     <div className="space-y-4" data-testid="tab-secondary">
@@ -461,11 +545,12 @@ function SkuSideView({ side, label }: { side: SkuSide; label: string }) {
 }
 
 export function SkuTabView({ fy, scope, recon, monthsParam = "" }: { fy: string; scope: string; recon: DistributorRecon | null; monthsParam?: string }) {
-  const { data, error, loading } = useApi<SkuTab>(
+  const { data, error, loading } = useApi<SkuTab | UnavailablePayload>(
     `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&${scope}&tab=sku${monthsParam}`);
   if (loading) return <Spinner label="Comparing SKU populations against the like-months baseline…" />;
   if (error) return <div className="text-sm text-destructive">{error}</div>;
   if (!data) return null;
+  if (isUnavailablePayload(data)) return <UnavailableNotice data={data} />;
   return (
     <div className="space-y-4" data-testid="tab-sku">
       <UnattributedBanner recon={recon} />

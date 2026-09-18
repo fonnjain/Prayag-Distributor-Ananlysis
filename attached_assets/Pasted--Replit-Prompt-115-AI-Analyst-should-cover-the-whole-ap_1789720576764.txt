@@ -1,0 +1,238 @@
+# Replit Prompt 115 — AI Analyst should cover the whole app
+
+**Date:** 18 September 2026
+**Follows:** the Prompt 114 audit, accepted in full.
+**Scope:** A is enforcement and must ship first. B–E are graph expansion, in
+releases. F is verification.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## The target
+
+**Every question a surface can answer, AI Analyst should answer** — Sales Deep
+Dive, SKU Deep Dive, Distributor Deep Dive, Company Reports, Pending Orders,
+Momentum, Growth, Targets, Coverage, Alerts, Data Health, and the Resolution
+register.
+
+**Keep the bounded resolver architecture.** No unrestricted SQL. The audit is
+right that query access would bypass `blocks_api`, effective-period MRP rules,
+not-offered exclusions, source seams, availability semantics and frozen-period
+rules.
+
+**Expand the graph, not the permissions.**
+
+---
+
+## Section A — enforcement first. Nothing else ships before this.
+
+The audit found the numeric guard **appends a warning and does not reject**. And
+the six operating rules are prompt-enforced only.
+
+```
+Code change. The resolver layer, not the prompt.
+
+A1. DISCRIMINATED AVAILABILITY ON EVERY MEASURE. Not a nullable value:
+
+      measured | partial | unavailable | held | not_applicable
+
+    A held measure returns availability "held", the hold code, the
+    category and a safe reason - and NO VALUE. The blocked number must not
+    be in the payload at all, because a model cannot narrate what it never
+    received.
+
+A2. PERCENTAGES CARRY THEIR BASIS OR DO NOT EXIST. Numerator, denominator,
+    population, period and source, as structured fields. A percentage
+    without them is not constructible.
+
+A3. TYPED MEASURE KINDS WITH FIXED LABELS.
+      order_booking never renders as "sales"
+      dispatch never renders as "booking"
+      The label is a property of the measure kind, not the prompt.
+
+A4. PROJECTIONS ONLY FROM AN APPROVED SEASONAL SERVICE. A projection node
+    carries the calibration basis and observed months, or it does not
+    exist. Linear annualisation must be unconstructible - Q4 is 34.56% of
+    this business's year and flat pacing understates by roughly 17 points.
+
+A5. CATEGORY IS ASSIGNED OR UNMAPPED. Never inferred from prefix, series,
+    division or price.
+
+A6. EVERY NODE CARRIES ITS CUTOFF AND READ TIME. The audit found the graph
+    returning Rs 140.54 Cr where production held Rs 140.64 Cr - a cache
+    difference of Rs 0.10 Cr quoted with no cutoff.
+
+A7. THE NUMERIC GUARD MUST REJECT, NOT WARN. An answer citing a figure not
+    present in the resolved nodes does not reach the user.
+
+These survive a model change. Prompt instructions do not.
+```
+
+---
+
+## Section B — Release 1: Resolution and margin, together
+
+```
+D3 is explicit: exposing margin without hold enforcement reproduces the
+exact risk the audit found. These ship together or not at all.
+
+B1. RESOLUTION REGISTER NODE
+      open holds and pending items, with type, scope, owner, priority,
+      days open, value at stake, blocks_api
+      which measures each hold blocks
+      resolved items with their resolution notes
+
+    This answers C12 and C14 - "what figures are currently unreliable and
+    why" and "what data are we missing and what is it worth" - which the
+    app knows and its analyst does not.
+
+B2. MARGIN NODE from margin_fact, WITH H1 ENFORCED AT CONSTRUCTION.
+      gross margin and gross contribution by category, sub-category, SKU
+      PTMT January-April 2026 returns held, never a value
+      coverage stated - FY2025-26 complete, FY2026-27 to June only
+
+    Terminology: gross margin or gross contribution, never profit.
+    bom_cost is factory cost only.
+
+B3. VERIFY BY ASKING IT. "What is PTMT margin for April 2026?" must return
+    the hold, not 86.47%.
+```
+
+---
+
+## Section C — Release 2: the deep dives
+
+```
+C1. SALES DEEP DIVE - everything that surface shows:
+      targets and achievement, with numerator and denominator
+      order booking, direct dealer order, sales received
+      cost - CTC, T.A., cost ratio with its denominator type named
+      coverage and visits, each with its own source and non-additive note
+      segment spread, on secondary register brand vocabulary, labelled
+      dormant retailers, win-back
+      seasonal projection and the flat comparator, both labelled
+
+    Ravinder Puri is the worked example: flat Rs 1.63 Cr against seasonal
+    Rs 1.95 Cr, 85.7% of plan.
+
+C2. DISTRIBUTOR DEEP DIVE
+      per distributor: retailers, active, booking, sale, dispatch, pending,
+      fill
+      six-master product mix, with legacy brand evidence beneath
+      mapping quality - shared, direct dealer, unassigned, duplicates
+      state the scope: 191 of 269 loaded, from stale snapshots
+
+C3. SKU DEEP DIVE
+      retailer x item facts with PER-MONTH SOURCE METADATA, which now
+      exists - source, value basis, completeness, identity coverage,
+      included or excluded, exclusion reason
+      the July control: both tables reconcile exactly at 32,378 pairs and
+      Rs 22,34,36,806
+      August Product-Wise is an isolated labelled view, excluded from B3,
+      secondary discount, and multi-month conclusions
+      breadth, gaps, push, discounts
+
+C4. CUSTOMER-SKU PENETRATION AND PEER SETS - the Prompt 105 shared
+    computations. Same-distributor peers at 100% coverage; cohorts below
+    five return unavailable; cohorts above 40 refine by value quintile.
+
+    This answers C8 and C11 - SKUs sold by one or two retailers, and
+    customers buying narrowly against peers.
+```
+
+---
+
+## Section D — Release 3: the rest of the app
+
+```
+D1. FULL SECONDARY ORDER BOOKING - three fiscal years, 866,201 rows,
+    Rs 548.03 Cr, with retailer and distributor identity on Product-Wise
+    rows.
+
+D2. PENDING-ORDER ATTRIBUTION - head, member, unassigned, disputed, with
+    reconciliation to zero at every level. Coverage per head, including the
+    five heads mapping 0.00%.
+
+    Answers C10 - pending orders with no assigned member, 1,32,491 pieces.
+
+D3. COMPANY REPORTS 1-7, at every drill level, with the multi-category
+    overlap explained.
+
+D4. MOMENTUM, GROWTH, TARGETS, COVERAGE, COMPARISON - monthly series, not
+    just totals.
+
+    Answers C2 - the monthly shape. Apr -13.0%, May -4.5%, Jun +5.2%,
+    Jul +21.9%, Aug +20.0%. A YTD figure of +7.2% hides a turnaround.
+
+D5. ALERTS AND WARNING SYSTEM - what fired, what is open, what cleared.
+
+D6. DATA HEALTH - MRP freshness and coverage, unpriced codes on both bases
+    separately, environment parity, audit results with the expected-key
+    manifest.
+
+D7. CATEGORY REGISTRY - six masters, 31 sub-categories, assignment
+    provenance, Unmapped explicit.
+
+D8. TOP-80 FROZEN SNAPSHOT - 564 codes, Rs 112.00 Cr, dated.
+```
+
+---
+
+## Section E — what it should say when it cannot answer
+
+```
+E1. A gap must be as informative as an answer. Not "I don't have that" but:
+
+      what is missing
+      why - not loaded, held, source absent, out of period
+      whether it is tracked, and under which register item
+      what would make it available
+
+E2. WORKED EXAMPLE. "What is PTMT margin for April 2026?" should return
+    roughly:
+
+      "Held. PTMT margin for January to April 2026 is under Resolution
+       hold H1 - factory cost recorded at about 40% of its true level,
+       overstating margin by roughly 21 points. Open since 9 September,
+       owner Prayag. The underlying figure is not shown."
+
+    That is more useful than the number would have been.
+```
+
+---
+
+## Section F — verification
+
+```
+F1. Ask it all fourteen questions from Prompt 114 Section C. Print each
+    question and its answer verbatim.
+
+F2. Ask three questions that MUST fail safely:
+      PTMT margin for April 2026            -> held, no value
+      Projected year-end for a state head   -> seasonal only, or
+                                               unavailable
+      Sales for a member in August          -> order booking vs dispatch
+                                               distinguished
+
+F3. Confirm the numeric guard REJECTS a fabricated figure rather than
+    warning.
+
+F4. Print every node the graph now exposes, with its source, cutoff and
+    availability semantics.
+```
+
+---
+
+## Notes
+
+- **Section A before anything.** Every capability added without it is another
+  surface a model can narrate wrongly. Held measures must be absent from the
+  payload, not merely flagged.
+- **B is the release that changes the most.** The app's best knowledge — what is
+  unreliable and why — is currently invisible to the thing people ask.
+- **C3 is now buildable** because per-month source metadata exists. It did not a
+  week ago.
+- **E is the difference between a tool and an oracle.** An analyst that explains a
+  gap, names the hold and says who owns it is more useful than one that produces a
+  number it cannot support.
