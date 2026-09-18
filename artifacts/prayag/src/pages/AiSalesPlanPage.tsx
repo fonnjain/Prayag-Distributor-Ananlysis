@@ -1,13 +1,23 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Search, Store, User, MapPin, Network, Lock, Loader2, AlertTriangle, Info, X, Bot } from "lucide-react";
+import { Search, Store, User, MapPin, Network, Lock, Loader2, AlertTriangle, Info, X, Bot, Check, ChevronsUpDown } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import { formatCompactQuantity, formatINR } from "@/data/dataset";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -104,6 +114,75 @@ type SharedComputeResponse = {
     };
   };
 };
+
+type FilterOption = {
+  value: string;
+  label: string;
+};
+
+function SearchableFilter({
+  value,
+  options,
+  onValueChange,
+  searchPlaceholder,
+  className,
+}: {
+  value: string;
+  options: FilterOption[];
+  onValueChange: (value: string) => void;
+  searchPlaceholder: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedLabel = options.find((option) => option.value === value)?.label ?? options[0]?.label ?? "";
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={cn("h-9 justify-between px-3 font-normal", className)}
+        >
+          <span className="truncate">{selectedLabel}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-[var(--radix-popover-trigger-width)] p-0"
+      >
+        <Command>
+          <CommandInput placeholder={searchPlaceholder} />
+          <CommandList className="max-h-64 overflow-y-auto">
+            <CommandEmpty>No matching option found.</CommandEmpty>
+            <CommandGroup>
+              {options.map((option) => (
+                <CommandItem
+                  key={option.value}
+                  value={option.label}
+                  onSelect={() => {
+                    onValueChange(option.value);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4",
+                      value === option.value ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <span className="truncate">{option.label}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 function renderStructuredData(data: any): string {
   if (!data) return "N/A";
@@ -531,75 +610,71 @@ export default function AiSalesPlanPage() {
           <div className="flex flex-wrap items-center gap-3">
             <Badge variant="outline" className="h-9 px-3 bg-muted/50 rounded-md text-sm font-normal">FY {fy}</Badge>
 
-            <Select value={selectedStateHeadId} onValueChange={(val) => {
-              setSelectedStateHeadId(val);
-              setSelectedMemberId("all");
-              setSelectedState("none");
-              setSelectedDistrict("all");
-              setSelectedRetailer(null);
-            }}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="All State Heads" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All State Heads</SelectItem>
-                {(options?.stateHeads ?? []).map((head) => (
-                  <SelectItem key={head.id} value={head.id}>{head.stateHead}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={selectedMemberId} onValueChange={(val) => {
-              setSelectedMemberId(val);
-              setSelectedState("none");
-              setSelectedDistrict("all");
-              setSelectedRetailer(null);
-            }}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="All Members" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Members</SelectItem>
-                {(options?.members ?? []).map((m) => (
-                  <SelectItem key={m.id} value={m.id}>{m.member}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={selectedState} onValueChange={(val) => {
-              setSelectedState(val);
-              setSelectedDistrict("all");
-              if (selectedRetailer && selectedRetailer.state !== val && val !== "none") {
+            <SearchableFilter
+              value={selectedStateHeadId}
+              options={[
+                { value: "all", label: "All State Heads" },
+                ...(options?.stateHeads ?? []).map((head) => ({ value: head.id, label: head.stateHead })),
+              ]}
+              searchPlaceholder="Search state heads..."
+              className="w-[180px]"
+              onValueChange={(val) => {
+                setSelectedStateHeadId(val);
+                setSelectedMemberId("all");
+                setSelectedState("none");
+                setSelectedDistrict("all");
                 setSelectedRetailer(null);
-              }
-            }}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="All States" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">All States</SelectItem>
-                {(options?.states ?? []).map((row) => (
-                  <SelectItem key={row.state} value={row.state}>{row.state}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              }}
+            />
 
-            <Select value={selectedDistrict} onValueChange={(val) => {
-              setSelectedDistrict(val);
-              if (selectedRetailer && selectedRetailer.district !== val && val !== "all") {
+            <SearchableFilter
+              value={selectedMemberId}
+              options={[
+                { value: "all", label: "All Members" },
+                ...(options?.members ?? []).map((member) => ({ value: member.id, label: member.member })),
+              ]}
+              searchPlaceholder="Search members..."
+              className="w-[180px]"
+              onValueChange={(val) => {
+                setSelectedMemberId(val);
+                setSelectedState("none");
+                setSelectedDistrict("all");
                 setSelectedRetailer(null);
-              }
-            }}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="All Districts" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Districts</SelectItem>
-                {(options?.districts ?? []).map((row) => (
-                  <SelectItem key={row.district} value={row.district}>{row.district}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              }}
+            />
+
+            <SearchableFilter
+              value={selectedState}
+              options={[
+                { value: "none", label: "All States" },
+                ...(options?.states ?? []).map((row) => ({ value: row.state, label: row.state })),
+              ]}
+              searchPlaceholder="Search states..."
+              className="w-[160px]"
+              onValueChange={(val) => {
+                setSelectedState(val);
+                setSelectedDistrict("all");
+                if (selectedRetailer && selectedRetailer.state !== val && val !== "none") {
+                  setSelectedRetailer(null);
+                }
+              }}
+            />
+
+            <SearchableFilter
+              value={selectedDistrict}
+              options={[
+                { value: "all", label: "All Districts" },
+                ...(options?.districts ?? []).map((row) => ({ value: row.district, label: row.district })),
+              ]}
+              searchPlaceholder="Search districts..."
+              className="w-[180px]"
+              onValueChange={(val) => {
+                setSelectedDistrict(val);
+                if (selectedRetailer && selectedRetailer.district !== val && val !== "all") {
+                  setSelectedRetailer(null);
+                }
+              }}
+            />
 
             <div className="relative" ref={dropdownRef}>
               {selectedRetailer ? (

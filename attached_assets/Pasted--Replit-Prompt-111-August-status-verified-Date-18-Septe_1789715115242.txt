@@ -1,0 +1,132 @@
+# Replit Prompt 111 — August status, verified
+
+**Date:** 18 September 2026
+**Scope:** Read-only. Change nothing, load nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Why.** August has been resolved in four separate ways and I want a single
+verified statement of what is actually in production, because the reports have
+contradicted each other twice.
+
+---
+
+## Section A — the five August datasets
+
+```
+Read-only. For EACH, print rows, value, frozen_at, and the environment.
+Production and development separately.
+
+A1. PRIMARY SALES - sale_line_current, Aug-26
+    Expected: 12,878 rows, Rs 30,42,28,618.69, anchored.
+
+A2. SECONDARY ORDER BOOKING - secondary_order_line, Aug-26
+    Expected: 28,185 rows, Rs 19,57,88,289, period_completeness complete,
+    all APPROVED.
+
+A3. SECONDARY SKU - secondary_sku_line, Aug-26
+    THIS IS THE ONE IN QUESTION.
+
+    Reports have said, at different times:
+      production 0 rows, development 8,602
+      "August is NOT empty - 8,602 rows, 1,108 retailers, Rs 5.64 Cr,
+       partial through 19 August"
+
+    Print the truth for BOTH environments, with frozen_at and
+    period_completeness.
+
+A4. BRAND MIRROR - secondary_register_line, Aug-26
+    Expected: zero, since the mirror covers Apr-Jul only after the H5 load.
+    Confirm.
+
+A5. SECONDARY HEAD MONTH - secondary_head_month, Aug-26
+    Rows, plan, ordered, received.
+```
+
+---
+
+## Section B — the freeze state
+
+```
+B1. Under the four-month window, Aug-26 should be OPEN until IST midnight
+    on 1 December 2026.
+
+    Print the calculated freeze instant and the persisted frozen_at for
+    Aug-26 across every table with a month state - primary register,
+    secondary SKU, secondary order.
+
+B2. CONFIRM NO OBSOLETE PERSISTED FREEZE SURVIVES. Development was found
+    carrying a 7 September stamp from the old rule and it was cleared.
+    Check production, and check every other month while you are there.
+
+B3. Any month in any table that is calendar-frozen with frozen_at NULL -
+    the unrepairable state - print it.
+```
+
+---
+
+## Section C — what the surfaces show
+
+```
+C1. What does SKU Deep Dive show for August, in production? A figure, a
+    blank, or unavailable-with-reason?
+
+C2. What does Red Alert B3 do with an empty August? Has it fired on it?
+
+C3. Does the provisional banner state August's actual coverage? Under the
+    shared component from Prompt 104 it should read the live position, not
+    hardcoded wording.
+
+C4. Does the SKU canary still report August as failing its 19,417-row
+    floor? If the month is genuinely empty in production, that is correct
+    behaviour and should be recorded as expected rather than investigated
+    again.
+```
+
+---
+
+## Section D — the decision I would take, for confirmation
+
+```
+Not a build instruction. State whether you agree.
+
+The partial 8,602-row file covers 1-19 August. This business books roughly
+44% of a month in its final six days, so that file represents about 30% of
+August.
+
+MY POSITION: DO NOT promote the partial file to production.
+
+  A month showing 30% of itself without a marker is worse than an empty
+  month that says it is empty. SKU Deep Dive and Red Alert B3 read this
+  table, and a 30% August would look like a collapse rather than a gap.
+
+  The same reasoning kept H5 non-blocking - accuracy over apparent
+  completeness.
+
+D1. Do you agree? If not, say what would make the partial safe - a
+    completeness flag, a suppression rule, a banner.
+
+D2. If the full-month export arrives, is the load path clear? The month is
+    open, so the normal loader should accept it. Confirm, and confirm
+    whether the development 8,602 would need clearing first or would be
+    superseded.
+
+D3. What does September look like? The month closes in twelve days and
+    STATE HEAD WISE Sep 2026 ORDER was updated 17 September, so the CRM is
+    producing data. Print what exists for Sep-26 in each of the five
+    datasets.
+```
+
+---
+
+## Notes
+
+- **A3 is the whole prompt.** Two reports have said different things about the same
+  table and I want one verified answer with the environment named.
+- **B2 matters because the obsolete freeze was found in development and cleared** —
+  nobody has confirmed production was clean, only that it "was already correctly
+  unfrozen". Worth seeing the value.
+- **C4 avoids re-investigating a correct failure.** If August genuinely has no
+  rows, the canary firing is right and should be recorded as expected.
+- **D3 is the forward-looking part.** August is recoverable whenever the export
+  arrives. September is the one where the same gap can still be prevented.
