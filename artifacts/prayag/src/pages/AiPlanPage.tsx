@@ -239,7 +239,7 @@ export default function AiPlanPage() {
       <div className="p-8">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Error loading AI Plans</AlertTitle>
+          <AlertTitle>Error loading AI Visit Plans</AlertTitle>
           <AlertDescription>Could not connect to the server.</AlertDescription>
         </Alert>
       </div>
@@ -257,7 +257,7 @@ export default function AiPlanPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
               <Map className="h-6 w-6 text-primary" />
-              AI Plan
+              AI Visit Plan
             </h1>
             <div className="text-sm text-muted-foreground mt-1">
               Source-explicit visit priorities and inferred outcomes
@@ -315,7 +315,7 @@ export default function AiPlanPage() {
                 <Map className="h-12 w-12 text-muted-foreground/50 mb-4" />
                 <h3 className="text-lg font-semibold mb-2">No Plan Found</h3>
                 <p className="text-muted-foreground text-sm max-w-md mb-6">
-                  No AI Plan exists for {selectedMember || 'this member'} in {selectedMonth || 'this month'} ({selectedFy}). Generate a new proposal to begin.
+                  No AI Visit Plan exists for {selectedMember || 'this member'} in {selectedMonth || 'this month'} ({selectedFy}). Generate a new proposal to begin.
                 </p>
                 <Button onClick={handleGenerate} disabled={!selectedMember || !selectedMonth || generatePlan.isPending} className="gap-2">
                   <RefreshCw className={`h-4 w-4 ${generatePlan.isPending ? 'animate-spin' : ''}`} />
@@ -392,7 +392,7 @@ export default function AiPlanPage() {
                   <TabsTrigger value="pace" className="py-2.5 data-[state=active]:shadow-sm uppercase text-[11px] tracking-wider font-semibold">PACE</TabsTrigger>
                   <TabsTrigger value="coverage-gap" className="py-2.5 data-[state=active]:shadow-sm uppercase text-[11px] tracking-wider font-semibold">COVERAGE GAP</TabsTrigger>
                   <TabsTrigger value="plan-vs-actual" className="py-2.5 data-[state=active]:shadow-sm uppercase text-[11px] tracking-wider font-semibold">PLAN VS ACTUAL</TabsTrigger>
-                  <TabsTrigger value="ai-travel-plan" className="py-2.5 data-[state=active]:shadow-sm uppercase text-[11px] tracking-wider font-semibold">AI TRAVEL PLAN</TabsTrigger>
+                  <TabsTrigger value="ai-travel-plan" className="py-2.5 data-[state=active]:shadow-sm uppercase text-[11px] tracking-wider font-semibold">AI VISIT PLAN</TabsTrigger>
                 </TabsList>
 
                 {/* Tab 1: THIS MONTH */}
@@ -831,7 +831,7 @@ export default function AiPlanPage() {
                   </Card>
                 </TabsContent>
 
-                {/* Tab 5: AI TRAVEL PLAN */}
+                {/* Tab 5: AI VISIT PLAN */}
                 <TabsContent value="ai-travel-plan" className="space-y-6 animate-in fade-in-50 duration-500">
                   <div className="space-y-6">
                     <Alert className="bg-blue-50/50 border-blue-200 text-blue-900 dark:bg-blue-950/30 dark:text-blue-200 dark:border-blue-900">
