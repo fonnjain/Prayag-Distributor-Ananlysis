@@ -36,6 +36,17 @@ export function formatCompact(value: number): string {
   return `${t === 0 ? "" : sign}₹${t.toLocaleString("en-IN")}`;
 }
 
+/** Adaptive Indian-format quantity: 2.14 Cr / 4.35 L / 12.5 K / 850. */
+export function formatCompactQuantity(value: number): string {
+  const sign = value < 0 ? "-" : "";
+  const abs = Math.abs(value);
+  if (abs >= 10000000) return `${sign}${trunc2(abs / 10000000)} Cr`;
+  if (abs >= 100000) return `${sign}${trunc2(abs / 100000)} L`;
+  if (abs >= 1000) return `${sign}${trunc2(abs / 1000)} K`;
+  const truncated = Math.trunc(abs);
+  return `${truncated === 0 ? "" : sign}${truncated.toLocaleString("en-IN")}`;
+}
+
 export const CHART_COLORS = {
   blue: "#0079F2",
   purple: "#795EFF",

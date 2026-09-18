@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { formatCompact, formatINR } from "@/data/dataset";
+import { formatCompactQuantity, formatINR } from "@/data/dataset";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -182,10 +182,10 @@ function useAiSalesPlanSharedCompute(retailerId: string | null, state: string, f
   });
 }
 
-const renderCompact = (val: any) => {
+const renderQuantity = (val: any) => {
   if (val === null || val === undefined) return "—";
   if (val === 0) return "0";
-  return formatCompact(val);
+  return formatCompactQuantity(val);
 };
 
 const renderINR = (val: any) => {
@@ -279,11 +279,11 @@ function WhatTheyBuyTab({ computeData, fy }: { computeData: SharedComputeRespons
                     return (
                       <TableRow key={row.code}>
                          <TableCell className="font-medium text-xs">{row.code}</TableCell>
-                         <TableCell className="text-right text-xs">{renderCompact(priorQty)}</TableCell>
+                         <TableCell className="text-right text-xs">{renderQuantity(priorQty)}</TableCell>
                          <TableCell className="text-right text-xs">{renderINR(priorValue)}</TableCell>
-                         <TableCell className="text-right text-xs border-l">{renderCompact(currentQty)}</TableCell>
+                         <TableCell className="text-right text-xs border-l">{renderQuantity(currentQty)}</TableCell>
                          <TableCell className="text-right text-xs font-medium">{renderINR(currentValue)}</TableCell>
-                         <TableCell className="text-right text-xs border-l">{renderChange(qChange, formatCompact)}</TableCell>
+                         <TableCell className="text-right text-xs border-l">{renderChange(qChange, formatCompactQuantity)}</TableCell>
                          <TableCell className="text-right text-xs">{renderChange(vChange, formatINR)}</TableCell>
                          {!isLimitedHistory && (
                            <TableCell className="text-center border-l">
@@ -328,8 +328,8 @@ function WhatTheyBuyTab({ computeData, fy }: { computeData: SharedComputeRespons
                   return (
                     <TableRow key={sku.code}>
                       <TableCell className="font-medium text-xs">{sku.code}</TableCell>
-                      <TableCell className="text-right text-xs">{renderCompact(currentQty)}</TableCell>
-                      <TableCell className="text-right text-xs">{pen ? renderCompact(pen.medianQty) : "—"}</TableCell>
+                       <TableCell className="text-right text-xs">{renderQuantity(currentQty)}</TableCell>
+                       <TableCell className="text-right text-xs">{pen ? renderQuantity(pen.medianQty) : "—"}</TableCell>
                       <TableCell className="text-right text-xs">
                         {pen ? `${Number(pen.penetrationPct).toFixed(1)}%` : "—"}
                         {pen && <div className="text-[9px] text-muted-foreground">{pen.buyingRetailers} / {pen.eligibleRetailers} retailers</div>}
@@ -401,11 +401,11 @@ function Top80Tab({ computeData, state }: { computeData: SharedComputeResponse, 
                   <TableRow key={row.code}>
                     <TableCell className="font-medium text-xs">{row.code}</TableCell>
                     
-                    <TableCell className="text-right text-xs border-l">{renderCompact(row.stateQty)}</TableCell>
+                    <TableCell className="text-right text-xs border-l">{renderQuantity(row.stateQty)}</TableCell>
                     <TableCell className="text-right text-xs">{renderINR(row.stateAmount)}</TableCell>
                     <TableCell className="text-right text-xs font-semibold">#{row.stateRank}</TableCell>
                     
-                    <TableCell className="text-right text-xs border-l">{renderCompact(row.indiaQty)}</TableCell>
+                    <TableCell className="text-right text-xs border-l">{renderQuantity(row.indiaQty)}</TableCell>
                     <TableCell className="text-right text-xs">{renderINR(row.indiaAmount)}</TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground">#{row.indiaRank}</TableCell>
                     

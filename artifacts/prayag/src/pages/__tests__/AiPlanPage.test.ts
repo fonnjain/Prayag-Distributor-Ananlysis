@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { formatCompactQuantity, formatINR } from '@/data/dataset';
 
 // These replicate the logic inside AiPlanPage to prove formatting invariants
 const formatValue = (val: unknown): string => {
@@ -55,6 +56,17 @@ describe('AiPlan formatting and logic', () => {
 
     it('leaves recent years as unformatted integers', () => {
       expect(formatValue(2025)).toBe('2025');
+    });
+
+    it('formats compact quantities without a rupee symbol', () => {
+      expect(formatCompactQuantity(141000)).toBe('1.41 L');
+      expect(formatCompactQuantity(28060)).toBe('28.06 K');
+      expect(formatCompactQuantity(-1500)).toBe('-1.50 K');
+      expect(formatCompactQuantity(850)).toBe('850');
+    });
+
+    it('keeps amount formatting in rupees', () => {
+      expect(formatINR(141000)).toContain('₹');
     });
   });
 
