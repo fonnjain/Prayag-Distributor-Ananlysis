@@ -1,0 +1,208 @@
+# Replit Prompt 105 — AI Sales Plan: shared compute, then Tabs 1 and 5
+
+**Date:** 17 September 2026
+**Follows:** Prompt 101 Section A (feasibility) and Prompt 104 Section F (design).
+**Scope:** A commits Prompt 104. B builds the shared computations. C and D are the
+two tabs that ship first.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Section A — commit and publish Prompt 104 first
+
+```
+Commit, push and publish Sections B to F.
+
+After publishing, confirm:
+  - the deployed commit against origin/main
+  - the projection panel for one member - seasonal primary, "Current
+    monthly pace x12" as comparator, seasonal share shown
+  - the coverage cards with source labels and the non-additive note
+  - Distributor Deep Dive export downloading with six sheets
+  - the provisional banner on all three deep dives, reading live coverage
+  - P3, E5 and F3 present in the PRODUCTION register
+
+Ravinder Puri is the example worth quoting: flat Rs 1.63 Cr against
+seasonal Rs 1.95 Cr - a 16.1% understatement on one member, who was
+reading as materially behind plan when he is at 85.7% of it.
+```
+
+---
+
+## Section B — the four shared computations
+
+One API surface. Every response carries source, basis and coverage metadata.
+Nothing here is AI Sales Plan specific — SKU Deep Dive and Distributor Deep Dive
+should be able to call it too.
+
+```
+Code change. Read-only computations, no writes.
+
+B1. PEER SETS
+
+    Default: SAME DISTRIBUTOR. Coverage is 100% - 6,314 of 6,314 - where
+    state resolves for 97.78% and still carries aliases.
+
+    Refinement, from the Prompt 101 finding: a peer set above roughly 40
+    members is too broad to be a signal. Ayan had 218 peers across two
+    distributors. Refine by annual-value quintile when the raw set exceeds
+    40.
+
+    Toggle to same-state and to national.
+
+    ALWAYS RETURN THE PEER BASIS AND ITS SIZE. "compared against 11
+    retailers under this distributor" is a different claim from
+    "compared against 3".
+
+    A peer set below a minimum size - propose one - returns unavailable,
+    not a weak signal.
+
+B2. CUSTOMER-SKU PENETRATION
+
+    Which retailers buy which codes, from secondary_sku_line.
+
+    Return per SKU within a peer set: how many peers buy it, their median
+    quantity, their median value.
+
+    STATE THE PERIOD. FY2025-26 is complete. FY2026-27 runs to July, with
+    August partial through 19 August and September unavailable.
+
+B3. ADJACENCY - CATEGORY LEVEL ONLY
+
+    Which of the 31 sub-categories does this customer buy, and which not.
+
+    F3 records that the registry cannot split CPVC pipe from CPVC
+    fittings, so the finer pitch is not available. Do not imply it is.
+
+B4. VERSIONED TOP-80 SNAPSHOT
+
+    FROZEN AND DATED, not a live threshold. Live is 566 codes /
+    Rs 110.99 Cr; the earlier reference was 560 / Rs 107.54 Cr.
+
+    A SKU leaving the top 80% between two visits with no explanation is
+    worse than a slightly stale list.
+
+    Store the snapshot with its source date, FY and period. Re-cut on a
+    stated cadence, and keep prior versions.
+
+RULES FOR ALL FOUR
+  - every response names its source, period and coverage
+  - three states throughout - value, unavailable with reason, genuine zero
+  - consult the Resolution register. H1 holds PTMT January-April margin;
+    anything margin-weighted must respect it
+  - no writes
+```
+
+---
+
+## Section C — Tab 1: what they buy
+
+Ships alone and is immediately useful. A salesperson who knows what a customer
+bought last year and has stopped buying is better prepared than by any
+recommendation.
+
+```
+Code change. New page /ai-sales-plan, Tab 1 only.
+
+SELECT a retailer directly, or a member and then one of their retailers.
+
+SHOW every SKU this customer bought:
+  FY2025-26 quantity and value
+  FY2026-27 to date, quantity and value
+  the change, in both
+
+THREE FLAGS, computed:
+
+  STOPPED     bought last year, nothing this year
+  DOWN 30%+   slipping
+  UP 30%+     working - do more of it
+
+  STOPPED is the strongest pitch on the page. The Prompt 101 sample found
+  Nirman Sales with 236 stopped SKUs, Srikrishna 166, Ayan 92 - with
+  individual lines worth Rs 3.04 L, Rs 2.08 L and Rs 1.33 L.
+
+  "You took 8,000 of 3272 last year across six months and none this year"
+  is a different conversation from a recommendation.
+
+ALSO SHOW, separately: which top-80 SKUs they ALREADY buy, with their
+quantity against the peer median.
+
+  "You buy C62 at half what your peers buy" is a better opening than a new
+  product.
+
+MINIMUM HISTORY. Prompt 101 found 4,279 of 9,078 retailers meet 10 SKUs
+and 3 months - 47%.
+
+  Below that threshold: show known purchases, label limited history, and
+  suppress change-based flags. A retailer with two SKUs in one month has no
+  trend to read.
+
+  Print how many retailers fall each side.
+
+COVERAGE STATEMENT on the tab: FY2025-26 complete; FY2026-27 to July;
+August partial through 19 August; September unavailable.
+```
+
+---
+
+## Section D — Tab 5: top 80%, state versus India
+
+Needs no customer history, so it works for every new prospect from day one.
+
+```
+Code change. Tab 5.
+
+THE VERSIONED TOP-80 LIST with TWO demand columns side by side:
+
+  what this SKU does IN THIS STATE      value, quantity, rank
+  what it does ACROSS INDIA             value, quantity, rank
+
+Sorted by state demand, so a new customer is pitched what moves where they
+are.
+
+THE GAP BETWEEN THE COLUMNS IS THE INSIGHT. A SKU ranked 12th nationally
+and 180th in this state is either an opportunity or a product the market
+rejects. Flag large divergences BOTH ways:
+
+  strong nationally, weak here    -> possible opportunity
+  strong here, weak nationally    -> local strength, protect it
+
+Use primary sale_line for the state ranking - it has state_canon and does
+not carry the secondary geography gap.
+
+STATE THE SNAPSHOT VERSION AND DATE on the tab. A salesperson comparing
+two customers a week apart must know whether the list changed.
+```
+
+---
+
+## Section E — what comes after
+
+```
+Not in this prompt. Recorded so the sequence is clear.
+
+  Tab 2  buy more of the top 80%   - needs the ranking engine
+  Tab 3  SKU peers                 - needs B1 proven in use
+  Tab 4  new SKU                   - needs a regional exclusion rule
+  Tab 6  the rest by national performance
+
+Tab 3 depends on peer sets behaving well in practice, not just in
+computation. Ship C and D, watch B1 under real use, then build 2 and 3.
+```
+
+---
+
+## Notes
+
+- **Section B is the part that must not be rushed.** If AI Sales Plan computes peer
+  penetration differently from SKU Deep Dive, two pages will disagree about one
+  customer — and the audit was explicit that the existing measures use different
+  sources, entities and periods and must not be conflated.
+- **B1's peer-size floor matters more than the algorithm.** A peer signal from three
+  retailers is noise presented as evidence. Better to return unavailable.
+- **C's STOPPED flag is the single most valuable output on this page**, and nothing
+  in the app surfaces it today.
+- **D ships without any customer history**, so it is useful the day it lands — and
+  it is the only part of this page that works for a prospect who has never bought
+  anything.

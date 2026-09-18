@@ -1,0 +1,240 @@
+# Replit Prompt 106 — Answer the Prayag questions from data we already hold
+
+**Date:** 17 September 2026
+**Scope:** Read-only throughout. Change nothing, load nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Purpose.** 33 questions are open with Prayag, some since 31 August. Several are
+answerable — or narrowable to a single decision — from data already in the
+database and the shared archives. Answer what can be answered, narrow what can be
+narrowed, and reduce the list that genuinely needs Prayag.
+
+---
+
+## Q1 is already answered. Here is how.
+
+Recomputing PTMT cost from the **34,369 component rows** in the `ANUJ SIR BOM..`
+tab of the June 2026 workbook, and comparing against each month's reported BOM
+cost across 230 common codes:
+
+| Reported month | Recomputed ÷ reported |
+|---|---:|
+| Dec-25 | 1.37× |
+| **Jan-26** | **3.15×** |
+| **Apr-26** | **2.77×** |
+| **Jun-26** | **1.07×** |
+
+**June agrees within 7%. January is out by more than three times.**
+
+Prayag's own component bill supports the **higher** cost level. January to April
+are understated; the surrounding months are not overstated.
+
+That is the method to apply across the rest.
+
+---
+
+## Section A — questions answerable from held data
+
+```
+Read-only. For each, run the stated test and report: ANSWERED,
+NARROWED, or NEEDS PRAYAG.
+
+A1. Q1 - PTMT COST, JANUARY TO APRIL 2026
+
+    Reproduce the test above and extend it:
+      - recompute from ANUJ SIR BOM.. for every month Nov-25 to Jun-26
+      - do the same from the OLD BOM, NEW BOM and NEW BOM APR 2026 tabs
+      - which tab reproduces which months?
+
+    If NEW BOM APR 2026 reproduces the low months and ANUJ SIR BOM..
+    reproduces the normal ones, the cause is a BOM version switch, and the
+    question to Prayag becomes "which version is current" rather than
+    "what happened".
+
+A2. Q2 - THE 64 PEA CODES, 1 FEBRUARY OR 10 AUGUST?
+
+    The sales data knows. If the price rose on 1 February, sales from
+    February onward realise against the new MRP; if on 10 August, they do
+    not.
+
+    For each of the 64 codes, compute realised price per piece by month
+    from sale_line FY2025-26 and FY2026-27. Find the month the level
+    steps.
+
+    PEA-44B rises Rs 479 to Rs 1,528 - a 219% change should be visible in
+    realised prices, not just in the master.
+
+A3. Q19 - ARE WCT AND WT THE SAME PRODUCT?
+
+    Three tests:
+      - do WCT-3LL-* and WT-3LL-* sell to the SAME customers?
+      - do they sell in NON-OVERLAPPING periods? A rename shows one
+        stopping as the other starts
+      - are their realised prices similar per piece?
+
+    All three pointing the same way would settle it.
+
+A4. Q20 - THE SIX AMBIGUOUS CODES
+
+    824XD, 924XD, 824SD, HD140B, HD160B, HD200B.
+
+    Same tests - customers, periods, realised price - against each
+    candidate catalogue code. Rank the candidates by evidence rather than
+    by edit distance.
+
+    Do not auto-match. Produce a ranked recommendation Prayag can confirm
+    in one line.
+
+A5. Q13 - WHICH OF THE 58 NAMES ARE FORMER EMPLOYEES?
+
+    A former employee has a last order date and nothing after it. Print
+    for each of the 58: first and last order month, total value, and
+    months since last activity.
+
+    Anyone with no activity for six months is almost certainly gone.
+    Anyone still ordering is not.
+
+A6. Q30, Q31, Q32 - DISCONTINUED AND -VB CODES
+
+    The eight PS codes, the 70 discontinued codes still selling, the 15
+    -VB codes.
+
+    For each: last sale date, quantity trend over FY2025-26 to date, and
+    whether sales are falling or steady.
+
+    A code with steady sales is not discontinued whatever the master says.
+    A code with no sales for eight months effectively is.
+
+A7. Q25 - RAVI UPADHYAY AND SHIV KUMAR
+
+    No plan, no order booking, no sales for any month of 2026-27. Check
+    FY2025-26 - did they ever have activity? If they did and it stopped,
+    that is a leaver question, not a plan question.
+
+A8. Q27 - SEPTEMBER SAP, 604 AGAINST ~700
+
+    Check whether the missing invoices have since arrived. If the gap has
+    closed, the question is answered and can be resolved.
+```
+
+---
+
+## Section B — questions narrowable but not answerable
+
+```
+B1. Q6 - THE 130 DISTRIBUTORS WITH NO CODE
+
+    We cannot create codes. We CAN propose matches.
+
+    For each uncoded distributor name, search the coded population with
+    UPPER(TRIM()) plus parenthetical stripping, then edit distance. Print
+    proposed matches with evidence - same state, same head, overlapping
+    customers.
+
+    That turns "create 130 codes" into "confirm these 40 matches and
+    create 90", which is a far smaller ask.
+
+B2. Q10, Q11, Q12 - ORGANISATION
+
+    Print what the data says about each disputed ownership:
+      Sunil Mohanty - any orders, any customers, any activity at all?
+      Rajasthan - which of the two Sharmas has customers with orders?
+      Karnataka and Maharashtra - which head's members actually service
+        those distributors, by order volume?
+
+    The data cannot decide who SHOULD own a state. It can say who
+    currently does the work.
+
+B3. Q7 - THE 870 UNPRICED CODES
+
+    Classify them rather than listing them:
+      still selling, steady          - needs a price urgently
+      selling, declining             - may be running down
+      no sales this FY               - probably discontinued
+      never sold                     - catalogue noise
+
+    Print counts and value per class. A list of 870 is unanswerable; four
+    classes with counts is a decision.
+
+B4. Q17 - COLOUR PRICES ON 123 PRODUCTS
+
+    Do the sales data show colour variants selling at different realised
+    prices? If ivory and white realise the same, one price per code is
+    adequate and the question resolves itself.
+
+B5. Q23 - MAHARASHTRA TERRITORIES
+
+    Print the distinct state and territory spellings in the order book for
+    Maharashtra, with volumes. Whatever the structure should be, the data
+    shows what is actually being recorded.
+```
+
+---
+
+## Section C — what genuinely needs Prayag
+
+```
+State plainly which of the 33 CANNOT be answered from data, and why.
+
+My expectation:
+  Q3, Q4   the missing exports - only Prayag has them
+  Q5       the FY2024-25 re-import - only Prayag can re-export
+  Q8, Q9   website intent - a business decision
+  Q15      whether the round tank prices are real or placeholder
+  Q16, Q18 what a label MEANS - only the author knows
+  Q28      which spelling is correct - a decision, not a fact
+  Q33      whether a price move was intended
+
+Confirm or correct that list. The goal is a much shorter set of questions
+where Prayag's answer is genuinely required, each stated as a single
+decision.
+```
+
+---
+
+## Section D — the output
+
+```
+One report, and one revised question pack.
+
+D1. PER QUESTION: the test run, what the data shows, and the verdict -
+    ANSWERED, NARROWED with a specific remaining decision, or NEEDS
+    PRAYAG.
+
+D2. A REVISED QUESTION LIST containing only what still needs them, each
+    phrased as a single decision rather than an investigation.
+
+    "Confirm these 40 distributor matches and create codes for the
+     remaining 90" is answerable in an afternoon. "Create codes for 130
+     distributors" is not.
+
+D3. FOR EVERYTHING ANSWERED: update the Resolution register - resolve the
+    item with the evidence as its resolution note, or move it to answered.
+
+    Q1 in particular: H1 currently holds PTMT margin January-April
+    pending Prayag. If the BOM recomputation establishes the direction,
+    record that as evidence - the hold may become "correct the four
+    months" rather than "wait for an explanation".
+
+Read-only throughout. Report before any register write.
+```
+
+---
+
+## Notes
+
+- **A1 is already half-done and is the most valuable.** If a specific BOM tab
+  reproduces the low months, the question changes from "what happened" to "which
+  version is current" — and that is answerable in one line rather than an
+  investigation.
+- **A2 is the neatest test on the list.** A 219% price rise is unmissable in
+  realised prices. The sales data knows the effective date even if the master file
+  disagrees with its own note.
+- **B1 is where the most effort is saved.** Turning "create 130 codes" into
+  "confirm 40 matches, create 90" halves the work and makes it something someone
+  can finish.
+- **B3 matters because 870 is an unanswerable number.** Four classes with counts
+  and values is a decision; a list is a task nobody starts.
+- **Section C is the point of the whole exercise** — a short list where Prayag's
+  answer is genuinely required, each a single decision.

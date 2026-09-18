@@ -84,6 +84,7 @@ const NAV: NavGroup[] = [
       { id: "comparison",      label: "Comparison",      path: "/comparison",      icon: LineChart },
       { id: "ai-targets",      label: "AI Targets",      path: "/ai-targets",      icon: Bot },
       { id: "ai-plan",         label: "AI Plan",         path: "/ai-plan",         icon: Map },
+      { id: "ai-sales-plan",   label: "AI Sales Plan",   path: "/ai-sales-plan",   icon: Bot },
       { id: "ai-schemes",      label: "AI Schemes",      path: "/ai-schemes",      icon: Database },
       { id: "targets",         label: "Targets",         path: "/targets",         icon: Target },
       { id: "pending",         label: "Pending Orders",  path: "/pending",         icon: ClipboardList },
@@ -238,6 +239,9 @@ function activeIds(location: string, nav: NavGroup[]): { groupId: string; itemId
   // Dashboard
   if (location.startsWith("/ai-plan")) {
     return { groupId: "dashboard", itemId: "ai-plan" };
+  }
+  if (location.startsWith("/ai-sales-plan")) {
+    return { groupId: "dashboard", itemId: "ai-sales-plan" };
   }
   if (location.startsWith("/ai-schemes")) {
     return { groupId: "dashboard", itemId: "ai-schemes" };

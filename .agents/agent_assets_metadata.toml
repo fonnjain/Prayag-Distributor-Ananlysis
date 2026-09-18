@@ -968,3 +968,45 @@ mtime_ms = 1789633807860
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/89e17694-e3d7-4266-81fd-ce90120771af/6b793e32-d435-41af-963b-e4c35dd13e5f"
 storage_version_token = "1789633818101182"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "yVHnuvaIlsslDbG6dOzgV"
+uri = "file://reports/prompt-106-prayag-held-data-evidence-report-2026-09-18.md"
+type = "text"
+title = "Prompt 106 — Held-data evidence report"
+description = "Read-only 33-question evidence audit with source-labelled tests, verdicts, production classifications, corrections to starting assumptions, and Resolution-register recommendations."
+logical_id = "1e64ce18-04bf-4d6f-8065-2ce1c4388193"
+content_hash = "sha256:0d036d9152ed3d9b7982aa35fd248c9d4a8fd0add3853446c41e9dec5f126f85"
+size = 19153
+mtime_ms = 1789702856949
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/1e64ce18-04bf-4d6f-8065-2ce1c4388193/849830e4-4250-4221-a6f0-7f9f71fa8783"
+storage_version_token = "1789702874966589"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "px6ktowY7p2x3_gcf2r1v"
+uri = "file://reports/prompt-106-revised-prayag-question-pack-2026-09-18.md"
+type = "text"
+title = "Revised Prayag question pack"
+description = "Reduced list of 32 specific decisions or source requests, phrased for one-line answers or annotated-file responses."
+logical_id = "883e21f0-3ccd-44d1-a9e1-c247e70851ce"
+content_hash = "sha256:f81bbe26e36a8a8fb1f5d6054557c0c14ddc6c64f518790a2dbac661304f4bb3"
+size = 4712
+mtime_ms = 1789702845305
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/883e21f0-3ccd-44d1-a9e1-c247e70851ce/9e27bfd6-0d76-4fb8-8f49-3d1b7e20a938"
+storage_version_token = "1789702876897082"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "yKe09RY2w_fkESZ1-otH5"
+uri = "file://reports/prompt-107-drive-gap-database-report-2026-09-18.md"
+type = "text"
+title = "Prompt 107 — Drive-gap database report"
+description = "Read-only evidence report covering colour-aware pricing exposure, 58-name and distributor snapshot limits, six ambiguous codes, WCT pricing, discontinued-code monthly patterns, SAP status, and proposed register revisions."
+logical_id = "367ce0cf-4538-41e5-aaaf-1704c38dfb93"
+content_hash = "sha256:766813a856b2c77630c146d512b83155a27abcca3f2cab3bb84a48bd211f5edc"
+size = 18013
+mtime_ms = 1789703270206
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/367ce0cf-4538-41e5-aaaf-1704c38dfb93/4d4f92ff-0361-44dd-8293-fa06266ec9f2"
+storage_version_token = "1789703283367434"
+content_type = "text/markdown"

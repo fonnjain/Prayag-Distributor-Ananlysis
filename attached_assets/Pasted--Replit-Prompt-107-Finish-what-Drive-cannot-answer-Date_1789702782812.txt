@@ -1,0 +1,208 @@
+# Replit Prompt 107 — Finish what Drive cannot answer
+
+**Date:** 18 September 2026
+**Scope:** Read-only throughout. Change nothing, load nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Context.** Seven Prayag questions were answered directly from Drive and the MRP
+master. These are the ones that need the database — mostly because they need
+colour, customer, date or peer information that the sheets do not carry.
+
+---
+
+## Section A — the colour-price gap. This is the largest open item.
+
+```
+Read-only.
+
+FINDING FROM THE MRP MASTER: 118 products carry an ivory price 10% to 48%
+above the white price, median +19.7%. 107 of them sold in FY2026-27, worth
+Rs 5.41 crore.
+
+The app holds ONE price per code. The sales register DOES record colour -
+WHITE, IVORY, GOLD, BLUE, P.GREEN and others appear in the colour column of
+the Sale Comparison sheet.
+
+A1. Does sale_line carry colour? If not, which table does, and can it join
+    to sale_line by invoice and item?
+
+A2. For the 107 colour-priced codes that sold in FY2026-27, split quantity
+    and value BY COLOUR. How much is white, how much ivory, how much other?
+
+A3. For the non-white portion, recompute discount against the CORRECT
+    colour price instead of the base white price. Print:
+      discount as currently computed
+      discount against the matching colour price
+      the difference, in percentage points and in rupees
+
+    Examples to check: 4031 Anglo Indian S Trap white Rs 4,680 ivory
+    Rs 6,290 (+34.4%); 4302 Closet S Trap white Rs 10,780 ivory Rs 13,640
+    (+26.5%); 4521 Wall Hung Closet white Rs 9,980 ivory Rs 11,940 (+19.6%).
+
+A4. Does any surface currently show a discount or realisation figure for
+    these products? If so, it is understating the discount on every ivory
+    sale.
+
+A5. What would it take for the MRP resolution to pick the colour price
+    where colour is known? The master already holds mrp_ivory,
+    mrp_white_with_jet and mrp_pink_green_blue.
+
+Report only. Do not change the MRP resolution.
+```
+
+---
+
+## Section B — the 58 names. Who has left?
+
+```
+Read-only. Q13.
+
+25,575 order booking rows sit against 58 names not in the current roster,
+worth Rs 13.51 Cr in FY2025-26.
+
+A former employee has a last order date and nothing after it. The data can
+say which.
+
+B1. For each of the 58: first order month, LAST order month, total value,
+    and months since last activity.
+
+B2. Classify:
+      no activity for 6+ months   -> almost certainly departed
+      active within 3 months      -> still working, roster is wrong
+      in between                  -> needs confirmation
+
+B3. Print the counts and value per class.
+
+That turns "which of these 58 are former employees" into a list Prayag can
+confirm rather than reconstruct.
+```
+
+---
+
+## Section C — the distributor matching. Q6.
+
+```
+Read-only.
+
+399 distributor names exist; 130 have no code. We cannot create codes, but
+we can propose matches.
+
+C1. For each of the 130 uncoded names, search the coded population using
+    UPPER(TRIM()) plus parenthetical stripping, then edit distance.
+
+    The normalisation that worked for P008 and for normSecKey applies here:
+    strip "(Off Roll)", "(JAMSHEDPUR)", "M/S", punctuation and case.
+
+C2. Print proposed matches with supporting evidence - same state, same
+    head, overlapping customers, similar order pattern.
+
+C3. Print the residue: names with no plausible match, with their sales
+    value.
+
+That turns "create 130 codes" into "confirm these N matches and create the
+rest".
+```
+
+---
+
+## Section D — the six ambiguous codes. Q20.
+
+```
+Read-only.
+
+824XD, 924XD, 824SD, HD140B, HD160B, HD200B. Rs 1.50 Cr, and 824XD alone
+is Rs 60.78 lakh - the single largest unpriced code.
+
+For each, against each candidate catalogue code:
+
+D1. Do they sell to the SAME customers?
+D2. Do they sell in OVERLAPPING or SEPARATE periods?
+D3. Are realised prices per piece similar?
+
+Rank candidates by evidence, not by edit distance. Produce a ranked
+recommendation Prayag can confirm in one line.
+
+DO NOT auto-match. The Q19 finding is the warning: WCT and WT looked like
+a rename by edit distance and turned out to be different products selling
+in parallel.
+```
+
+---
+
+## Section E — smaller confirmations
+
+```
+E1. Q25 - Ravi Upadhyay and Shiv Kumar have no plan, no order booking and
+    no sales for any month of FY2026-27. Did they have activity in
+    FY2025-26? If they did and it stopped, this is a leaver question, not
+    a plan question.
+
+E2. Q27 - September SAP showed 604 invoices against ~700 derived. Has the
+    gap closed since? If so the question resolves itself.
+
+E3. Q31 - 31 codes worth Rs 11.4 lakh are still selling 6-8 months after
+    discontinuation (dated 2026-01-20 and 2026-02-01).
+
+    Print their monthly sales pattern. Steady sales mean the
+    discontinuation is wrong; a tail that is fading means it is working.
+
+E4. Q19 follow-up - the three WCT codes are Rs 1.15 Cr and have no MRP.
+    Print their monthly quantity and realised price per piece, so Prayag
+    can price them.
+
+E5. Q30 - the eight PS codes appear in no sheet and have no FY2026-27
+    sales. Did they sell in FY2025-26? If they did, they were
+    discontinued without being recorded.
+```
+
+---
+
+## Section F — the register updates that follow
+
+```
+Read-only report first; make no register change until the above is
+reported.
+
+Based on what Drive already answered, these entries need revising:
+
+F1. Q2 / the PEA codes - drops from URGENT to LOW. Zero FY2026-27 sales.
+    The 64 revised codes all carry "Revised on 10th Aug, 2026"; 1 February
+    is the list version, not the effective date.
+
+F2. Q19 - the WCT-to-WT candidate mapping recorded in P4 is WRONG and must
+    be removed. WCT begins June 2026 and runs alongside WT at full volume.
+    They are distinct SKUs.
+
+    This matters: P4 currently records three candidate mappings that would
+    merge Rs 1.15 Cr of a live product line into another.
+
+F3. P3 - 780 genuinely missing codes at Rs 9.68 Cr, plus 70 already
+    discontinued at Rs 20.15 L. Record the classification, and record that
+    CP (303 codes, Rs 3.09 Cr) and Sink (91 codes, Rs 2.17 Cr) are the
+    first tranche.
+
+F4. NEW ENTRY - the colour-price gap. 118 products with colour prices 10-48%
+    above base, 107 selling, Rs 5.41 Cr exposed. Owner internal pending
+    Section A, then Prayag if the master needs restructuring.
+
+F5. Q16 - the "Unchanged - carried forward" label is unreliable on 500 of
+    2,175 rows, some by 89%. Record that the label cannot be trusted.
+```
+
+---
+
+## Notes
+
+- **Section A is the priority.** It is the only open item with a measured
+  commercial impact on live sales — ₹5.41 crore where the discount is being
+  computed against the wrong price.
+- **F2 is a correction that must land before anyone acts on P4.** The register
+  currently holds three WCT-to-WT candidate mappings, and the monthly data shows
+  they are different products. Acting on them would merge a live ₹1.15 crore line
+  into another.
+- **Section D carries the Q19 lesson forward.** Edit distance suggested WCT was a
+  rename of WT and the sales pattern proved otherwise. The same discipline applies
+  to 824XD.
+- **Sections B and C are the biggest effort savings for Prayag** — they convert two
+  open-ended requests into confirmation lists.

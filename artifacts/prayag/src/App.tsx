@@ -31,6 +31,7 @@ import ResolutionPage from "@/pages/ResolutionPage";
 import NotFound from "@/pages/not-found";
 import AiSchemesPage from "@/pages/AiSchemesPage";
 import AiPlanPage from "@/pages/AiPlanPage";
+import AiSalesPlanPage from "@/pages/AiSalesPlanPage";
 import { DashboardProvider } from "@/data/dashboard-context";
 import { GlobalFilterProvider } from "@/data/global-filter-context";
 import { AuthProvider, useAuth } from "@/data/auth-context";
@@ -80,6 +81,7 @@ function ProtectedRoutes() {
         <Route path="/sku" component={SkuPage} />
         {/* AI Plan & Schemes */}
         <Route path="/ai-plan" component={AiPlanPage} />
+        <Route path="/ai-sales-plan" component={AiSalesPlanPage} />
         <Route path="/ai-schemes" component={AiSchemesPage} />
         {/* MRP section */}
         <Route path="/mrp/competition" component={CompetitionPricePage} />
