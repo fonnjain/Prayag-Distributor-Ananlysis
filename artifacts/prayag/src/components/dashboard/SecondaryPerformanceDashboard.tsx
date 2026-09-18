@@ -77,6 +77,14 @@ type ApiData = {
   };
 };
 
+function isApiData(value: unknown): value is ApiData {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { rows?: unknown; meta?: unknown };
+  return Array.isArray(candidate.rows) &&
+    candidate.meta != null &&
+    typeof candidate.meta === "object";
+}
+
 type HeadGroup = {
   head: string;
   plan: number;
@@ -271,7 +279,13 @@ export default function SecondaryPerformanceDashboard() {
   // from live sources in the background — poll silently and swap the fresh
   // figures in without a loading state.
   const dataUrl = `/api/mgmt/data?fy=${encodeURIComponent(fy)}&monthFrom=${effectivePeriodFrom}&monthTo=${effectivePeriodTo}`;
-  useSnapshotRefresh(data?.meta, dataUrl, (fresh) => setData(fresh as ApiData));
+  useSnapshotRefresh(data?.meta, dataUrl, (fresh) => {
+    if (isApiData(fresh)) {
+      setData(fresh);
+    } else {
+      setError("Secondary Performance received an invalid refreshed response. Reload the page to retry.");
+    }
+  });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -304,10 +318,13 @@ export default function SecondaryPerformanceDashboard() {
               }
               throw new Error(e.error ?? r.statusText);
             });
-        return r.json() as Promise<ApiData>;
+        return r.json() as Promise<unknown>;
       })
       .then((d) => {
         if (d === null) return; // quota wait — retry scheduled
+        if (!isApiData(d)) {
+          throw new Error("Secondary Performance received an invalid response. Reload the page to retry.");
+        }
         setQuotaWait(false);
         setData(d);
         setLoading(false);
@@ -332,7 +349,7 @@ export default function SecondaryPerformanceDashboard() {
   // Secondary-only rows (exclude primary-role members who have no secondary target).
   const secondaryRows = useMemo((): MemberRow[] => {
     if (!data) return [];
-    return data.rows.filter((r) => !r.isPrimaryRole);
+    return data.rows.filter((r) => r && typeof r === "object" && !r.isPrimaryRole);
   }, [data]);
 
   // Build state-head groups from secondary rows.
