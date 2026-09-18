@@ -6281,6 +6281,53 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
       END $verify$;
     `,
   },
+  {
+    id: "128_prompt116_productwise_source_change_h2",
+    sql: `
+      -- Prompt 116 Sections A/E: H2 is a permanent source-seam hold, not a
+      -- missing-export reminder. Restrict the correction to an open H2 so a
+      -- resolved/closed administrator decision is never reopened.
+      UPDATE resolution_item
+         SET title = 'AUGUST 2026 SECONDARY SKU — PRODUCT-WISE SOURCE CHANGE',
+             category = 'data quality',
+             fiscal_year = NULL,
+             month = 'Aug-26 onward',
+             scope_product = 'secondary SKU',
+             scope_measure = 'secondary SKU, retailer-level secondary analysis, item-level secondary analysis',
+             reason = 'PSCode3 was discontinued after July 2026. Product-Wise is the sole source from August onward. August retailer × item data exists in secondary_order_line (26,819 pairs, 2,832 retailers, 2,380 product codes, Rs 19.58 Cr basic order value; source: Product-Wise secondary_order_line), but it uses a different value basis from the PSCode3 SKU register. The SKU surfaces read secondary_sku_line, so this period is withheld until the sources are reconciled rather than mixed. The tab remains withheld rather than treating unavailable data as zero.',
+             evidence = '[Source: Prompt 116 Sections A/E; production secondary_order_line and Product-Wise CRM controls, read-only evidence dated 18 September 2026] PSCode3 is discontinued after July 2026 and no PSCode3 August export will arrive. Product-Wise is the sole source from Aug-26 onward. August contains 26,819 retailer × product pairs, 2,832 retailers, 2,380 product codes, and Rs 19.58 Cr basic order value in secondary_order_line; the source uses basic_order_value_ex_gst rather than the PSCode3 net_amount basis. The SKU surfaces still read secondary_sku_line and must not mix the sources before the parity gate. Blocks SKU Deep Dive retailer detail, B3, breadth, gaps, push, peer penetration, and secondary discount. No Prayag export request remains. No capability is irreproducible: only PSCode3 observed mrp and gross_amount columns are unavailable; effective-dated MRP can rebuild that calculation as derived gross after parity controls pass.',
+             raised_by = 'Prompt 116',
+             owner = 'internal - Product-Wise parity build',
+             updated_at = now()
+       WHERE code = 'H2'
+         AND type = 'HOLD'
+         AND status = 'open';
+
+      DO $verify$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'H2'
+             AND type = 'HOLD'
+             AND status = 'open'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code = 'H2'
+             AND type = 'HOLD'
+             AND status = 'open'
+             AND month = 'Aug-26 onward'
+             AND fiscal_year IS NULL
+             AND owner = 'internal - Product-Wise parity build'
+             AND reason ILIKE '%PSCode3 was discontinued after July 2026%'
+             AND reason ILIKE '%Product-Wise is the sole source from August onward%'
+             AND reason ILIKE '%withheld rather than treating unavailable data as zero%'
+             AND evidence ILIKE '%No capability is irreproducible%'
+        ) THEN
+          RAISE EXCEPTION 'Prompt 116 H2 source-change correction is incomplete';
+        END IF;
+      END $verify$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

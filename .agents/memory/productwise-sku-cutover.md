@@ -14,3 +14,18 @@ Product-Wise month permanence shares the existing `register_month_state` and the
 **Why:** Manual exports routinely include an already-closed month. A separate Product-Wise clock could disagree with the register/margin state and reintroduce duplicate or altered historical figures.
 
 **How to apply:** Keep all Product-Wise loaders on the shared freeze decision/state; never add a bypass or reset endpoint. The API status must expose every month/source pair's frozen state and source evidence.
+
+Product-Wise parity has a hard activation gate: source-contract and read-only
+adapter code may be built first, but no existing secondary consumer may cross
+the July/August seam until an independent July Product-Wise export has been
+reconciled against PSCode3 at row, item, retailer, total, and inclusion-rule
+levels.
+
+**Why:** The accepted PSCode3 July total is only a single-source target control;
+it does not prove that Product-Wise Basic Order Value has the same commercial
+definition or GST/returns/status population.
+
+**How to apply:** Keep pre-August and post-August values separate and disclose
+the seam. A measured mismatch is acceptable evidence; an unmeasured seam is
+not. Do not enable source-aware consumer rollout until the comparison report
+exists.

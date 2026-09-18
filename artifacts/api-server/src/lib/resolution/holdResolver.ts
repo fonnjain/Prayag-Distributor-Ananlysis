@@ -176,6 +176,15 @@ function fiscalYearForMonthLabel(period: string): string | null {
   return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
 }
 
+function monthYearKey(period: string): number | null {
+  const match = period.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[-\s](20\d{2}|\d{2})\b/i);
+  if (!match) return null;
+  const month = MONTHS.get(match[1]!.toLowerCase());
+  if (!month) return null;
+  const year = Number(match[2]!.length === 2 ? `20${match[2]}` : match[2]);
+  return year * 12 + month;
+}
+
 function periodMatches(hold: ResolutionHold, requested: string, strictFiscalYear = false): boolean {
   const holdMonth = hold.month;
   const holdFy = hold.fiscalYear;
@@ -185,6 +194,15 @@ function periodMatches(hold: ResolutionHold, requested: string, strictFiscalYear
   const requestedFy = strictFiscalYear ? fiscalYearForMonthLabel(requested) : null;
   if (holdFy && requestedFy && requestedFy !== holdFy) return false;
   if (!holdMonth) return !holdFy || requestedYears.size === 0;
+  // A source-change hold is open-ended: "Aug-26 onward" covers Aug-26 and
+  // every later concrete month, rather than only the month named in the label.
+  if (/\bonward\s*$/i.test(holdMonth)) {
+    const start = monthYearKey(holdMonth);
+    const requestedMonth = monthYearKey(requested);
+    if (start != null && requestedMonth != null) return requestedMonth >= start;
+    if (start != null && holdFy == null && requested.includes(`${Math.floor(start / 12)}-`)) return true;
+    if (start != null && requestedMonthsForFiscalYear(requested, start)) return true;
+  }
   const heldMonths = monthNumbers(holdMonth);
   const requestedMonths = monthNumbers(requested);
   // Comparison month labels (for example Jan-25) carry the calendar year,
@@ -198,6 +216,11 @@ function periodMatches(hold: ResolutionHold, requested: string, strictFiscalYear
   if (![...heldMonths].some((m) => requestedMonths.has(m))) return false;
   const heldYears = years(holdMonth);
   return heldYears.size === 0 || requestedYears.size === 0 || [...heldYears].some((y) => requestedYears.has(y));
+}
+
+function requestedMonthsForFiscalYear(requested: string, start: number): boolean {
+  const match = requested.match(/\b(20\d{2})-(\d{2})\b/);
+  return match != null && Number(match[1]) * 12 + 4 >= start;
 }
 
 function toHold(row: Record<string, unknown>): ResolutionHold | null {

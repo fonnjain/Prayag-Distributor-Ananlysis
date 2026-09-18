@@ -25,7 +25,7 @@ const augSecondary: ResolutionHold = {
   id: "H2",
   title: "AUGUST 2026 SECONDARY SKU",
   fiscalYear: "2026-27",
-  month: "Aug-26",
+  month: "Aug-26 onward",
   scopeProduct: "secondary SKU",
   scopeMeasure: "secondary SKU, retailer-level secondary analysis, item-level secondary analysis",
 };
@@ -107,7 +107,7 @@ describe("central resolution HOLD enforcement", () => {
     }, [pending])).toEqual([]);
   });
 
-  it("blocks H2 August secondary SKU only, with explicit coverage", () => {
+  it("blocks H2 from August onward, with explicit coverage", () => {
     const exclusion = resolveHoldExclusionsFromRows({
       measure: "secondary SKU",
       product: "secondary SKU",
@@ -120,10 +120,23 @@ describe("central resolution HOLD enforcement", () => {
       resolutionItemId: "H2",
       coverage: {
         requestedPeriods: ["Jul-26", "Aug-26", "Sep-26"],
-        heldPeriods: ["Aug-26"],
-        availablePeriods: ["Jul-26", "Sep-26"],
+        heldPeriods: ["Aug-26", "Sep-26"],
+        availablePeriods: ["Jul-26"],
       },
     });
+  });
+
+  it("treats an open-ended H2 hold as covering the open fiscal year", () => {
+    expect(resolveHoldExclusionsFromRows({
+      measure: "secondary SKU",
+      product: "secondary SKU",
+      requestedPeriods: ["2026-27"],
+    }, [augSecondary])).toHaveLength(1);
+    expect(resolveHoldExclusionsFromRows({
+      measure: "secondary SKU",
+      product: "secondary SKU",
+      requestedPeriods: ["2025-26"],
+    }, [augSecondary])).toEqual([]);
   });
 
   it("blocks H3 monthly/quarterly attribution but leaves annual requests unheld", () => {

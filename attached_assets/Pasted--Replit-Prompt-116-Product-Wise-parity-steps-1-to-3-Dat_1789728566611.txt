@@ -1,0 +1,210 @@
+# Replit Prompt 116 — Product-Wise parity, steps 1 to 3
+
+**Date:** 18 September 2026
+**Follows:** the parity audit, accepted in full.
+**Scope:** A is a correction. B, C and D are steps 1–3 of the plan. E is the
+register.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## First — the freshness indicator works, and it tells us something
+
+The header now reads **`MRP current · 1.0h · 6119/6119 rows · Exact gap 8.0% ·
+unresolved 6.9%`**.
+
+Prompt 112 shipped. And **6119/6119 matches the Competition catalogue exactly**,
+where the cache held 6,109 a week ago — a difference of ten, which is the UGD
+series.
+
+```
+Confirm: are the ten UGD codes now in the active MRP cache?
+  U-11CS U-12CS U-13CS U-14CS U-15CS U-16CS
+  U-11BS U-12BS U-13BS U-14BS
+
+If yes, the sync worked as designed and Prompt 113 Section A is answered.
+They still have no Item Type, so Section B of that prompt stands.
+```
+
+---
+
+## Section A — the August notice is now wrong
+
+The Distributor Deep Dive shows:
+
+> **AUGUST 2026 SECONDARY SKU** — *Export not received. Production zero rows.
+> Month open until 1 December 2026.*
+
+**Three things are wrong with that, and one is right.**
+
+```
+Code change. The hold notice and the H2 register entry.
+
+A1. "EXPORT NOT RECEIVED" implies one is coming. PSCode3 is DISCONTINUED.
+    No PSCode3 August export will ever arrive.
+
+A2. AUGUST RETAILER x ITEM DATA EXISTS. Product-Wise carries 26,819
+    retailer x product pairs, 2,832 retailers, 2,380 codes, Rs 19.58 Cr in
+    secondary_order_line - complete, no missing identity or values.
+
+    The data is not missing. It is in a table this surface does not read.
+
+A3. "MONTH OPEN UNTIL 1 DECEMBER" is true but irrelevant now. The month
+    being open mattered when we were waiting for a file. We are not.
+
+A4. WHAT IS RIGHT: "The tab is withheld rather than treating unavailable
+    data as zero." That is correct and should stay.
+
+REWRITE IT, roughly:
+
+  "August 2026 secondary SKU - source changed.
+   PSCode3, which fed this view, was discontinued after July 2026. The new
+   CRM produces Product-Wise exports, which carry August retailer and item
+   data but use a different value basis. This view is withheld until the
+   two sources are reconciled, rather than mixing them.
+   Held period: Aug-26 onward. See Resolution."
+
+A5. AND THE HELD PERIOD IS WRONG. It lists Sep-26 through Mar-27 as
+    UNHELD. Every month from August onward comes from Product-Wise, so
+    every one of them is affected, not just August.
+
+    Correct the held period to Aug-26 onward.
+```
+
+---
+
+## Section B — Step 1: freeze the source contract
+
+```
+Code change. This prevents mixed-era arithmetic before anything else is
+built.
+
+B1. EVERY ROW AND EVERY NODE CARRIES:
+      source          pscode3_xlsx | productwise_xlsx
+      value_basis     net_amount | basic_order_value_ex_gst
+      month, cutoff, completeness
+
+B2. THE CONTRACT:
+      PSCode3      through July 2026
+      Product-Wise from August 2026 onward
+
+B3. NEVER SUM ACROSS THE SEAM without an approved equivalence. Any
+    multi-month response spanning July-August names the seam explicitly.
+
+B4. The per-month source metadata already built for retailer SKU payloads
+    is the pattern. Extend it to every secondary consumer.
+```
+
+---
+
+## Section C — Step 2: the MRP adapter
+
+```
+Code change. This is what restores secondary discount.
+
+Product-Wise has Discount %, Discount Amount, Basic Order Value and
+Product Code - but no observed mrp or gross_amount.
+
+Primary discount already resolves sale_line.code against mrp_history for
+closed periods and mrp_synced for the open FY, with the not-offered
+exclusion. product_code is the same join key.
+
+C1. SELECT effective MRP by product_code and transaction month.
+C2. APPLY the same not-offered and missing-MRP rules. A month with no
+    effective price means the product was not offered - exclude, count,
+    state.
+C3. RETAIN the Product-Wise discount percentage and basic ex-GST value.
+C4. DERIVE gross only where the discount is valid and the denominator is
+    non-zero.
+
+C5. LABEL IT DERIVED, NEVER OBSERVED. This is the audit's key condition. A
+    reconstructed gross is not the CRM's gross column and must not be
+    presented as one.
+
+C6. EXPOSE the controls: row counts, missing-MRP counts, excluded codes,
+    and coverage as a percentage of value.
+```
+
+---
+
+## Section D — Step 3: the July reconciliation. This is the gate.
+
+```
+Read-only until it passes.
+
+THE AUDIT CORRECTED A MISTAKE OF MINE. I treated July's
+Rs 22,34,36,806 as proof the two sources agree. It is not - it is the
+PSCode3 ACCEPTED TOTAL, a target control. No independent Product-Wise July
+export has been loaded or compared.
+
+D1. LOAD PRODUCT-WISE JULY INDEPENDENTLY, into an isolated comparison
+    population. Do not write it to secondary_sku_line.
+
+D2. RECONCILE AT FOUR LEVELS against the PSCode3 control:
+      row, item, retailer, total
+    PSCode3 July: 34,147 rows, Rs 22,34,36,806 net, Rs 44,23,26,730.10
+    gross.
+
+D3. ESTABLISH THE TWO THINGS THAT ARE UNPROVEN:
+      do net_amount and basic_order_value have the same commercial
+        definition?
+      are the GST, returns and status exclusions identical?
+
+D4. COMPARE THE INCLUSION RULES row by row. PSCode3's accepted population
+    and Product-Wise's may differ before any value comparison matters.
+
+D5. IF THEY RECONCILE: the seam is a naming difference and multi-month
+    series can proceed with the basis stated.
+
+    IF THEY DO NOT: the difference is measured and disclosed, and
+    pre-August and post-August retailer x item data are formally not
+    comparable.
+
+    Either outcome is usable. An unmeasured seam is not.
+
+D6. NO SURFACE CHANGES UNTIL D2-D4 REPORT.
+```
+
+---
+
+## Section E — the register
+
+```
+E1. REWRITE H2. It currently reads as a missing export. It is a permanent
+    source change.
+
+      reason   PSCode3 discontinued after July 2026. Product-Wise is the
+               sole source from August. Retailer x item data EXISTS for
+               August - 26,819 pairs, Rs 19.58 Cr - but on a different
+               value basis, and the SKU surfaces read only
+               secondary_sku_line.
+      scope    Aug-26 onward, not Aug-26 alone
+      blocks   SKU Deep Dive retailer detail, B3, breadth, gaps, push,
+               peer penetration, secondary discount
+      owner    internal - this is a build, not a Prayag request
+
+E2. REMOVE the Prayag ask. The revised pack asks for an August retailer
+    and item export. That export no longer exists. Confirm so it can be
+    struck.
+
+E3. RECORD THE PARITY FINDING: no capability is irreproducible. Only
+    PSCode3's OBSERVED mrp and gross_amount columns are unavailable, and
+    the calculation they served can be rebuilt from effective-dated MRP.
+```
+
+---
+
+## Notes
+
+- **A1 is the correction that matters most to a user.** "Export not received" tells
+  someone to wait for a file that will never come. The source changed; that is a
+  different fact and it needs different wording.
+- **A5 is a real error, not wording.** The notice lists September through March as
+  unheld. Every month from August onward comes from Product-Wise, so every one is
+  affected.
+- **D is the gate and it corrects me.** I called July a calibration point. It is a
+  target control on one source. The reconciliation still has to be run.
+- **E2 matters before the Prayag pack goes out.** Asking for an export their CRM no
+  longer produces would waste their time and weaken every other ask in the
+  document.
