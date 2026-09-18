@@ -1,0 +1,162 @@
+# Replit Prompt 108 — Publish 105, apply the register amendments
+
+**Date:** 18 September 2026
+**Follows:** Prompts 106 and 107, both complete and read-only.
+**Scope:** A publishes. B amends the register. C is one open question.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Section A — publish Prompt 105
+
+AI Sales Plan Tabs 1 and 5 plus the shared computations are built, tested and
+uncommitted.
+
+```
+Commit, push and publish Prompt 105.
+
+After publishing, confirm:
+  - the deployed commit against origin/main
+  - Tab 1 for a retailer with a real STOPPED list
+  - Tab 5 for one state, showing the state-versus-India gap and the frozen
+    snapshot date - 564 codes / Rs 112.00 Cr through 17 September
+  - the peer basis and cohort size visible on screen
+  - a retailer below the 10-SKU / 3-month threshold showing limited history
+    with trend flags suppressed
+  - a cohort below five peers returning unavailable, not a weak signal
+```
+
+---
+
+## Section B — register amendments, in priority order
+
+```
+Apply these. Each carries its evidence.
+
+B1. REMOVE THE WCT-TO-WT CANDIDATE MAPPINGS FROM P4. Highest priority.
+
+    P4 currently records WCT-3LL-05, -07 and -10 as edit-distance-one
+    candidates for WT-3LL-05, -07 and -10.
+
+    THEY ARE DISTINCT PRODUCTS. WCT begins June 2026 and runs ALONGSIDE WT
+    at full volume through September - a rename would show WT stopping, and
+    it does not. Prices are similar and customers overlap, which is why the
+    string match looked plausible.
+
+    WCT sold Rs 1.215 Cr June to September.
+
+    Acting on those mappings would merge a live product line into another.
+    Remove them, and record why, so nobody re-derives the same wrong match.
+
+    Replace with: three unpriced codes needing their own MRP entries.
+    Rs 1.215 Cr. Owner Prayag.
+
+B2. THE COLOUR-PRICE ENTRY IS A STRUCTURAL RISK, NOT AN EXPOSURE.
+
+    Record it accurately:
+      118 products carry colour prices 10-48% above base, median +19.7%
+      107 of them sold in FY2026-27
+      ALL SALES ARE WHITE - ivory has zero rows
+      measurable correction today: Rs 0.00, 0.00 percentage points
+
+    The resolver would silently apply a white price to an ivory row if one
+    appeared. That is a latent defect worth recording and not a live loss.
+
+    My earlier Rs 5.41 Cr figure was wrong - it assumed colour sales
+    existed without checking. Record the corrected position, not the
+    original claim.
+
+B3. Q31 REDUCES TO TWO CODES.
+
+    Of the 31 codes selling after discontinuation, 28 stopped by June.
+    Only BEA-103A and BS-28 remained active in August; BS-65 had a small
+    July tail.
+
+    Record that, and drop the priority accordingly. It is a question about
+    two products.
+
+B4. Q2 / THE PEA CODES DROP TO LOW.
+
+    Two independent confirmations: the master's own notes date all 64
+    revised codes to "Revised on 10th Aug, 2026" with 1 February as the
+    list version; and there were no sales February through August, so
+    realised prices cannot contradict it.
+
+    Correct the master for accuracy. No financial impact.
+
+B5. P3 - RECORD THE CLASSIFICATION.
+
+    870 codes / Rs 11.03 Cr splits into:
+      328 steady sellers    Rs 5.19 Cr   <- price these first
+      542 declining sellers Rs 5.85 Cr
+    and separately 70 already discontinued at Rs 20.15 L.
+
+B6. Q8, Q30, Q25 - CLOSE OR CORRECT.
+
+    Q8  codes 20, 25, 32 are the only three rows marked "Invalid Input by
+        Prayag" in excluded_do_not_load. None sells. The website is wrong;
+        removing them loses nothing.
+
+    Q30 the eight PS codes are in no sheet and have no FY2026-27 sales.
+        Absent from the master rather than discontinued.
+
+    Q25 CORRECT THE PREMISE. Ravi Upadhyay and Shiv Kumar had no exact
+        FY2025-26 activity but both had May 2026 secondary orders. The
+        original claim of no order booking was wrong. Record that the
+        question was based on a false premise, and flag that whatever
+        produced the claim needs checking.
+
+B7. Q16 - RECORD THE LABEL AS UNRELIABLE.
+
+    "Unchanged - carried forward" appears on 2,175 rows; 500 of them have a
+    changed price, some by 89% (FR-24 +89.1%, FS-24 +82.5%, F-71 +72.5%).
+    The label cannot be trusted.
+```
+
+---
+
+## Section C — the annex question, before anything goes to Prayag
+
+```
+Read-only. This affects whether the Prompt 106 output is usable.
+
+Prompt 107 reports that the frozen 58-name and historic 130-distributor
+annexes are NOT retained, and that current identity populations have
+changed.
+
+Prompt 106 produced 52 unresolved distributor names from the 130 - with 20
+high-confidence and 8 possible matches.
+
+C1. Which population were those 52 drawn from - the original 130 annex, or
+    the current identity table?
+
+C2. If the current table, how many of the original 130 names still exist in
+    it? Names that have since been coded, merged or removed would not
+    appear, and the 52 would be a different set from what Prayag were
+    asked about.
+
+C3. Same question for the 58 names in Q13.
+
+If the populations differ, say by how much. A confirmation list that does
+not match the names Prayag hold is worse than no list - they will confirm
+against a set we cannot reconcile.
+```
+
+---
+
+## Notes
+
+- **B1 is the one to do first.** The register currently holds a mapping that would
+  merge ₹1.215 crore of a live product line into another, derived from a string
+  similarity that the sales data disproves.
+- **B2 corrects me.** I claimed ₹5.41 crore of exposure from colour pricing and did
+  not check whether colour actually sells. It does not — every row is white. The
+  record should carry the corrected position.
+- **Section C decides whether the Prompt 106 distributor work can be sent.** A list
+  of 52 names built on a population that has since changed will not reconcile
+  against what Prayag were originally asked.
+- **One question for Prayag that came out of B2**, worth adding to the pack: why do
+  118 products carry ivory prices 10–48% above white when no ivory has sold this
+  year? Either the colour is discontinued in practice, or ivory sales are being
+  recorded as white.
