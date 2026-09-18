@@ -3,8 +3,8 @@
 // Navigation groups:
 //   Dashboard — Overview, Regional, Coverage, Products, Momentum, Growth,
 //               Reports, Company Reports, Targets, Pending, Sources, Health
-//   AI        — Analyst, Reports, Targets, Plans, Schemes, Deep Dives
-//   Sales     — State Head, Sales People, Primary, Secondary
+//   AI        — Analyst, Reports, Targets, Visit Plan, Sales Plan, Schemes
+//   Sales     — State Head, Sales People, Primary, Secondary, Deep Dives
 //   MRP       — MRP Master, Margin (GP contribution data)
 //   Market    — Market Survey (competitor pricing intelligence)
 //   Customers — Rankings, Price Shrinkers, At Risk & New, Schemes
@@ -98,9 +98,6 @@ const NAV: NavGroup[] = [
       { id: "ai-plan",       label: "AI Visit Plan", path: "/ai-plan",       icon: Map },
       { id: "ai-sales-plan", label: "AI Sales Plan", path: "/ai-sales-plan", icon: Bot },
       { id: "ai-schemes",    label: "AI Schemes",    path: "/ai-schemes",    icon: Database },
-      { id: "deep-dive",             label: "Sales Deep Dive",       path: "/sales/deep-dive",             icon: BookOpen },
-      { id: "distributor-deep-dive", label: "Distributor Deep Dive", path: "/sales/distributor-deep-dive", icon: Network },
-      { id: "sku-deep-dive",         label: "SKU Deep Dive",         path: "/sku",                         icon: Layers },
     ],
   },
   {
@@ -123,6 +120,9 @@ const NAV: NavGroup[] = [
       { id: "primary-performance",    label: "Primary Performance",    path: "/sales/primary-performance",    icon: BarChartIcon },
       { id: "secondary-performance",  label: "Secondary Performance",  path: "/sales/secondary-performance",  icon: ShoppingBag },
       { id: "secondary-orders",       label: "Secondary Orders",       path: "/secondary-orders",             icon: ShoppingCart },
+      { id: "deep-dive",              label: "Sales Deep Dive",        path: "/sales/deep-dive",              icon: BookOpen },
+      { id: "distributor-deep-dive",  label: "Distributor Deep Dive",  path: "/sales/distributor-deep-dive",  icon: Network },
+      { id: "sku-deep-dive",          label: "SKU Deep Dive",          path: "/sku",                          icon: Layers },
     ],
   },
   {
@@ -203,7 +203,7 @@ function activeIds(location: string, nav: NavGroup[]): { groupId: string; itemId
   if (location === "/secondary-orders" || location.startsWith("/secondary-orders?")) {
     return { groupId: "sales", itemId: "secondary-orders" };
   }
-  // AI routes include the three Deep Dive pages whose URLs remain unchanged.
+  // AI
   const aiGroup = nav.find((group) => group.id === "ai");
   const aiItem = aiGroup?.items.find((item) =>
     location === item.path || location.startsWith(`${item.path}?`) || location.startsWith(`${item.path}/`)
@@ -216,6 +216,9 @@ function activeIds(location: string, nav: NavGroup[]): { groupId: string; itemId
     const salesGrp = nav.find((g) => g.id === "sales")!;
     const item = salesGrp.items.find((i) => i.id === slug) ?? salesGrp.items[0];
     return { groupId: "sales", itemId: item.id };
+  }
+  if (location === "/sku" || location.startsWith("/sku/")) {
+    return { groupId: "sales", itemId: "sku-deep-dive" };
   }
   if (location === "/mrp" || location === "/mrp/") {
     return { groupId: "mrp", itemId: "mrp-master" };
