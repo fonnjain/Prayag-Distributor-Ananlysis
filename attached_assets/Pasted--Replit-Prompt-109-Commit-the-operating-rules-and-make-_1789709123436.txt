@@ -1,0 +1,104 @@
+# Replit Prompt 109 — Commit the operating rules, and make them load
+
+**Date:** 18 September 2026
+**Scope:** One file, committed. Then referenced from where work starts.
+
+**Why.** Every rule in the attached document was established by investigation,
+forgotten, and re-established. The RET#/DIST# table question alone has been asked
+and answered at least three times. **It keeps happening because the answers live
+in conversations, not in the repository.**
+
+---
+
+## Section A — commit the file
+
+```
+Add PRAYAG_OPERATING_RULES.md to the repository root.
+
+Content: exactly as supplied. Do not summarise, reorganise or shorten it.
+Each rule carries the evidence that produced it, and the evidence is the
+reason the rule survives.
+
+Fifteen sections:
+   1  Which table carries what
+   2  Environment
+   3  Empty, zero, and unavailable
+   4  What a measure actually is
+   5  Units
+   6  Time
+   7  Annualisation and projection
+   8  Matching and identity
+   9  Grouping vocabularies
+  10  Margin
+  11  The Resolution register
+  12  Evidence discipline
+  13  Publish and schema
+  14  Known blocked or absent
+  15  How to answer a question
+```
+
+---
+
+## Section B — make it load before work starts
+
+```
+The file is useless if nobody reads it.
+
+B1. REFERENCE IT FROM replit.md, at the top, as required reading before
+    answering any data question, writing any query, or building any
+    surface.
+
+    Not "see also". The first line should be that this document is
+    canonical and takes precedence over recollection.
+
+B2. ADD THE TABLE MAP TO replit.md DIRECTLY - section 1 of the rules. It is
+    the most-forgotten fact in the system and it is six lines:
+
+      primary sale / dispatch     sale_line_current
+      secondary order booking     secondary_order_line   RET# + DIST# HERE
+      secondary SKU history       secondary_sku_line     NO RET#/DIST#
+      brand/segment mirror        secondary_register_line  no item code
+      head monthly plan           secondary_head_month
+      margin                      margin_fact            to June 2026 only
+
+B3. Where a guard or audit check enforces a rule, cite the rule number in
+    its comment. A check that says "see rule 3.1" survives a rewrite; a
+    check with an unexplained assertion does not.
+```
+
+---
+
+## Section C — keep it true
+
+```
+C1. WHEN EVIDENCE CONTRADICTS A RULE, update the rule in the same change
+    and say what changed it. Do not work around it silently - that is how
+    every one of these got lost the first time.
+
+C2. WHEN A HOLD RESOLVES, update section 14. It currently lists nine
+    blocked or absent items; three have moved this month.
+
+C3. WHEN A NEW RECURRING FAILURE APPEARS, add it. The test for inclusion:
+    has this been explained more than once?
+
+C4. Do not let it become a changelog. It records what is true now and the
+    evidence for it, not the history of how it was learned. Superseded
+    figures belong in the Resolution register, which already carries dated
+    measurements.
+```
+
+---
+
+## Notes
+
+- **Section B is the part that matters.** A rules file nobody loads is another
+  forgotten conversation. `replit.md` is read at the start of work; that is where
+  the pointer belongs.
+- **B2 duplicates six lines deliberately.** The table map is the single
+  most-repeated question in this project, and a pointer to another file is one
+  step too many when someone is mid-query.
+- **B3 is what makes rules survive refactors.** An assertion with a rule number
+  explains itself; one without gets deleted as unexplained strictness.
+- **C1 is the discipline the whole thing depends on.** These rules were lost
+  because each was worked around once, quietly, by someone who had good reason at
+  the time.
