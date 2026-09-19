@@ -86,30 +86,46 @@ describe("Product-Wise effective MRP adapter", () => {
     ]);
   });
 
-  it("flags code-level unit variation, excludes price-list measures, and counts value", () => {
+  it("keeps normal rows when a code has small variation and flags modal outliers", () => {
     const rows = [
-      { productCode: "UNIT", month: "Aug-26", transactionDate: "2026-08-01", segment: null, qty: 1, discountPct: 0, basicOrderValueExGst: 100 },
+      { productCode: "UNIT", month: "Aug-26", transactionDate: "2026-08-01", segment: null, qty: 1, discountPct: 0, basicOrderValueExGst: 90 },
       { productCode: "UNIT", month: "Aug-26", transactionDate: "2026-08-02", segment: null, qty: 1, discountPct: 0, basicOrderValueExGst: 103 },
+      { productCode: "UNIT", month: "Aug-26", transactionDate: "2026-08-03", segment: null, qty: 1, discountPct: 0, basicOrderValueExGst: 103 },
     ];
     const result = applyProductWiseMrp(rows, new Map([["UNIT", 100]]));
-    expect(result.rows.every((row) => row.exclusionReason === "unit_mismatch" &&
-      row.grossMrp === null && row.discountMrp === null)).toBe(true);
-    expect(result.controls.unitMismatchRows).toBe(2);
-    expect(result.controls.unitMismatchValue).toBe(203);
+    expect(result.rows.every((row) => row.included && row.exclusionReason === null)).toBe(true);
+    expect(result.controls.unitMismatchRows).toBe(0);
+    expect(result.controls.priceOutlierRows).toBe(1);
+    expect(result.controls.priceOutlierValue).toBe(90);
   });
 
-  it("prioritizes UNIT_MISMATCH over missing MRP and excludes it from missing controls", () => {
+  it("excludes only rows outside the 0.5x–2x implied/catalogue ratio", () => {
     const rows = [
       { productCode: "MIXED", month: "Aug-26", transactionDate: "2026-08-01", segment: null, qty: 1, discountPct: 0, basicOrderValueExGst: 100 },
-      { productCode: "MIXED", month: "Aug-26", transactionDate: "2026-08-02", segment: null, qty: 1, discountPct: 0, basicOrderValueExGst: 300 },
+      { productCode: "MIXED", month: "Aug-26", transactionDate: "2026-08-02", segment: null, qty: 1, discountPct: 0, basicOrderValueExGst: 2500 },
     ];
     const result = applyProductWiseMrp(rows, new Map([
       [productWiseMrpLookupKey("MIXED", "2026-08-01"), 100],
+      [productWiseMrpLookupKey("MIXED", "2026-08-02"), 100],
     ]));
     expect(result.controls.unitMismatchCodes).toBe(1);
     expect(result.controls.unitMismatchCodeList).toEqual(["MIXED"]);
-    expect(result.rows.map((row) => row.exclusionReason)).toEqual(["unit_mismatch", "unit_mismatch"]);
-    expect(result.controls.missingMrpRows).toBe(0);
+    expect(result.rows.map((row) => row.exclusionReason)).toEqual([null, "unit_mismatch"]);
+    expect(result.controls.unitMismatchRows).toBe(1);
+    expect(result.controls.unitMismatchValue).toBe(2500);
+    expect(result.controls.valueCovered).toBe(100);
+  });
+
+  it("keeps the 0.5x and 2x boundaries included", () => {
+    const result = applyProductWiseMrp([
+      { productCode: "BOUNDARY", month: "Aug-26", transactionDate: "2026-08-01", segment: null, qty: 1, discountPct: 0, basicOrderValueExGst: 50 },
+      { productCode: "BOUNDARY", month: "Aug-26", transactionDate: "2026-08-02", segment: null, qty: 1, discountPct: 0, basicOrderValueExGst: 200 },
+    ], new Map([
+      [productWiseMrpLookupKey("BOUNDARY", "2026-08-01"), 100],
+      [productWiseMrpLookupKey("BOUNDARY", "2026-08-02"), 100],
+    ]));
+    expect(result.rows.every((row) => row.included)).toBe(true);
+    expect(result.controls.unitMismatchRows).toBe(0);
   });
 
   it("reports code agreement buckets at 1%, 5%, and outside 5%", () => {

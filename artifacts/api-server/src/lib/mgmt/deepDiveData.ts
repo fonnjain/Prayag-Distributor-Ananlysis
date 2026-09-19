@@ -39,6 +39,7 @@ import { IdentityRegistry } from "./identityRegistry.js";
 import { getCachedStateDashboard } from "./stateDashboard.js";
 import { personRegistry } from "@workspace/db";
 import { resolveEmployeeCode } from "../employeeCodeIdentity.js";
+import { getHrRosterUniqueEmployeeCodeNames } from "./roster.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1307,6 +1308,7 @@ export function aggregateAugustSecondaryHeadRows(
 export function resolveProductWiseRows(
   lines: ProductWiseLineForResolution[],
   registryRows: ProductWiseRegistryPerson[],
+  hrUniqueEmployeeCodes: Map<string, string> = new Map(),
 ): ProductWiseResolution {
   const out: ProductWiseResolution = {
     values: new Map(), reasons: new Map(), mappedCount: 0, unmappedCount: 0,
@@ -1337,7 +1339,16 @@ export function resolveProductWiseRows(
     let person: ProductWiseRegistryPerson | null = null;
     if (codeResolution.status === "unique") person = codeResolution.unique;
     else if (codeResolution.status === "ambiguous") {
-      out.unmappedCount++; addReason("employee_code_ambiguous"); continue;
+      const hrName = hrUniqueEmployeeCodes.get(normalizeProductEmployeeCode(line.employee_id)!.toUpperCase());
+      const hrMatches = hrName
+        ? codeResolution.candidates.filter((candidate) => normSecKey(candidate.canonical_name) === normSecKey(hrName))
+        : [];
+      if (hrMatches.length === 1) {
+        person = hrMatches[0];
+        addReason("employee_code_hr_deterministic");
+      } else {
+        out.unmappedCount++; addReason("employee_code_ambiguous"); continue;
+      }
     } else {
       const nameMatches = byName.get(normSecKey(line.sales_user_name ?? "")) ?? [];
       if (nameMatches.length === 1) person = nameMatches[0];
@@ -1386,7 +1397,7 @@ async function loadProductWiseResolution(fy: string): Promise<ProductWiseResolut
       FROM secondary_order_line
       WHERE fiscal_year = ${fy} AND source_kind = 'product_wise'
     `)).rows as Array<{ employee_id: string | null; sales_user_name: string | null; basic_order_value: string | number | null }>;
-    const resolved = resolveProductWiseRows(lines, registryRows);
+    const resolved = resolveProductWiseRows(lines, registryRows, getHrRosterUniqueEmployeeCodeNames());
     empty.values = resolved.values;
     empty.mappedCount = resolved.mappedCount;
     empty.unmappedCount = resolved.unmappedCount;

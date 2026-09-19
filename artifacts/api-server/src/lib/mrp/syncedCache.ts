@@ -177,8 +177,87 @@ export async function refreshAuthoritativeMrpCache(): Promise<AuthoritativeSyncR
           );
         }
       }
-      await client.query("UPDATE mrp_sync_generation SET is_active = false WHERE is_active = true");
-      await client.query("UPDATE mrp_sync_generation SET is_active = true WHERE generation_id = $1", [generationId]);
+      // Build effective history from the immutable snapshot. A new row is
+      // written only when the code/segment price changed; replaying the same
+      // source therefore cannot create duplicate history points.
+      await client.query(
+        `INSERT INTO mrp_master
+           (item_code, item_name, segment, is_ambiguous_code)
+         SELECT DISTINCT s.item_code, s.product_name, d.app_segment, false
+           FROM mrp_synced s
+           JOIN mrp_synced_division d
+             ON d.generation_id = s.generation_id AND d.item_code = s.item_code
+          WHERE s.generation_id = $1 AND d.app_segment IS NOT NULL
+         ON CONFLICT (item_code, segment) DO UPDATE SET
+           item_name = EXCLUDED.item_name`,
+        [generationId],
+      );
+      await client.query(
+        `WITH newest AS (
+           SELECT s.item_code, d.app_segment AS segment, s.mrp,
+                  COALESCE(s.price_in_force_since, g.source_fetched_at::date) AS effective_from
+             FROM mrp_synced s
+             JOIN mrp_sync_generation g ON g.generation_id = s.generation_id
+             JOIN mrp_synced_division d
+               ON d.generation_id = s.generation_id AND d.item_code = s.item_code
+            WHERE s.generation_id = $1 AND d.app_segment IS NOT NULL
+         ), previous AS (
+           SELECT DISTINCT ON (h.item_code, h.segment)
+                  h.item_code, h.segment, h.mrp, h.effective_from
+             FROM mrp_history h
+            ORDER BY h.item_code, h.segment, h.effective_from DESC, h.id DESC
+         )
+         UPDATE mrp_history h
+            SET effective_to = n.effective_from, is_current = false
+           FROM newest n
+           WHERE h.item_code = n.item_code
+             AND h.segment = n.segment
+             AND h.is_current = true
+             AND h.effective_to IS NULL
+             AND h.mrp IS DISTINCT FROM n.mrp
+             AND n.effective_from > h.effective_from`,
+        [generationId],
+      );
+      await client.query(
+        `WITH newest AS (
+           SELECT s.item_code, d.app_segment AS segment, s.mrp,
+                  COALESCE(s.price_in_force_since, g.source_fetched_at::date) AS effective_from
+             FROM mrp_synced s
+             JOIN mrp_sync_generation g ON g.generation_id = s.generation_id
+             JOIN mrp_synced_division d
+               ON d.generation_id = s.generation_id AND d.item_code = s.item_code
+            WHERE s.generation_id = $1 AND d.app_segment IS NOT NULL
+         ), previous AS (
+           SELECT DISTINCT ON (h.item_code, h.segment)
+                  h.item_code, h.segment, h.mrp
+             FROM mrp_history h
+            ORDER BY h.item_code, h.segment, h.effective_from DESC, h.id DESC
+         )
+         INSERT INTO mrp_history
+           (item_code, segment, mrp, effective_from, effective_to, source_file,
+            is_current, source_generation_id)
+         SELECT n.item_code, n.segment, n.mrp, n.effective_from, NULL,
+                'authoritative_products_api', true, $1::uuid
+           FROM newest n
+           LEFT JOIN previous p
+             ON p.item_code = n.item_code AND p.segment = n.segment
+          WHERE n.mrp IS NOT NULL
+            AND (p.item_code IS NULL OR p.mrp IS DISTINCT FROM n.mrp)
+            AND NOT EXISTS (
+              SELECT 1 FROM mrp_history h
+               WHERE h.item_code = n.item_code AND h.segment = n.segment
+                 AND h.effective_from = n.effective_from
+                 AND h.source_generation_id = $1::uuid
+            )`,
+        [generationId],
+      );
+      await client.query(
+        "UPDATE mrp_sync_generation SET is_active = false, retired_at = NOW() WHERE is_active = true",
+      );
+      await client.query(
+        "UPDATE mrp_sync_generation SET is_active = true, activated_at = NOW() WHERE generation_id = $1",
+        [generationId],
+      );
       await client.query(
         `INSERT INTO mrp_sync_status (singleton, last_success_at, last_error)
          VALUES (true, $1, NULL)

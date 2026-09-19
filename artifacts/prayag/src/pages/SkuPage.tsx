@@ -116,6 +116,7 @@ export default function SkuPage() {
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [augRows, setAugRows] = useState<Array<Record<string, unknown>>>([]);
   const [augTotal, setAugTotal] = useState(0);
+  const [augLoading, setAugLoading] = useState(false);
   const [augViewError, setAugViewError] = useState<string | null>(null);
 
   // Fetch state — drill
@@ -182,13 +183,28 @@ export default function SkuPage() {
   useEffect(() => {
     if (level !== "retailer") {
       setAugRows([]);
+      setAugTotal(0);
+      setAugViewError(null);
       return;
     }
-    fetch(`${BASE}/api/sku/retailer-aug26?limit=100&offset=0`)
-      .then((r) => r.ok ? r.json() as Promise<{ rows?: Array<Record<string, unknown>>; pagination?: { total: number } }> : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then((d) => { setAugRows(d.rows ?? []); setAugTotal(d.pagination?.total ?? 0); })
-      .catch((e: Error) => setAugViewError(e.message));
-  }, [level]);
+    let cancelled = false;
+    setAugLoading(true);
+    setAugViewError(null);
+    setAugRows([]);
+    fetch(`${BASE}/api/sku/retailer-aug26?fy=${encodeURIComponent(fy)}&limit=100&offset=0`)
+      .then((r) => r.ok
+        ? r.json() as Promise<{ rows?: Array<Record<string, unknown>>; pagination?: { total: number } }>
+        : r.json().then((body: { error?: string }) => Promise.reject(new Error(body.error ?? `HTTP ${r.status}`))))
+      .then((d) => {
+        if (!cancelled) {
+          setAugRows(d.rows ?? []);
+          setAugTotal(d.pagination?.total ?? 0);
+        }
+      })
+      .catch((e: Error) => { if (!cancelled) setAugViewError(e.message); })
+      .finally(() => { if (!cancelled) setAugLoading(false); });
+    return () => { cancelled = true; };
+  }, [level, fy]);
 
   // ── Fetch drill (single segment) ─────────────────────────────────────────────
 
@@ -300,11 +316,10 @@ export default function SkuPage() {
         ? { level, scope: "head", scopeId: scopeHead }
         : { level, scope: "company" },
     );
-    // Like-months restriction across every FY (Q1 vs Q1, YTD vs same months…).
-    if (period.monthFrom !== 1 || period.monthTo !== 12) {
-      params.set("monthFrom", String(period.monthFrom));
-      params.set("monthTo", String(period.monthTo));
-    }
+    // Prompt 120 requires the permanent July PSCode3 → August Product-Wise
+    // seam to be visible together, regardless of the global period selection.
+    params.set("monthFrom", "4");
+    params.set("monthTo", "5");
     fetch(`${BASE}/api/sku/trend?${params}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -695,8 +710,8 @@ export default function SkuPage() {
           level === "retailer" && overviewData?.sourceMetadata && (
             <div className="mb-4 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
               <p className="font-semibold">Monthly source metadata</p>
-              {Object.entries(overviewData.sourceMetadata).map(([month, entries]) => entries.map((meta) => (
-                <p key={`${month}-${meta.source}`}><b>{month}</b>: {meta.source} · {meta.valueBasis} · cutoff {meta.cutoff} · {meta.completeness} · {meta.included ? "included" : "excluded"} · identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}{meta.exclusionReason ? ` · ${meta.exclusionReason}` : ""}</p>
+              {Object.entries(overviewData.sourceMetadata).map(([month, entries]) => entries.map((meta, index) => (
+                <p key={`${month}-${meta.source}-${meta.valueBasis}-${index}`}><b>{month}</b>: {meta.source} · {meta.valueBasis} · cutoff {meta.cutoff} · {meta.completeness} · {meta.included ? "included" : "excluded"} · identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}{meta.exclusionReason ? ` · ${meta.exclusionReason}` : ""}</p>
               )))}
             </div>
           )
@@ -713,16 +728,26 @@ export default function SkuPage() {
         {section === "overview" && level === "retailer" && (
           <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/40">
             <h3 className="text-sm font-semibold">August 2026 · isolated retailer × item view</h3>
-            <p className="mt-1 text-xs text-muted-foreground">From Aug 2026: new CRM (Product-Wise), valued ex-GST on basic order value. Jul 2026 and earlier: PSCode3 net amount. Rupees are not compared across this change; counts are.</p>
-            <p className="text-xs text-muted-foreground">Value: Basic Order Value, ex-GST</p>
-            <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Rupees are not compared across this change; counts are.</p>
-            {augViewError ? <p className="mt-2 text-xs text-destructive">{augViewError}</p> : (
+            <p className="mt-1 text-xs text-muted-foreground">August uses individual Product-Wise CRM source rows, valued as Basic Order Value ex-GST. Each row keeps its own order date and observed discount; this isolated view does not combine July PSCode3 net amount with August.</p>
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Rupees are not added or compared across this change; counts are.</p>
+            {augLoading ? <p className="mt-3 text-xs text-muted-foreground">Loading August retailer items…</p>
+              : augViewError ? <p role="alert" className="mt-2 text-xs text-destructive">Could not load retailer items: {augViewError}</p>
+              : augRows.length === 0 ? <p className="mt-3 text-xs text-muted-foreground">No August Product-Wise retailer items were returned for FY {fy}.</p>
+              : (
               <div className="mt-3 max-h-64 overflow-auto">
                 <table className="w-full text-xs">
-                  <thead><tr className="border-b text-left"><th className="p-1">Retailer</th><th className="p-1">Product</th><th className="p-1">Qty</th><th className="p-1">Basic value (ex-GST)</th></tr></thead>
-                  <tbody>{augRows.slice(0, 100).map((row, index) => <tr key={`${String(row.dealer_id)}-${String(row.product_code)}-${index}`} className="border-b last:border-0"><td className="p-1">{String(row.customer_name ?? row.dealer_id ?? "")}</td><td className="p-1">{String(row.product_code ?? "")}</td><td className="p-1">{String(row.qty ?? "")}</td><td className="p-1">{String(row.basic_order_value ?? "")}</td></tr>)}</tbody>
+                  <thead><tr className="border-b text-left"><th className="p-1">Retailer / order</th><th className="p-1">Product / date</th><th className="p-1">Qty</th><th className="p-1">Basic ex-GST</th><th className="p-1">Discount off MRP</th><th className="p-1">Observed CRM discount</th><th className="p-1">Source / basis</th></tr></thead>
+                  <tbody>{augRows.slice(0, 100).map((row, index) => <tr key={`${String(row.id ?? row.order_id)}-${String(row.product_code)}-${index}`} className="border-b last:border-0">
+                    <td className="p-1"><span className="block">{String(row.customer_name ?? row.dealer_id ?? "")}</span><span className="text-muted-foreground">Order {String(row.order_id ?? "—")}</span></td>
+                    <td className="p-1"><span className="block">{String(row.product_code ?? "")}</span><span className="text-muted-foreground">{String(row.order_datetime ?? "—")}</span></td>
+                    <td className="p-1">{String(row.qty ?? "")}</td>
+                    <td className="p-1">{String(row.basic_order_value ?? "")}</td>
+                    <td className="p-1">{row.discount_mrp == null ? "—" : `${Number(row.discount_mrp).toFixed(2)}%`}<span className="block text-muted-foreground">MRP {row.mrp == null ? "—" : String(row.mrp)} × Qty</span></td>
+                    <td className="p-1">{row.discount_pct == null ? "—" : `${Number(row.discount_pct).toFixed(2)}%`}</td>
+                    <td className="p-1"><span className="block">{String(row.source ?? "productwise_xlsx")}</span><span className="text-muted-foreground">{String(row.value_basis ?? "basic_order_value_ex_gst")}</span></td>
+                  </tr>)}</tbody>
                 </table>
-                <p className="mt-2 text-muted-foreground">Showing first {augRows.length} retailer × item rows of {augTotal} total.</p>
+                <p className="mt-2 text-muted-foreground">Showing first {augRows.length} source rows of {augTotal} total; quantities and values are not cross-row aggregates.</p>
               </div>
             )}
           </div>

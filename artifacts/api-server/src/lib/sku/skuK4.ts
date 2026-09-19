@@ -405,6 +405,9 @@ export type SecondaryDiscountResult = {
     valueCoveragePct: number;
     unitMismatchRows: number;
     unitMismatchValue: number;
+    priceOutlierRows: number;
+    priceOutlierValue: number;
+    priceOutlierCodes: number;
     agreementWithin1Pct: { codes: number; value: number };
     agreementWithin5Pct: { codes: number; value: number };
     agreementOutside5Pct: { codes: number; value: number };
@@ -413,7 +416,7 @@ export type SecondaryDiscountResult = {
   };
   productWiseControls?: {
     mrpBasis: string;
-    rows: Array<{ orderId: string | null; productCode: string; transactionDate: string | Date; qty: number | null; basicOrderValueExGst: number; mrp: number | null; mrpSource: string; grossMrp: number | null; discountMrp: number | null; grossCrm: number | null; observedCrmDiscount: number | null; unitMismatch: boolean; discountDisagreement: boolean }>;
+    rows: Array<{ orderId: string | null; productCode: string; transactionDate: string | Date; qty: number | null; basicOrderValueExGst: number; mrp: number | null; mrpSource: string; grossMrp: number | null; discountMrp: number | null; grossCrm: number | null; observedCrmDiscount: number | null; unitMismatch: boolean; priceOutlier: boolean; discountDisagreement: boolean }>;
     controls: ProductWiseMrpControls;
   };
 };
@@ -525,7 +528,8 @@ export async function getSecondaryDiscountByCode(
           mrp: row.mrp, mrpSource: row.mrpSource,
           discountMrp: row.discountMrp, grossCrm: row.grossCrm,
           observedCrmDiscount: row.observedCrmDiscount,
-          unitMismatch: row.unitMismatch, discountDisagreement: row.discountDisagreement,
+          unitMismatch: row.unitMismatch, priceOutlier: row.priceOutlier,
+          discountDisagreement: row.discountDisagreement,
         })),
         controls: adapted.controls,
       },

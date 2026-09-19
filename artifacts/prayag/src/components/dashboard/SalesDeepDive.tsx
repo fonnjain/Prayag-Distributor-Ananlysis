@@ -637,6 +637,11 @@ function TeamSummaryPanel({ summary, dataReadAt }: { summary: TeamSummary; dataR
         </div>
       </div>
       <div className="rounded-lg border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+        <p className="mb-1 font-medium text-foreground">
+          Attribution basis: August secondary ordered is the distributor/head-month attribution;
+          Product-Wise order is the independently mapped member measure from
+          <code className="mx-1">secondary_order_line</code> Basic Order Value ex-GST.
+        </p>
         Product-Wise identity: {summary.productWiseMapping?.mappedCount ?? 0} mapped · {summary.productWiseMapping?.unmappedCount ?? 0} unmapped
         {summary.productWiseMapping && Object.keys(summary.productWiseMapping.reasons).length > 0 && (
           <span className="ml-2">({Object.entries(summary.productWiseMapping.reasons).map(([reason, count]) => `${reason}: ${count}`).join(" · ")})</span>
@@ -2841,8 +2846,8 @@ export default function SalesDeepDive() {
 
             <SectionLabel>{isFyClosed(fy) ? "Performance (Full Year)" : "Performance (YTD)"}</SectionLabel>
             <Tile label="Order Booking (Retailer / Party)" value={fmtRs(kpis.orderBooking)} sub="NET = Sub Total" accent />
-            <Tile label="Product-Wise order value (ex-GST)" value={fmtRs(kpis.productWiseOrderValue)} sub="secondary_order_line basic_order_value; separate measure" />
-            <Tile label="August secondary ordered" value={fmtRs(kpis.augustSecondaryHeadOrdered)} sub="secondary_head_month; separate measure" />
+            <Tile label="Product-Wise order value (ex-GST)" value={fmtRs(kpis.productWiseOrderValue)} sub="Member mapping · secondary_order_line basic_order_value · separate measure" />
+            <Tile label="August secondary ordered" value={fmtRs(kpis.augustSecondaryHeadOrdered)} sub="Distributor/head attribution · secondary_head_month · separate measure" />
             <Tile label="Direct Dealers Order" value={fmtRs(kpis.directDealersOrder)} sub="Kept separate from party OB" />
             <Tile label="Sales Received" value={fmtRs(kpis.sale)} accent />
             <Tile label="Sale Achievement" value={fmtPct(kpis.achievementSale)} sub="Sale / Total Target (to date)" />

@@ -6435,6 +6435,60 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
       END $verify$;
     `,
   },
+  {
+    id: "120_immutable_mrp_generations_and_source_history",
+    sql: `
+      -- A generation is an immutable source snapshot.  Activation metadata is
+      -- the only mutable part; source rows themselves are append-only.
+      ALTER TABLE mrp_sync_generation
+        ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
+      UPDATE mrp_sync_generation
+         SET activated_at = COALESCE(activated_at, created_at)
+       WHERE activated_at IS NULL;
+
+      ALTER TABLE mrp_history
+        ADD COLUMN IF NOT EXISTS source_generation_id UUID
+          REFERENCES mrp_sync_generation(generation_id);
+      CREATE INDEX IF NOT EXISTS mrp_history_source_generation_idx
+        ON mrp_history (source_generation_id);
+
+      CREATE OR REPLACE FUNCTION reject_mrp_generation_delete()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF TG_OP = 'DELETE' THEN
+          RAISE EXCEPTION 'MRP generations are immutable and cannot be deleted';
+        END IF;
+        IF OLD.source_fetched_at IS DISTINCT FROM NEW.source_fetched_at
+           OR OLD.source_row_count IS DISTINCT FROM NEW.source_row_count
+           OR OLD.checksum IS DISTINCT FROM NEW.checksum
+           OR OLD.provenance_complete IS DISTINCT FROM NEW.provenance_complete
+           OR OLD.created_at IS DISTINCT FROM NEW.created_at
+           OR OLD.generation_id IS DISTINCT FROM NEW.generation_id THEN
+          RAISE EXCEPTION 'MRP generation source fields are immutable';
+        END IF;
+        RETURN NEW;
+      END $$;
+      DROP TRIGGER IF EXISTS mrp_generation_immutable ON mrp_sync_generation;
+      CREATE TRIGGER mrp_generation_immutable
+        BEFORE UPDATE OR DELETE ON mrp_sync_generation
+        FOR EACH ROW EXECUTE FUNCTION reject_mrp_generation_delete();
+
+      CREATE OR REPLACE FUNCTION reject_mrp_snapshot_mutation()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'MRP snapshot rows are immutable';
+      END $$;
+      DROP TRIGGER IF EXISTS mrp_synced_immutable ON mrp_synced;
+      CREATE TRIGGER mrp_synced_immutable
+        BEFORE UPDATE OR DELETE ON mrp_synced
+        FOR EACH ROW EXECUTE FUNCTION reject_mrp_snapshot_mutation();
+      DROP TRIGGER IF EXISTS mrp_synced_division_immutable ON mrp_synced_division;
+      CREATE TRIGGER mrp_synced_division_immutable
+        BEFORE UPDATE OR DELETE ON mrp_synced_division
+        FOR EACH ROW EXECUTE FUNCTION reject_mrp_snapshot_mutation();
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

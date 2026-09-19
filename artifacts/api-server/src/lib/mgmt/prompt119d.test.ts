@@ -49,6 +49,25 @@ describe("Prompt 119 D Product-Wise identity controls", () => {
     expect(result.reasonCounts.employee_code_absent).toBe(1);
   });
 
+  it("uses a unique HR roster name to resolve only a matching ambiguous registry candidate", () => {
+    const result = resolveProductWiseRows([
+      { employee_id: "DUP", sales_user_name: "Unrelated Name", basic_order_value: 90 },
+    ], people, new Map([["DUP", "Collision Two"]]));
+    expect(result.values.get("collisiontwo")).toBe(90);
+    expect(result.mappedCount).toBe(1);
+    expect(result.unmappedCount).toBe(0);
+    expect(result.reasonCounts.employee_code_hr_deterministic).toBe(1);
+  });
+
+  it("does not rescue an ambiguous code when HR has no unique matching candidate", () => {
+    const result = resolveProductWiseRows([
+      { employee_id: "DUP", sales_user_name: "Collision One", basic_order_value: 90 },
+    ], people, new Map([["DUP", "Not In Registry"]]));
+    expect(result.mappedCount).toBe(0);
+    expect(result.unmappedCount).toBe(1);
+    expect(result.reasonCounts.employee_code_ambiguous).toBe(1);
+  });
+
   it("preserves separate measures and labels Product-Wise ex-GST in workbook", async () => {
     const kpis = {
       stateHead: "Head", name: "Alice Code", normKey: "alicecode",

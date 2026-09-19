@@ -63,9 +63,10 @@ export type SecondaryDiscount = {
   verification: SecondaryVerification;
   productWiseControls?: {
     mrpBasis: string;
-    rows: Array<{ orderId?: string | null; productCode: string; transactionDate?: string; qty: number | null; basicOrderValueExGst?: number; mrp?: number | null; mrpSource?: string; grossMrp: number | null; discountMrp: number | null; grossCrm: number | null; observedCrmDiscount: number | null; unitMismatch: boolean; discountDisagreement: boolean }>;
+    rows: Array<{ orderId?: string | null; productCode: string; transactionDate?: string; qty: number | null; basicOrderValueExGst?: number; mrp?: number | null; mrpSource?: string; grossMrp: number | null; discountMrp: number | null; grossCrm: number | null; observedCrmDiscount: number | null; unitMismatch: boolean; priceOutlier: boolean; discountDisagreement: boolean }>;
     controls: {
       unitMismatchRows: number; unitMismatchCodes: number; unitMismatchValue: number;
+      priceOutlierRows: number; priceOutlierCodes: number; priceOutlierValue: number;
       agreementWithin1Pct: { codes: number; value: number };
       agreementWithin5Pct: { codes: number; value: number };
       agreementOutside5Pct: { codes: number; value: number };
@@ -240,14 +241,15 @@ export default function SkuDiscounts({ fy, channel, monthFrom, monthTo, periodLa
             {secondary.productWiseControls.controls.agreementWithin1Pct.codes} codes within 1% ·{" "}
             {secondary.productWiseControls.controls.agreementWithin5Pct.codes} codes within 1–5% ·{" "}
             {secondary.productWiseControls.controls.agreementOutside5Pct.codes} outside 5% ·{" "}
-            {secondary.productWiseControls.controls.unitMismatchCodes} UNIT_MISMATCH codes ({secondary.productWiseControls.controls.unitMismatchRows} rows) excluded.
+             {secondary.productWiseControls.controls.unitMismatchCodes} UNIT_MISMATCH codes ({secondary.productWiseControls.controls.unitMismatchRows} rows) excluded;{" "}
+             {secondary.productWiseControls.controls.priceOutlierCodes} PRICE_OUTLIER codes ({secondary.productWiseControls.controls.priceOutlierRows} rows) retained.
             {secondary.productWiseControls.controls.disagreementRows > 0 && (
               <> {secondary.productWiseControls.controls.disagreementRows} rows differ from observed CRM discount by &gt;2 points.</>
             )}
-            {secondary.productWiseControls.rows.filter((row) => row.discountDisagreement || row.unitMismatch).slice(0, 10).map((row) => (
+             {secondary.productWiseControls.rows.filter((row) => row.discountDisagreement || row.unitMismatch || row.priceOutlier).slice(0, 10).map((row) => (
               <div className="mt-1" key={`${row.productCode}-${row.qty}`}>
                 <span className="font-mono">{row.productCode}</span>:{" "}
-                {row.unitMismatch ? "UNIT_MISMATCH (excluded)" : "discount disagreement"} · discount_mrp{" "}
+                 {row.unitMismatch ? "UNIT_MISMATCH (excluded)" : row.priceOutlier ? "PRICE_OUTLIER (retained)" : "discount disagreement"} · discount_mrp{" "}
                 {row.discountMrp == null ? "—" : `${trunc2(row.discountMrp)}%`}
                 {" "}· observed CRM{" "}
                 {row.observedCrmDiscount == null ? "—" : `${trunc2(row.observedCrmDiscount)}%`}

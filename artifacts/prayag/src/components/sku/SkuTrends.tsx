@@ -120,6 +120,9 @@ export default function SkuTrends({ data }: Props) {
   const tickColor = isDark ? "#98999C" : "#71717a";
 
   const { fys, fyMonths, everSold, monthly, fyTotals, fyNetTotals } = data;
+  const julAugSeam = data.level === "retailer" &&
+    monthly.some((row) => row.fyMonth === "Jul-26") &&
+    monthly.some((row) => row.fyMonth === "Aug-26");
 
   // Rank segments by cumulative net (descending)
   const segmentsByNet = useMemo(() => {
@@ -238,6 +241,20 @@ export default function SkuTrends({ data }: Props) {
 
   return (
     <div className="space-y-6">
+      {julAugSeam && (
+        <div
+          className="rounded-md border border-amber-300/60 bg-amber-50/70 p-3 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-100"
+          data-testid="sku-trends-jul-aug-seam"
+        >
+          <p className="font-semibold">Jul-26 → Aug-26 source seam</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className="rounded border border-amber-400/60 px-2 py-1 font-medium">Jul-26 · PSCode3 net amount</span>
+            <span aria-label="source seam marker" className="font-bold text-amber-700 dark:text-amber-300">│ source changes │</span>
+            <span className="rounded border border-amber-400/60 px-2 py-1 font-medium">Aug-26 · Product-Wise ex-GST</span>
+          </div>
+          <p className="mt-2 font-medium">Rupees are not added or compared across this change; counts are.</p>
+        </div>
+      )}
       {data.level === "retailer" && (Object.keys(data.sourceMetadata ?? {}).length > 0 || Object.keys(data.excludedMonths ?? {}).length > 0) && (
         <div className="rounded-md border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
           <p className="font-semibold">Monthly source basis</p>

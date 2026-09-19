@@ -482,6 +482,8 @@ type CsvHrResult = {
   ambiguousNameKeys: Set<string>;
   /** normSecKey → raw display name from CSV (used for closest-candidate labels). */
   rawNames: Map<string, string>;
+  /** Normalized employee code → distinct HR names; used only for deterministic identity resolution. */
+  employeeCodeNames: Map<string, string[]>;
   /** Roster-health facts for the Organization page (see RosterHealth). */
   health: RosterHealth;
 };
@@ -609,6 +611,7 @@ function loadCsvHrEnrichment(): CsvHrResult | null {
     // Compound-keyed rows: needed only for roster-health aggregation.
     const identityRows = new Map<string, RosterCsvRow>();
     const csvRows: RosterCsvRow[] = [];
+    const employeeCodeNames = new Map<string, Set<string>>();
 
     const dataRows = rows.slice(1).filter((f) => (f[cName]?.trim() ?? "") !== "");
     for (const f of dataRows) {
@@ -621,6 +624,12 @@ function loadCsvHrEnrichment(): CsvHrResult | null {
       const isActive = statusRaw.toLowerCase() === "active";
       const activeLeft = isActive ? "Active" : "LEFT";
       const empCode = cEmp >= 0 ? (f[cEmp]?.trim() || null) : null;
+      if (empCode) {
+        const codeKey = empCode.replace(/^PRG-/i, "").trim().toUpperCase();
+        const names = employeeCodeNames.get(codeKey) ?? new Set<string>();
+        names.add(name);
+        employeeCodeNames.set(codeKey, names);
+      }
       const ctcRaw = cCtc >= 0 ? parseFloat((f[cCtc] ?? "").replace(/[,\s]/g, "")) : NaN;
       const monthlyCtc = Number.isFinite(ctcRaw) && ctcRaw > 0 ? ctcRaw : null;
 
@@ -687,12 +696,25 @@ function loadCsvHrEnrichment(): CsvHrResult | null {
       "hr_roster.csv loaded (Sales_User_List — HR SFA system; compound identity key)",
     );
     return map.size > 0
-      ? { enrichment: map, byIdentity, ambiguousNameKeys, rawNames, health }
+      ? {
+          enrichment: map, byIdentity, ambiguousNameKeys, rawNames, health,
+          employeeCodeNames: new Map([...employeeCodeNames].map(([code, names]) => [code, [...names]])),
+        }
       : null;
   } catch (err) {
     logger.warn({ err }, "hr_roster.csv unreadable; emp code / designation unavailable");
     return null;
   }
+}
+
+/** HR employee-code evidence for deterministic, auditable identity resolution. */
+export function getHrRosterUniqueEmployeeCodeNames(): Map<string, string> {
+  const result = loadCsvHrEnrichment();
+  const unique = new Map<string, string>();
+  for (const [code, names] of result?.employeeCodeNames ?? []) {
+    if (names.length === 1) unique.set(code, names[0]);
+  }
+  return unique;
 }
 
 /**

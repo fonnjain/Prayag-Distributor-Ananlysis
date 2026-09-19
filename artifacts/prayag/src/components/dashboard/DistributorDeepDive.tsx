@@ -2537,6 +2537,10 @@ export default function DistributorDeepDive() {
           </span>
           <span className="text-muted-foreground"> · FY {fy} · Party / secondary channel</span>
           <div className="text-xs text-muted-foreground mt-0.5">{dir.basisLabel}</div>
+           <div className="text-xs text-muted-foreground mt-0.5">
+             Attribution basis: Distributor Deep Dive values are distributor/customer-assignment
+             secondary booking; they are not the Product-Wise member-mapping measure shown in Sales Deep Dive.
+           </div>
           {stateHead && (
             <div className="text-xs text-muted-foreground mt-0.5">
               Head detail below shows {stateHead}'s full team figures. The geography and

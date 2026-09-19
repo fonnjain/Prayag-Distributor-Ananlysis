@@ -122,6 +122,12 @@ use stable resolution codes and constrained relation types.
 
 ## 12. Evidence discipline
 
+**Unit and outlier tests are row-level. One bad row never excludes a code.**
+For Product-Wise MRP controls, a row is `UNIT_MISMATCH` only when its implied
+MRP / effective catalogue MRP ratio is outside 0.5 through 2.0 inclusive.
+Rows more than 5% from their code's modal implied MRP are `PRICE_OUTLIER`
+controls, but remain priced and included.
+
 Unpriced code counts differ by **basis**. Exact-code absence and
 resolver-unresolved are different measures and must never be compared without
 stating which is which. The accepted P021 comparison was 814

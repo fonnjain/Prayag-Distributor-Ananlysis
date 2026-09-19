@@ -23,6 +23,8 @@ export type ProductWiseMrpResult = ProductWiseDiscountRow & {
   included: boolean;
   exclusionReason: "missing_mrp" | "invalid_discount" | "non_positive_denominator" | "unit_mismatch" | null;
   unitMismatch: boolean;
+  /** A priced row more than 5% from its code's modal implied MRP. */
+  priceOutlier: boolean;
   discountDisagreement: boolean;
 };
 
@@ -39,6 +41,10 @@ export type ProductWiseMrpControls = {
   unitMismatchValue: number;
   unitMismatchCodes: number;
   unitMismatchCodeList: string[];
+  priceOutlierRows: number;
+  priceOutlierValue: number;
+  priceOutlierCodes: number;
+  priceOutlierCodeList: string[];
   agreementWithin1Pct: { codes: number; value: number };
   agreementWithin5Pct: { codes: number; value: number };
   agreementOutside5Pct: { codes: number; value: number };
@@ -104,14 +110,24 @@ export function applyProductWiseMrp(
       impliedByCode.set(code, [...(impliedByCode.get(code) ?? []), value.impliedMrp]);
     }
   }
-  const unitMismatchCodes = new Set<string>();
+  const modalByCode = new Map<string, number>();
   for (const [code, values] of impliedByCode) {
-    const min = Math.min(...values), max = Math.max(...values);
-    if (min > 0 && max / min > 1.02) unitMismatchCodes.add(code);
+    const frequencies = new Map<number, number>();
+    for (const value of values) {
+      const rounded = Math.round(value * 100) / 100;
+      frequencies.set(rounded, (frequencies.get(rounded) ?? 0) + 1);
+    }
+    const ordered = [...frequencies.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+    if (ordered[0]) modalByCode.set(code, ordered[0][0]);
   }
   const rows = preliminary.map(({ row, mrp, mrpSource, denominator, qty, grossCrm, impliedMrp }) => {
+    const code = normaliseMrpCode(row.productCode);
+    const modalImpliedMrp = modalByCode.get(code) ?? null;
+    const priceOutlier = impliedMrp != null && modalImpliedMrp != null && modalImpliedMrp > 0
+      ? Math.abs(impliedMrp / modalImpliedMrp - 1) > 0.05 : false;
     let exclusionReason: ProductWiseMrpResult["exclusionReason"] = null;
-    if (unitMismatchCodes.has(normaliseMrpCode(row.productCode))) exclusionReason = "unit_mismatch";
+    const ratio = mrp != null && impliedMrp != null && mrp > 0 ? impliedMrp / mrp : null;
+    if (ratio != null && (ratio < 0.5 || ratio > 2)) exclusionReason = "unit_mismatch";
     else if (mrp == null) exclusionReason = "missing_mrp";
     else if (denominator == null || !Number.isFinite(denominator)) exclusionReason = "invalid_discount";
     else if (denominator <= 0) exclusionReason = "non_positive_denominator";
@@ -119,13 +135,13 @@ export function applyProductWiseMrp(
     const grossMrp = included && qty > 0 ? mrp! * qty : null;
     const discountMrp = grossMrp != null && grossMrp > 0
       ? (1 - row.basicOrderValueExGst / grossMrp) * 100 : null;
-    const ratio = mrp != null && impliedMrp != null && mrp > 0 ? impliedMrp / mrp : null;
     const agreementPct = ratio == null ? null : Math.abs(ratio - 1) * 100;
     return {
       ...row, mrp, mrpSource, grossMrp, discountMrp, grossCrm,
       observedCrmDiscount: row.discountPct,
       included, exclusionReason,
       unitMismatch: exclusionReason === "unit_mismatch",
+      priceOutlier,
       discountDisagreement: discountMrp != null && row.discountPct != null
         ? Math.abs(discountMrp - row.discountPct) > 2 : false,
       _agreementPct: agreementPct,
@@ -148,11 +164,20 @@ export function applyProductWiseMrp(
       nonPositiveDenominatorRows: rows.filter((row) => row.exclusionReason === "non_positive_denominator").length,
       nonPositiveDenominatorValue: rows.filter((row) => row.exclusionReason === "non_positive_denominator")
         .reduce((sum, row) => sum + row.basicOrderValueExGst, 0),
-      unitMismatchRows: rows.filter((row) => row.unitMismatch).length,
+       unitMismatchRows: rows.filter((row) => row.unitMismatch).length,
       unitMismatchValue: rows.filter((row) => row.unitMismatch)
         .reduce((sum, row) => sum + row.basicOrderValueExGst, 0),
-      unitMismatchCodes: unitMismatchCodes.size,
-      unitMismatchCodeList: [...unitMismatchCodes].sort(),
+       unitMismatchCodes: new Set(rows.filter((row) => row.unitMismatch)
+         .map((row) => normaliseMrpCode(row.productCode))).size,
+       unitMismatchCodeList: [...new Set(rows.filter((row) => row.unitMismatch)
+         .map((row) => normaliseMrpCode(row.productCode)))].sort(),
+       priceOutlierRows: rows.filter((row) => row.priceOutlier).length,
+       priceOutlierValue: rows.filter((row) => row.priceOutlier)
+         .reduce((sum, row) => sum + row.basicOrderValueExGst, 0),
+       priceOutlierCodes: new Set(rows.filter((row) => row.priceOutlier)
+         .map((row) => normaliseMrpCode(row.productCode))).size,
+       priceOutlierCodeList: [...new Set(rows.filter((row) => row.priceOutlier)
+         .map((row) => normaliseMrpCode(row.productCode)))].sort(),
       agreementWithin1Pct: agreementControl(rows, 0, 1),
       agreementWithin5Pct: agreementControl(rows, 1, 5),
       agreementOutside5Pct: agreementControl(rows, 5, Infinity, true),
@@ -215,14 +240,10 @@ export async function adaptProductWiseMrp(rows: ProductWiseDiscountRow[]): Promi
     return applyProductWiseMrp([], new Map());
   }
   const datedRows = rows.map((row) => ({ row, date: dateValue(row.transactionDate) }));
-  const currentGeneration = await pool.query<{ generation_id: string }>(
-    "SELECT generation_id::text FROM mrp_sync_generation WHERE is_active = TRUE LIMIT 1",
-  );
-  const generation = currentGeneration.rows[0]?.generation_id ?? null;
   const lookup = new Map<string, number | null>();
-  // Effective history is authoritative for every completed month, including
-  // months in the currently open FY. The active synced catalogue is only the
-  // fallback for a date for which history has no covering row.
+  // Effective history is authoritative. If a row has no history, use the
+  // generation that was already active on its transaction date; never use a
+  // later refreshed catalogue for a closed row.
   const requests = [...new Map(datedRows.map(({ row, date }) => [
       productWiseMrpLookupKey(row.productCode, date),
       { productCode: normaliseMrpCode(row.productCode), date: date.toISOString().slice(0, 10) },
@@ -233,9 +254,11 @@ export async function adaptProductWiseMrp(rows: ProductWiseDiscountRow[]): Promi
       params.push(productCode, date);
       return `($${index * 2 + 1}::text, $${index * 2 + 2}::date)`;
     }).join(", ");
-    const result = await pool.query<{ item_code: string; tx_date: string; mrp: string | null }>(
+     const result = await pool.query<{ item_code: string; tx_date: string; mrp: string | null; source: string }>(
       `WITH requested(item_code, tx_date) AS (VALUES ${valuesSql})
-       SELECT requested.item_code, requested.tx_date::text, effective.mrp::text
+        SELECT requested.item_code, requested.tx_date::text,
+               COALESCE(effective.mrp, synced.mrp)::text AS mrp,
+               CASE WHEN effective.mrp IS NOT NULL THEN 'history' ELSE 'synced' END AS source
          FROM requested
          LEFT JOIN LATERAL (
            SELECT h.mrp
@@ -244,33 +267,26 @@ export async function adaptProductWiseMrp(rows: ProductWiseDiscountRow[]): Promi
               AND h.mrp IS NOT NULL
               AND h.effective_from <= requested.tx_date
               AND (h.effective_to IS NULL OR h.effective_to > requested.tx_date)
-            ORDER BY h.effective_from DESC
+             ORDER BY h.effective_from DESC, h.id DESC
             LIMIT 1
-         ) effective ON TRUE`,
+           ) effective ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT s.mrp
+              FROM mrp_synced s
+              JOIN mrp_sync_generation g ON g.generation_id = s.generation_id
+             WHERE effective.mrp IS NULL
+               AND UPPER(BTRIM(s.item_code)) = requested.item_code
+               AND g.activated_at <= requested.tx_date::date + INTERVAL '1 day'
+             ORDER BY g.activated_at DESC
+             LIMIT 1
+          ) synced ON TRUE`,
       params,
     );
     result.rows.forEach((row) => {
-      if (row.mrp != null) lookup.set(productWiseMrpLookupKey(row.item_code, row.tx_date), Number(row.mrp));
-    });
-    if (generation) {
-      const codes = [...new Set(requests.map(({ productCode }) => productCode))];
-      const synced = await pool.query<{ item_code: string; mrp: string | null }>(
-        `SELECT item_code, mrp::text FROM mrp_synced
-         WHERE generation_id = $1 AND UPPER(BTRIM(item_code)) = ANY($2::text[])`,
-        [generation, codes],
-      );
-      const currentByCode = new Map(synced.rows.map((row) => [
-        normaliseMrpCode(row.item_code), row.mrp == null ? null : Number(row.mrp),
-      ]));
-      for (const { productCode, date } of requests) {
-        const key = productWiseMrpLookupKey(productCode, date);
-        if (!lookup.has(key)) {
-          const value = currentByCode.get(productCode) ?? null;
-          lookup.set(key, value);
-          if (value != null) lookup.set(`${key}\u0000source`, -1);
-        }
-      }
-    }
+       const key = productWiseMrpLookupKey(row.item_code, row.tx_date);
+       lookup.set(key, row.mrp == null ? null : Number(row.mrp));
+       if (row.mrp != null && row.source === "synced") lookup.set(`${key}\u0000source`, -1);
+     });
   }
   return applyProductWiseMrp(rows, lookup);
 }

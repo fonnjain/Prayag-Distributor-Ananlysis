@@ -430,10 +430,8 @@ export async function loadMrpFiles(): Promise<LoadStats> {
   try {
     await client.query("BEGIN");
 
-    // Delete history first (FK constraint), then master.
-    await client.query("DELETE FROM mrp_history");
-    await client.query("DELETE FROM mrp_master");
-
+    // Master and history are append-only. A reload must not erase the audit
+    // trail or cascade-delete effective prices already used by closed rows.
     // Insert master rows in batches of 500.
     const BATCH = 500;
     for (let i = 0; i < masterRows.length; i += BATCH) {
@@ -453,8 +451,12 @@ export async function loadMrpFiles(): Promise<LoadStats> {
       await client.query(
         `INSERT INTO mrp_master
            (item_code, item_name, segment, series, packing, is_ambiguous_code)
-         VALUES ${vals.join(",")}
-         ON CONFLICT (item_code, segment) DO NOTHING`,
+          VALUES ${vals.join(",")}
+          ON CONFLICT (item_code, segment) DO UPDATE SET
+            item_name = EXCLUDED.item_name,
+            series = EXCLUDED.series,
+            packing = EXCLUDED.packing,
+            is_ambiguous_code = EXCLUDED.is_ambiguous_code`,
         params,
       );
     }
@@ -475,12 +477,25 @@ export async function loadMrpFiles(): Promise<LoadStats> {
         r.sourceFile,
         r.isCurrent,
       ]);
-      await client.query(
-        `INSERT INTO mrp_history
-           (item_code, segment, mrp, effective_from, effective_to, source_file, is_current)
-         VALUES ${vals.join(",")}`,
-        params,
-      );
+       await client.query(
+         `INSERT INTO mrp_history
+            (item_code, segment, mrp, effective_from, effective_to, source_file, is_current)
+          SELECT v.item_code, v.segment, v.mrp, v.effective_from, v.effective_to,
+                 v.source_file, v.is_current
+            FROM (VALUES ${vals.join(",")}) AS v
+              (item_code, segment, mrp, effective_from, effective_to, source_file, is_current)
+           WHERE NOT EXISTS (
+             SELECT 1 FROM mrp_history h
+              WHERE h.item_code = v.item_code
+                AND h.segment = v.segment
+                AND h.mrp = v.mrp
+                AND h.effective_from = v.effective_from
+                AND h.effective_to IS NOT DISTINCT FROM v.effective_to
+                AND h.source_file = v.source_file
+                AND h.is_current = v.is_current
+           )`,
+         params,
+       );
     }
 
     await client.query("COMMIT");
