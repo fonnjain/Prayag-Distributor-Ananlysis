@@ -169,7 +169,12 @@ export type SkuSourceMetadata = {
   month: string;
   cutoff: string;
   completeness: "complete" | "partial" | "unavailable";
+  /** Share of source rows carrying a stable retailer identifier. */
   identityCoverage: number | null;
+  /** Share of source value carried by rows with a stable retailer identifier. */
+  identityValueCoverage?: number | null;
+  identifiedValue?: number | null;
+  totalValue?: number | null;
   included: boolean;
   exclusionReason?: string;
 };
@@ -967,10 +972,14 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
     })));
     const sourceRows = await db.execute<{
       month_label: string; source: string; rows: string; identified: string;
+      identified_value: string | null; total_value: string | null;
       cutoff: string | null; state_status: string | null;
     }>(sql`
       SELECT sku.month_label, sku.source, COUNT(*)::text AS rows,
              COUNT(*) FILTER (WHERE sku.dealer_id IS NOT NULL OR sku.retailer_id IS NOT NULL)::text AS identified,
+              SUM(COALESCE(sku.net_amount, 0)::numeric) FILTER
+                (WHERE sku.dealer_id IS NOT NULL OR sku.retailer_id IS NOT NULL)::text AS identified_value,
+              SUM(COALESCE(sku.net_amount, 0)::numeric)::text AS total_value,
              MAX(COALESCE(state.closed_at, state.verified_at, state.uploaded_at, sku.ingested_at))::text AS cutoff,
              MAX(state.status) AS state_status
         FROM secondary_sku_line sku
@@ -980,11 +989,15 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
     `);
     const productSourceRows = await db.execute<{
       month_label: string; rows: string; identified: string;
+      identified_value: string | null; total_value: string | null;
       cutoff: string | null; completeness: string | null;
     }>(sql`
       SELECT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY') AS month_label,
              COUNT(*)::text AS rows,
              COUNT(*) FILTER (WHERE sol.dealer_id IS NOT NULL)::text AS identified,
+              SUM(COALESCE(sol.basic_order_value, 0)::numeric) FILTER
+                (WHERE sol.dealer_id IS NOT NULL)::text AS identified_value,
+              SUM(COALESCE(sol.basic_order_value, 0)::numeric)::text AS total_value,
              MAX(sol.loaded_at)::text AS cutoff,
              MAX(sol.period_completeness) AS completeness
         FROM secondary_order_line sol
@@ -992,10 +1005,13 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
        GROUP BY to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')
     `).catch(() => ({ rows: [] as Array<{
       month_label: string; rows: string; identified: string;
+      identified_value: string | null; total_value: string | null;
       cutoff: string | null; completeness: string | null;
     }> }));
     for (const row of sourceRows.rows) {
       const rows = Number(row.rows);
+      const identifiedValue = Number(row.identified_value ?? 0);
+      const totalValue = Number(row.total_value ?? 0);
       const meta: SkuSourceMetadata = {
         source: row.source === "productwise_xlsx" ? "Product-Wise CRM order booking" : "PSCode3 secondary SKU register",
         valueBasis: row.source === "productwise_xlsx" ? "Basic Order Value, ex-GST" : "SKU NET (Sub Total)",
@@ -1003,6 +1019,9 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
         cutoff: row.cutoff ?? "No verified cutoff recorded",
         completeness: row.source === "productwise_xlsx" && row.state_status !== "frozen_verified" ? "partial" : "complete",
         identityCoverage: rows ? Number(row.identified) / rows : null,
+        identityValueCoverage: totalValue ? identifiedValue / totalValue : null,
+        identifiedValue,
+        totalValue,
         included: row.source !== "productwise_xlsx",
         exclusionReason: row.source === "productwise_xlsx"
           ? "Permanently excluded from cross-source trends: Product-Wise and PSCode3 have no overlapping CRM month."
@@ -1015,6 +1034,8 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
     }
     for (const row of productSourceRows.rows) {
       const rows = Number(row.rows);
+      const identifiedValue = Number(row.identified_value ?? 0);
+      const totalValue = Number(row.total_value ?? 0);
       sourceMetadata[row.month_label] = [
         ...(sourceMetadata[row.month_label] ?? []),
         {
@@ -1025,6 +1046,9 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
           cutoff: row.cutoff ?? "No source cutoff recorded",
           completeness: row.completeness === "complete" ? "complete" : "partial",
           identityCoverage: rows ? Number(row.identified) / rows : null,
+          identityValueCoverage: totalValue ? identifiedValue / totalValue : null,
+          identifiedValue,
+          totalValue,
           included: false,
           exclusionReason: "Rupees are not comparable with PSCode3 across the permanent source seam; this is a count/month point only.",
         },

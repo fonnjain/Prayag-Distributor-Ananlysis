@@ -11,7 +11,7 @@ import { trunc2 } from "@/lib/trunc";
 import { useState, useMemo } from "react";
 import {
   LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { useTheme } from "next-themes";
@@ -68,6 +68,10 @@ export type TrendData = {
     cutoff: string;
     completeness: "complete" | "partial" | "unavailable";
     identityCoverage: number | null;
+    identityValueCoverage?: number | null;
+    identifiedValue?: number | null;
+    totalValue?: number | null;
+    value_basis?: string;
     included: boolean;
     exclusionReason?: string;
   }[]>;
@@ -111,6 +115,17 @@ function xTickInterval(count: number): number {
   return 11;
 }
 
+const MONTH_NUMBER: Record<string, number> = {
+  Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+  Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
+};
+
+export function chronologicalMonthKey(label: string): number {
+  const match = label.match(/^([A-Z][a-z]{2})-(\d{2})$/);
+  if (!match || MONTH_NUMBER[match[1]] == null) return Number.MAX_SAFE_INTEGER;
+  return (2000 + Number(match[2])) * 12 + MONTH_NUMBER[match[1]];
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SkuTrends({ data }: Props) {
@@ -123,6 +138,23 @@ export default function SkuTrends({ data }: Props) {
   const julAugSeam = data.level === "retailer" &&
     monthly.some((row) => row.fyMonth === "Jul-26") &&
     monthly.some((row) => row.fyMonth === "Aug-26");
+  const sourceEntries = useMemo(
+    () => Object.entries(data.sourceMetadata ?? {})
+      .sort(([a], [b]) => chronologicalMonthKey(a) - chronologicalMonthKey(b))
+      .flatMap(([month, entries]) => entries.map((meta) => ({ month, meta }))),
+    [data.sourceMetadata],
+  );
+  const identifiedTrendValue = sourceEntries.reduce(
+    (sum, { meta }) => sum + (meta.included ? Number(meta.identifiedValue ?? 0) : 0),
+    0,
+  );
+  const totalTrendValue = sourceEntries.reduce(
+    (sum, { meta }) => sum + (meta.included ? Number(meta.totalValue ?? 0) : 0),
+    0,
+  );
+  const trendValueIdentityCoverage = totalTrendValue > 0
+    ? identifiedTrendValue / totalTrendValue
+    : null;
 
   // Rank segments by cumulative net (descending)
   const segmentsByNet = useMemo(() => {
@@ -256,17 +288,30 @@ export default function SkuTrends({ data }: Props) {
         </div>
       )}
       {data.level === "retailer" && (Object.keys(data.sourceMetadata ?? {}).length > 0 || Object.keys(data.excludedMonths ?? {}).length > 0) && (
-        <div className="rounded-md border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
-          <p className="font-semibold">Monthly source basis</p>
-          <div className="mt-1 space-y-1">
-            {Object.entries(data.sourceMetadata ?? {}).flatMap(([month, entries]) => entries.map((meta) => (
-               <p key={`${month}-${meta.source}`}><b>{month}</b>: {meta.source} · {meta.valueBasis} · cutoff {meta.cutoff} · {meta.completeness} · {meta.included ? "included" : "excluded"} · identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}{meta.exclusionReason ? ` · ${meta.exclusionReason}` : ""}</p>
-            )))}
-            {Object.entries(data.excludedMonths ?? {}).map(([month, reason]) => (
-              <p key={month} className="font-medium"><b>{month}</b>: excluded — {reason}</p>
+        <details className="rounded-md border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+          <summary className="cursor-pointer font-semibold">Source details</summary>
+          <div className="mt-2 space-y-1">
+            <p>
+              Identity coverage is the share of source rows carrying a stable retailer ID; it is not a share of distinct retailers.
+              {trendValueIdentityCoverage == null
+                ? " The value coverage for the included multi-year trend is unavailable."
+                : ` The included multi-year retailer trend is based on ${(trendValueIdentityCoverage * 100).toFixed(1)}% of source value with a stable retailer ID.`}
+            </p>
+            {sourceEntries.map(({ month, meta }) => (
+              <p key={`${month}-${meta.source}`}>
+                <b>{month}</b>: {meta.source} - {meta.value_basis ?? meta.valueBasis} - cutoff {meta.cutoff} - {meta.completeness} - identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}
+                {meta.identityValueCoverage == null ? "" : ` of rows / ${(meta.identityValueCoverage * 100).toFixed(1)}% of value`}
+                {meta.included ? " - included" : " - excluded"}
+                {meta.exclusionReason ? ` - ${meta.exclusionReason}` : ""}
+              </p>
             ))}
+            {Object.entries(data.excludedMonths ?? {})
+              .sort(([a], [b]) => chronologicalMonthKey(a) - chronologicalMonthKey(b))
+              .map(([month, reason]) => (
+                <p key={month} className="font-medium"><b>{month}</b>: excluded — {reason}</p>
+              ))}
           </div>
-        </div>
+        </details>
       )}
 
       {/* Segment selector */}
@@ -308,6 +353,11 @@ export default function SkuTrends({ data }: Props) {
             : "codesBought ÷ codesEverSold (territory codes)"}
           </span>
         </h3>
+        {julAugSeam && (
+          <p className="mb-2 text-xs text-muted-foreground">
+            This chart contains count-based breadth only. No rupee line crosses the Jul-26 → Aug-26 source seam.
+          </p>
+        )}
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={lineData} margin={{ top: 8, right: 16, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={gridColor} />
@@ -339,6 +389,14 @@ export default function SkuTrends({ data }: Props) {
               }}
             />
             <Legend wrapperStyle={{ fontSize: 11 }} />
+            {julAugSeam && (
+              <ReferenceLine
+                x="Aug-26"
+                stroke="#d97706"
+                strokeDasharray="4 4"
+                label={{ value: "source seam", position: "insideTopRight", fill: "#b45309", fontSize: 10 }}
+              />
+            )}
             {activeSegments.map((seg) => (
               <Line
                 key={seg}
