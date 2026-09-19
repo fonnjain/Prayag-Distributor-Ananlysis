@@ -1,0 +1,56 @@
+{
+  "captured_at": "2026-09-19T12:41:22.557789+00:00",
+  "endpoint": "/api/sku/retailer-aug26",
+  "fy": "2026-27",
+  "month": "Aug-26",
+  "total_rows": 28185,
+  "buckets": [
+    {
+      "bucket": "outside_5pct",
+      "rows": 5296,
+      "codes": 582,
+      "basic_order_value": "42372401.00",
+      "history_rows": 5294,
+      "synced_rows": 2,
+      "unpriced_rows": 0
+    },
+    {
+      "bucket": "unpriced_or_not_comparable",
+      "rows": 1033,
+      "codes": 215,
+      "basic_order_value": "10624958.00",
+      "history_rows": 1033,
+      "synced_rows": 0,
+      "unpriced_rows": 0
+    },
+    {
+      "bucket": "within_1pct",
+      "rows": 21502,
+      "codes": 1722,
+      "basic_order_value": "141028203.00",
+      "history_rows": 20959,
+      "synced_rows": 543,
+      "unpriced_rows": 0
+    },
+    {
+      "bucket": "within_5pct",
+      "rows": 354,
+      "codes": 42,
+      "basic_order_value": "1762727.00",
+      "history_rows": 354,
+      "synced_rows": 0,
+      "unpriced_rows": 0
+    }
+  ],
+  "line_field_sha256": "05fe85dd5c1426eba8d7f4f321a32741e7b578325235cf8e0beb2c6a2cd486aa",
+  "line_hash_fields": [
+    "id",
+    "product_code",
+    "qty",
+    "basic_order_value",
+    "discount_pct",
+    "mrp",
+    "mrp_source",
+    "bucket"
+  ]
+}
