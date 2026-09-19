@@ -1066,3 +1066,17 @@ mtime_ms = 1789735818018
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/5c0b1220-0aff-40fd-97a9-7b882c42e403/29b43973-0e64-4e8e-a307-1e2f9a8c9f5c"
 storage_version_token = "1789735867498961"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "tUcPYIOhIA7kuxodAy4te"
+uri = "file://docs/prompt115-and-116-detailed-results-2026-09-18.md"
+type = "text"
+title = "Detailed Results: Prompts 115 and 116"
+description = "Consolidated 702-line report covering implementation, data findings, live verification, permanent limitations, and remaining acceptance gaps."
+logical_id = "3ae49f27-1d9b-4321-82a6-46a2d17fa110"
+content_hash = "sha256:6232a17ed461ea189683725a4ff89cdbb9d5bfc267cc510079063f6c8a052f86"
+size = 24521
+mtime_ms = 1789794834206
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/3ae49f27-1d9b-4321-82a6-46a2d17fa110/09d80fa6-4c4a-4423-9b6d-776195d70c81"
+storage_version_token = "1789794859758010"
+content_type = "text/markdown"
