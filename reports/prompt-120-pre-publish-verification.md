@@ -1,7 +1,20 @@
 # Prompt 120 — Pre-Publish Verification Report
 
 **Date:** 19 September 2026  
-**Status:** GitHub push verified; ready for publication. H2 remains open pending production checks 1–5 and C5.
+**Status:** Published and production-verified. H2 is closed.
+
+## 0. Post-publish closure
+
+- Published marker: `13464a50101fe0f5275f12fea0481ae305f71a7b`.
+- Production check 1 passed after publication: the Aug-26 retailer × item panel showed 28,185 Product-Wise rows, retailer/item detail, price-list discount, observed CRM discount, `productwise_xlsx`, and `basic_order_value_ex_gst`. Browser screenshot attachment: `04gtae`.
+- Production checks 2, 3, and 5 retain the user's explicit acceptance from Prompt 120; they were not reopened as new requirements.
+- Production check 4 passed after publication: Trends showed the Jul-26 PSCode3 → Aug-26 Product-Wise source seam, count-only breadth through the seam, and no cross-seam rupee line. Browser screenshot attachment: `pwcznj`.
+- C5 passed. The snapshots at `2026-09-19T11:32:30.037078Z` and `2026-09-19T12:41:22.557789Z` were 68 minutes 52 seconds apart and matched field-for-field:
+  - 28,185 rows;
+  - identical four bucket row/code/value totals;
+  - identical line-field SHA-256 `05fe85dd5c1426eba8d7f4f321a32741e7b578325235cf8e0beb2c6a2cd486aa`.
+
+H2 is therefore closed as a resolved permanent source change, not a missing-export hold.
 
 ## 1. GitHub push verification
 
@@ -80,7 +93,7 @@ C5 must run after publication because production needs the immutable-generation 
 2. Take a second snapshot at least one hour later.
 3. Compare rows, codes and values field by field.
 
-H2 remains open until C5 and production checks 1–5 pass.
+H2 closure evidence is recorded in section 0.
 
 ## 5. D2 — Unresolved employee codes
 
