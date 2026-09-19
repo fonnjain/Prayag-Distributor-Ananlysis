@@ -6489,6 +6489,55 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
         FOR EACH ROW EXECUTE FUNCTION reject_mrp_snapshot_mutation();
     `,
   },
+  {
+    id: "121_approved_head_name_aliases",
+    sql: `
+      -- Prompt 120 D4: append approved spellings to their canonical head rows.
+      -- Source variants and person rows remain intact; this migration deletes
+      -- nothing and records every attribution-affecting alias change.
+      WITH approved(canonical_name, alias_name) AS (
+        VALUES
+          ('Syed Aqil Rizvi', 'Aqil Rizvi'),
+          ('Pawan Kumar Sharma', 'Pawan Sharma'),
+          ('Narendra Kumar Sharma', 'Narendra Sharma')
+      ),
+      targets AS (
+        SELECT pr.id,
+               pr.canonical_name,
+               pr.alias_primary AS old_aliases,
+               CASE
+                 WHEN EXISTS (
+                   SELECT 1
+                     FROM unnest(COALESCE(pr.alias_primary, ARRAY[]::text[])) existing(alias)
+                    WHERE regexp_replace(lower(existing.alias), '[^a-z0-9]+', '', 'g')
+                        = regexp_replace(lower(approved.alias_name), '[^a-z0-9]+', '', 'g')
+                 ) THEN COALESCE(pr.alias_primary, ARRAY[]::text[])
+                 ELSE COALESCE(pr.alias_primary, ARRAY[]::text[]) || approved.alias_name
+               END AS new_aliases
+          FROM person_registry pr
+          JOIN approved USING (canonical_name)
+      ),
+      changed AS (
+        UPDATE person_registry pr
+           SET alias_primary = targets.new_aliases,
+               updated_at = now()
+          FROM targets
+         WHERE pr.id = targets.id
+           AND targets.old_aliases IS DISTINCT FROM targets.new_aliases
+        RETURNING pr.id, targets.old_aliases, targets.new_aliases
+      )
+      INSERT INTO change_log
+        (entity_type, entity_id, field, old_value, new_value, changed_by, reason)
+      SELECT 'person_registry',
+             id::text,
+             'alias_primary',
+             to_json(old_aliases)::text,
+             to_json(new_aliases)::text,
+             'Prompt 120 approved migration',
+             'Approved append-only head-name aliases; source variants retained'
+        FROM changed;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

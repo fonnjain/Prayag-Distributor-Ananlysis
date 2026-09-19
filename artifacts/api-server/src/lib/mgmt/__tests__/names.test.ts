@@ -122,10 +122,13 @@ describe("headNormKey family — resolveHeadKey", () => {
       // Alias: sulindarpal → sulinderpal
       ["Sulindar Pal",                "sulinderpal"],
       ["Sulinder Pal",                "sulinderpal"],
-      // Alias: pawankumar / pawankumarsharma → pawansharma
-      ["Pawan Kumar",                 "pawansharma"],
-      ["Pawan Kumar Sharma",          "pawansharma"],
-      ["Pawan Sharma",                "pawansharma"],
+      // Approved alias: Pawan Sharma → Pawan Kumar Sharma.
+      ["Pawan Kumar",                 "pawankumarsharma"],
+      ["Pawan Kumar Sharma",          "pawankumarsharma"],
+      ["Pawan Sharma",                "pawankumarsharma"],
+      // Approved alias: Narendra Sharma → Narendra Kumar Sharma.
+      ["Narendra Sharma",             "narendrakumarsharma"],
+      ["Narendra Kumar Sharma",       "narendrakumarsharma"],
       // Alias: lalan → lalankumar
       ["LALAN",                       "lalankumar"],
       ["Lalan Kumar",                 "lalankumar"],

@@ -65,8 +65,9 @@ export const HEAD_ALIASES: Record<string, string> = {
   biju: "bijuco",
   // STATE HEAD DASHBOARD name variants confirmed in secondary booking data.
   sulindarpal: "sulinderpal",   // "Sulindar Pal" → "Sulinder Pal"
-  pawankumar: "pawansharma",    // "Pawan Kumar Sharma" → "Pawan Sharma"
-  pawankumarsharma: "pawansharma",
+  pawansharma: "pawankumarsharma",
+  pawankumar: "pawankumarsharma",
+  narendrasharma: "narendrakumarsharma",
   lalan: "lalankumar",          // "LALAN" → "Lalan Kumar"
   nasirhusain: "nasirhussainkhan", // "NASIR HUSAIN" → "Nasir Hussain Khan"
   nasirhussain: "nasirhussainkhan",
