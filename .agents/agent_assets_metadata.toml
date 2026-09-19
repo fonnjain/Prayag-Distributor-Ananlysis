@@ -1094,3 +1094,31 @@ mtime_ms = 1789815039572
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/e7e8aa0d-4435-4cf7-b460-61407783dca3/508cede8-1d82-44e0-80c1-0b5c262a2a08"
 storage_version_token = "1789815046073185"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "4-JrlS8shiVPNj3a7nbfA"
+uri = "file://screenshots/prompt120-production-check-1.jpg"
+type = "image"
+title = "Production Check 1 — Retailer Item Discount"
+description = "Live production retailer view showing item, price-list MRP discount, observed CRM discount, source, and value basis."
+logical_id = "aeb6b433-0c06-4750-862f-104e66e07a20"
+content_hash = "sha256:19f306647d8866971abc8e83d08864adf5e02d88f20821a0b1091ccb97d3a082"
+size = 183500
+mtime_ms = 1789817345307
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/aeb6b433-0c06-4750-862f-104e66e07a20/1f71065e-75e0-4115-b815-830903df125c"
+storage_version_token = "1789820286702622"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "mScEyCWGBu7T4ZAOKG3E7"
+uri = "file://screenshots/prompt120-production-check-4.jpg"
+type = "image"
+title = "Production Check 4 — Jul–Aug Source Seam"
+description = "Live production Trends view showing the PSCode3-to-Product-Wise seam and the required non-comparison notice."
+logical_id = "e82d82b9-c5f1-4793-bd9a-d44c32d1df3f"
+content_hash = "sha256:c593006381566c5455b7bbe406bc7b1f3c16e512b7e70a2224303ee579d7d2db"
+size = 412799
+mtime_ms = 1789817358159
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/e82d82b9-c5f1-4793-bd9a-d44c32d1df3f/6f9dfaa8-e8b8-4c04-ab5f-e8ea474fd566"
+storage_version_token = "1789820288640810"
+content_type = "image/jpeg"

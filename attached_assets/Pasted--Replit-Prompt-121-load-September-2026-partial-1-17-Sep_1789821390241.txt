@@ -1,0 +1,157 @@
+# Replit Prompt 121 — load September 2026 (partial, 1–17 Sep)
+
+**Date:** 19 September 2026
+**File:** September_Order_Booking.xlsx. Attach it to this message.
+**Standing rules:**
+- Every figure names dev or prod and its source table.
+- Nothing in Prayag's files is changed.
+
+---
+
+## STOP FIRST: the CRM changed its export headers, and two value columns swapped places
+
+I checked the file. It has the same 25 columns as August, but they are
+renamed, and the two value columns are in REVERSED positions.
+
+| Position | August header | September header | Meaning |
+|---|---|---|---|
+| 6 | Customer Name | Retailer Company Name | same field |
+| 7 | Dealer ID | Retailer ID | same (RET#) |
+| 8 | Dealer Mobile | Retailer Mobile | same |
+| 9 | Channel Partner Name | Distributor | same |
+| 10 | CP Code | Distributor Code | same (DIST#) |
+| 15 | Category Name | Segment | same values (20 of 20 match) |
+| 23 | Dealer Order Value (incl GST) | **Sub Total (ex-GST)** | **SWAPPED** |
+| 24 | Basic Order Value (ex-GST) | **Retailer Net Amount (incl GST)** | **SWAPPED** |
+
+Proof, row 1 (SORD-161783, WT-4LL-07):
+- Sub Total 15,000
+- GST 2,700
+- Retailer Net Amount 17,700 = 15,000 + 2,700
+
+Across the file, Retailer Net Amount = Sub Total + GST on 99.9% of rows.
+
+**A loader that maps by position would load GST-inclusive values as
+`basic_order_value_ex_gst` and overstate September by 18%:
+Rs 7.21 Cr instead of Rs 6.13 Cr.**
+
+### Header contract. Code change, before any load.
+
+1. **Map by header NAME, never by position.** Use an explicit alias table:
+
+   ```
+   basic_order_value_ex_gst  <- "Basic Order Value" | "Sub Total"
+   dealer_order_value_incl   <- "Dealer Order Value" | "Retailer Net Amount"
+   retailer_name             <- "Customer Name" | "Retailer Company Name"
+   retailer_id               <- "Dealer ID" | "Retailer ID"
+   retailer_mobile           <- "Dealer Mobile" | "Retailer Mobile"
+   distributor_name          <- "Channel Partner Name" | "Distributor"
+   distributor_code          <- "CP Code" | "Distributor Code"
+   category_name             <- "Category Name" | "Segment"
+   ```
+
+2. **Fail loudly** on any unknown or missing header. Never guess.
+
+3. **Semantic assertion on every load.** It runs in addition to the name
+   mapping:
+
+   ```
+   dealer_order_value_incl ≈ basic_order_value_ex_gst + GST Amount
+   ```
+
+   This must hold within Rs 1 on at least 99% of rows. If it fails, or if
+   the two columns look swapped, reject the file.
+
+4. **Discount Amount is PER-UNIT discount** in both files
+   (= Discount % × implied MRP per piece). It is not a line total. Record
+   this in PRAYAG_OPERATING_RULES.md, section 4.
+
+5. Add a rule to section 13 of the same file: "CRM export headers can
+   change without notice. Loads map by name with aliases and are checked
+   semantically."
+
+---
+
+## Load September into dev, then prod
+
+The load must be idempotent and must REPLACE by month:
+- A later full-month September file replaces this partial one.
+- It must never be appended on top of it.
+- The key is Order ID + product line.
+
+### Control totals. Both dev and prod must match these exactly.
+
+```
+rows                 8,437
+orders               1,338   SORD-161783 to SORD-163131 (Aug ended at SORD-161781;
+                             SORD-161782 absent - report it, do not invent it)
+date range           01-09-2026 00:00:26 to 17-09-2026 23:46:26   (17 days)
+Sub Total (ex-GST)   Rs 6,13,05,811
+Retailer Net (incl)  Rs 7,21,37,897.69
+GST Amount           Rs 1,09,74,385.45
+retailers / distributors / codes / users   1,094 / 119 / 1,545 / 116
+status               all APPROVED
+discount %           min 6, median 47.46, max 70.8, no nulls
+overlap with August order IDs   0
+```
+
+### Known quirks. Report these. Do not silently fix them.
+
+- **2 exact duplicate line pairs:**
+  - SORD-161855, code 130, qty 6, Rs 996
+  - SORD-162952, code 144, qty 90, Rs 12,830
+
+  Keep both lines and flag them. Tell me whether August has the same
+  pattern.
+- **110 rows with a blank GST Type.** Their GST Amount is present; keep
+  them.
+- **9 rows at GST 0%** (Rs 1,94,704), and Retailer Net ≠ Sub Total on
+  these rows. List them.
+- **160 rows with a blank City.**
+
+### Completeness
+
+```
+September completeness = PARTIAL, cutoff 17-09-2026 23:46:26.
+Month stays open until 1 Jan 2027.
+Every surface shows "Sep-26 (1-17 Sep, partial)".
+Never annualise or rank against full months without that label.
+```
+
+Like-for-like comparison, from my check:
+- Aug 1–17: 7,363 rows, Rs 4.88 Cr
+- Sep 1–17: 8,437 rows, Rs 6.13 Cr (+25.5%)
+
+Any Aug vs Sep comparison uses the same days, or says it does not.
+
+---
+
+## After the load
+
+1. **Remove the "Secondary Sep-26 unavailable" banner.** Replace it with
+   the partial label.
+2. **MRP for September.** Price every September row with the MRP in
+   effect on its transaction date. The 1 Sep generation applies to these
+   rows. Run the same controls as August: coverage, unit_mismatch rows,
+   PRICE_OUTLIER rows, and the B3 buckets.
+3. **CRM price lag in September.** My check found that 1,374 of the
+   1,384 codes sold in both months carry an unchanged CRM implied MRP
+   from August to September. Code 5306 is still at 1,040. Report:
+   - how many codes revised effective 1 Sep 2026 still show the previous
+     price in September CRM orders
+   - their value, by category
+   - repeat the same for the 1 Aug CP revision
+4. **Acceptance on production:**
+   - SKU Deep Dive retailer → items → discount for one September retailer
+   - Distributor Deep Dive, September
+   - Trends showing Aug and Sep side by side. Both are Product-Wise, so no
+     seam applies between them.
+5. **Report back with:**
+   - control totals for dev and prod
+   - the header-contract test (feed it an August file and a September
+     file and show both pass; feed it a file with the value columns
+     swapped and show it is rejected)
+   - the list of quirks
+   - the September price-lag counts
+   - the acceptance screenshots
+   - commit SHAs, confirmed with `git ls-remote origin refs/heads/main`
