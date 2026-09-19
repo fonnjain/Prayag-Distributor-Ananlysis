@@ -58,7 +58,7 @@ const DATA_TAB_NAME = "Data";
 
 // Import from names.ts (single authoritative definition) and re-export so
 // all callers keep their existing `import { normSecKey } from "...deepDiveData.js"`.
-import { normSecKey, resolveHeadKey } from "./names.js";
+import { canonicalHeadDisplay, normSecKey, resolveHeadKey } from "./names.js";
 export { normSecKey };
 
 // ── Cell helpers ──────────────────────────────────────────────────────────────
@@ -1553,11 +1553,14 @@ export async function loadDeepDiveData(
   }
 
   // Distinct state heads in order of first appearance.
-  const headsSet = new Set<string>();
+  const headsSet = new Map<string, string>();
   for (const m of entry.allMembers) {
-    if (m.stateHead) headsSet.add(m.stateHead);
+    if (m.stateHead) {
+      const key = resolveHeadKey(m.stateHead);
+      if (!headsSet.has(key)) headsSet.set(key, canonicalHeadDisplay(m.stateHead));
+    }
   }
-  const stateHeads = [...headsSet];
+  const stateHeads = [...headsSet.values()];
 
   // Resolve the independent Product-Wise measure once per response.  This
   // deliberately does not alter orderBooking or any dashboard achievement.
@@ -1592,12 +1595,13 @@ export async function loadDeepDiveData(
   }
 
   // Members under the selected state head (or all members if no head selected).
+  const selectedStateHeadKey = selectedStateHead ? resolveHeadKey(selectedStateHead) : null;
   const filtered = selectedStateHead
-    ? entry.allMembers.filter((m) => m.stateHead === selectedStateHead)
+    ? entry.allMembers.filter((m) => resolveHeadKey(m.stateHead) === selectedStateHeadKey)
     : entry.allMembers;
 
   const members: MemberRef[] = filtered.map((m) => ({
-    stateHead: m.stateHead,
+    stateHead: canonicalHeadDisplay(m.stateHead),
     name: m.name,
     normKey: m.normKey,
     state: extractStateName(m),

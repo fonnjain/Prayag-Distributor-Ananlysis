@@ -81,6 +81,18 @@ export function resolveHeadKey(raw: unknown): string {
   return HEAD_ALIASES[n] ?? n;
 }
 
+const HEAD_DISPLAY_BY_KEY: Record<string, string> = {
+  syedaqilrizvi: "Syed Aqil Rizvi",
+  pawankumarsharma: "Pawan Kumar Sharma",
+  narendrakumarsharma: "Narendra Kumar Sharma",
+};
+
+/** Canonical display for approved head aliases; preserves other source names. */
+export function canonicalHeadDisplay(raw: unknown): string {
+  const source = raw == null ? "" : String(raw).trim();
+  return HEAD_DISPLAY_BY_KEY[resolveHeadKey(source)] ?? source;
+}
+
 // Resolves head-name spellings from any source (register, bridge, folder
 // names) to the canonical display used by the provided reference set
 // (normally the roster's State Head column). Matching order: exact normHead,

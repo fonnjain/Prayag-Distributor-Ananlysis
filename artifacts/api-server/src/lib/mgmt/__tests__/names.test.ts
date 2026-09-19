@@ -12,6 +12,7 @@ import {
   normHead,
   resolveHeadKey,
   HEAD_ALIASES,
+  canonicalHeadDisplay,
   dateToSerial,
   parseOrderDate,
   assertSegmentWiseDateSignature,
@@ -143,6 +144,13 @@ describe("headNormKey family — resolveHeadKey", () => {
     for (const [raw, expected] of fixtures) {
       expect(resolveHeadKey(raw), `resolveHeadKey(${JSON.stringify(raw)})`).toBe(expected);
     }
+  });
+
+  it("renders approved head aliases with their canonical display names", () => {
+    expect(canonicalHeadDisplay("Aqil Rizvi")).toBe("Syed Aqil Rizvi");
+    expect(canonicalHeadDisplay("Pawan Sharma")).toBe("Pawan Kumar Sharma");
+    expect(canonicalHeadDisplay("Narendra Sharma")).toBe("Narendra Kumar Sharma");
+    expect(canonicalHeadDisplay("Anant Singh")).toBe("Anant Singh");
   });
 });
 
