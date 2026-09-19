@@ -1,0 +1,211 @@
+# Replit Prompt 120 — close August: two UI fixes, one rule of mine corrected, MRP freeze, identity
+
+**Date:** 19 September 2026
+**Follows:** the Prompt 119 production report.
+
+**Accepted:**
+- A2 parity, exactly
+- the GST gate (median 0.999988)
+- production checks 2, 3 and 5
+- keeping H2 open
+
+**Standing rules:**
+- every figure names dev or prod and its source table
+- nothing in Prayag's files is changed
+
+---
+
+## A. My unit_mismatch rule was wrong. It excludes Rs 7.05 Cr that is fine.
+
+I asked you to flag a whole CODE when its implied MRP varied by more than
+2% within August. I checked the August file row by row, and that rule is
+far too blunt:
+
+```
+Flagged by the code-level rule   102 codes   7,204 rows   Rs 7,05,41,795
+Rows within 5% of their code's
+usual implied MRP                             7,046 rows   Rs 6,87,07,930
+Rows that look like a real unit
+problem (ratio >2x or <0.5x)                     27 rows   Rs     4,84,368
+```
+
+Examples:
+
+| Code | Rows | Rows at the usual implied MRP | Outlier rows |
+|---|---|---|---|
+| PW 11 | 266 | 265 (970) | 1 |
+| 701 | 275 | 274 (1,450) | 1 |
+| 144 | 343 | 342 (216) | 1 |
+| 120-WS | 274 | 272 (132) | 2 (one at 0.04) |
+
+So one bad row was knocking out a whole code. That is 36% of August value
+removed from discount, for no good reason.
+
+**A1. REPLACE the rule with a row-level test:**
+
+```
+ratio = row implied MRP / effective catalogue MRP
+
+between 0.5 and 2.0    keep: priced from the catalogue as normal
+outside 0.5 to 2.0     UNIT_MISMATCH: exclude this ROW only, count it
+```
+
+Also flag a row as PRICE_OUTLIER when it is more than 5% away from its
+code's modal implied MRP. Keep it priced, but show it in the controls.
+
+**A2.** Report the new numbers:
+- unit_mismatch rows, codes and value (expect about 27 rows, about
+  Rs 4.8 L)
+- discount_mrp coverage as a percentage of value, before and after this
+  change
+
+**A3.** Record in PRAYAG_OPERATING_RULES.md, section 12: "Unit and outlier
+tests are row-level. One bad row never excludes a code."
+
+---
+
+## B. The worked row found a real business fact. Measure it.
+
+Code 5306 was priced in the CRM at an implied MRP of 1,040 on every one of
+its 78 August rows, from 1 Aug to 31 Aug. Your price list says 1,140
+effective from 1 Aug ("New CP MRP w.e.f. 01st Aug, 2026.xlsx").
+
+In other words, the CRM ran all of August on the pre-revision CP price.
+The discount it reports (50%) understates the real discount off the
+current MRP (54.4%).
+
+**B1.** Break down the "outside 5%" bucket (553 codes, Rs 3.88 Cr) by:
+- master category and sub-category
+- the MRP source file and effective_from
+- the median ratio of implied to catalogue MRP
+
+**B2.** Count how many of those codes had their MRP revised on 1 Aug 2026,
+and whether their implied MRP equals the PREVIOUS mrp_history price. If
+most do, then the CRM price list was not updated for the 1 Aug revision.
+
+**B3.** Report the result only. I will take it to Prayag as a question. Do
+not change any figure because of it.
+
+---
+
+## C. MRP controls must not move after a month is analysed
+
+The closed-month controls changed between dev acceptance and production
+(outside 5%: 431 codes became 553) because the fallback uses today's
+active catalogue. C2 cannot be reconstructed either, because the earlier
+generation was not retained as active.
+
+**C1. RETAIN every mrp_sync_generation immutably.** Never delete or
+overwrite one.
+
+**C2. Closed-month fallback** uses the generation that was ACTIVE ON THE
+TRANSACTION DATE, not the current one.
+
+**C3. Build mrp_history from the syncs.** On every sync, write each
+changed code into mrp_history with:
+- effective_from = the declared w.e.f. date, or the sync date if none is
+  declared
+- source_generation_id
+
+**C4. The 19 Sep refresh changed 1,025 codes (Rs 9.66 Cr of August
+value).** Report:
+- is this the September price list going live? Prayag Q9 asks when the
+  September prices go live.
+- the w.e.f. date the source declares
+- the change by master category
+
+**C5.** After C1–C3, rerun the B3 buckets twice, an hour apart. Both runs
+must give identical numbers.
+
+---
+
+## D. Identity. Most of the Rs 5.16 Cr gap is here.
+
+About 81% of the gap is attribution:
+- unmapped: Rs 2.50 Cr
+- no usable state head: Rs 1.69 Cr
+
+**D1. AMBIGUOUS EMPLOYEE CODES.** These are 2,984 rows, Rs 1.98 Cr. List:
+- each ambiguous code
+- the candidate persons for it
+- the rows and value
+
+Resolve DETERMINISTICALLY where the HR roster (hr_roster.csv) has exactly
+one person with that employee code. Apply that fix and report it. Leave
+the rest for my approval.
+
+**D2. UNRESOLVED EMPLOYEE CODES.** These are 1,137 rows, Rs 52 L. List
+the codes and the Sales User Name for each. Do not guess.
+
+**D3. DEV vs PROD REGISTRY.** Dev mapped 24,721 rows and prod mapped
+24,064. Print the person_registry differences that cause this. Make prod
+the source of truth and bring dev into line.
+
+**D4. HEAD NAME VARIANTS.** Your own alert-routing report already found
+these duplicates:
+- "Aqil Rizvi" vs "Syed Aqil Rizvi"
+- "Narendra Kumar Sharma" vs "Narendra Sharma"
+- "Pawan Kumar Sharma" vs "Pawan Sharma" (head_month shows Rs 0 for
+  Pawan Sharma, and Product-Wise shows Rs 29.57 L)
+
+Check whether these variants explain:
+- the Aqil +Rs 1.65 Cr and Sandeep −Rs 1.86 Cr offset
+- the Pawan Rs 0
+
+Propose a canonical mapping. Do not apply it.
+
+**D5. SANDEEP HAS THREE AUGUST NUMBERS on production:**
+
+```
+Distributor Deep Dive   Rs 11.70 Cr   (distributor attribution)
+Sales Deep Dive         Rs  9.21 Cr   (Product-Wise, member mapping)
+E table                 Rs  9.17 Cr
+```
+
+Explain each one. Label each surface with its attribution basis, so that
+a user seeing 11.70 and 9.21 knows why they differ. Explain the
+9.21 vs 9.17 difference exactly.
+
+---
+
+## E. Fix the two failed production checks
+
+**E1. CHECK 1: retailer → items → discount is empty on production.**
+- Find why the SKU Deep Dive retailer panel returns nothing for FY
+  2026-27 / August / Retailer. Check the API response first, then the
+  frontend routing.
+- After the fix, show:
+  - one retailer
+  - its items
+  - discount_mrp
+  - the observed CRM discount
+  - the source and basis labels
+
+**E2. CHECK 4: Jul–Aug seam in Trends.**
+- Add a monthly view that includes both Jul-26 and Aug-26.
+- Label July "PSCode3 net amount" and August "Product-Wise ex-GST".
+- Show a visible seam marker between the two months.
+- Add the sentence: "Rupees are not added or compared across this change;
+  counts are."
+- Do not draw a rupee line through the seam. Counts (retailers, codes,
+  pieces) may run continuously.
+
+---
+
+## F. Then
+
+1. Dev: run all the tests, then acceptance checks 1–5.
+2. Tell me when to publish.
+3. After I publish: production checks 1–5, with screenshots of checks 1
+   and 4.
+4. Close H2 when all five checks pass.
+
+**Report back with:**
+- A2 before and after
+- the B1/B2 breakdown
+- C4
+- C5, both runs
+- the D1–D5 tables
+- the E1 root cause
+- the acceptance results
+- commit SHAs
