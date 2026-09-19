@@ -1080,3 +1080,17 @@ mtime_ms = 1789794834206
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/3ae49f27-1d9b-4321-82a6-46a2d17fa110/09d80fa6-4c4a-4423-9b6d-776195d70c81"
 storage_version_token = "1789794859758010"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "2AxCHuObwK_2AnKvpdbm6"
+uri = "file://reports/prompt-120-pre-publish-verification.docx"
+type = "word_document"
+title = "Prompt 120 Pre-Publish Verification Report"
+description = "Word document with GitHub verification, B1/B2, C5 plan, D2, D4, D5, and publication instructions."
+logical_id = "e7e8aa0d-4435-4cf7-b460-61407783dca3"
+content_hash = "sha256:b09af55cb6f9687bf07adc7361859ffb5be5997fe5cd5fd7168b5f16fa41b365"
+size = 41892
+mtime_ms = 1789815039572
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/e7e8aa0d-4435-4cf7-b460-61407783dca3/508cede8-1d82-44e0-80c1-0b5c262a2a08"
+storage_version_token = "1789815046073185"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
