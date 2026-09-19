@@ -70,6 +70,16 @@ function toText(v: unknown): string | null {
   return s === "" ? null : s;
 }
 
+function toRawSourceText(v: unknown): string {
+  const p = plainCellValue(v);
+  return p == null ? "" : String(p);
+}
+
+export function normalizeProductWiseNullableText(v: unknown): string | null {
+  const text = toText(v);
+  return text?.toUpperCase() === "NA" ? null : text;
+}
+
 function toNum(v: unknown): number | null {
   const p = plainCellValue(v);
   if (p == null || p === "") return null;
@@ -214,6 +224,8 @@ export type Prompt121Sep26Controls = {
   discountMedian: number;
   discountMax: number;
   discountNulls: number;
+  cityUnavailableLiterals: number;
+  blankGstTypes: number;
   months: string[];
 };
 
@@ -229,6 +241,10 @@ type SepControlRow = {
   basicOrderValue: number | null;
   dealerOrderValueIncl: number | null;
   gstAmount: number | null;
+  city: string | null;
+  cityRaw: string;
+  gstType: string | null;
+  gstTypeRaw: string;
 };
 
 export const PRODUCT_WISE_ORDER_SNAPSHOT_PREFIXES = [
@@ -296,6 +312,8 @@ export function assertPrompt121Sep26Controls(
     discountMedian: discounts.length % 2 ? discounts[Math.floor(discounts.length / 2)]! : (discounts[discounts.length / 2 - 1]! + discounts[discounts.length / 2]!) / 2,
     discountMax: discounts[discounts.length - 1] ?? NaN,
     discountNulls: rows.length - discounts.length,
+    cityUnavailableLiterals: rows.filter((row) => row.city == null && row.cityRaw.trim().toUpperCase() === "NA").length,
+    blankGstTypes: rows.filter((row) => row.gstType == null && row.gstTypeRaw === "").length,
     months: [...new Set(rows.map((row) => indiaMonthLabel(row.orderDatetime)))].sort(),
   };
   const near = (actual: number, expected: number, cents = false) => Math.abs(actual - expected) <= (cents ? manifest.valueToleranceCents : 0);
@@ -307,6 +325,8 @@ export function assertPrompt121Sep26Controls(
   if (controls.retailers !== manifest.retailers || controls.distributors !== manifest.distributors || controls.codes !== manifest.codes || controls.salesUsers !== manifest.salesUsers) errors.push("identity/code control totals do not match reviewed Sep-26 controls");
   if (controls.statuses.length !== manifest.statuses.length || controls.statuses[0] !== manifest.statuses[0]) errors.push(`statuses=${controls.statuses.join(",")}; expected ${manifest.statuses.join(",")}`);
   if (controls.discountMin !== manifest.discountMin || controls.discountMedian !== manifest.discountMedian || controls.discountMax !== manifest.discountMax || controls.discountNulls !== manifest.discountNulls) errors.push("discount controls do not match reviewed Sep-26 controls");
+  if (controls.cityUnavailableLiterals !== manifest.cityUnavailableLiterals) errors.push(`city unavailable literals=${controls.cityUnavailableLiterals}; expected ${manifest.cityUnavailableLiterals}`);
+  if (controls.blankGstTypes !== manifest.blankGstTypes) errors.push(`blank GST types=${controls.blankGstTypes}; expected ${manifest.blankGstTypes}`);
   if (controls.months.length !== 1 || controls.months[0] !== manifest.month) errors.push(`months=${controls.months.join(",")}; expected ${manifest.month}`);
   if (rows.some((row) => row.orderId === manifest.absentOrderId)) errors.push(`${manifest.absentOrderId} must remain absent`);
   if (errors.length) throw new Error(`Reviewed Sep-26 controls refused: ${errors.join("; ")}`);
@@ -567,10 +587,13 @@ export async function loadSecondaryOrders(
     state: string | null;
     district: string | null;
     city: string | null;
+    cityRaw: string;
     pincode: string | null;
     categoryName: string | null;
     segmentCanon: string | null;
     productCode: string;
+    gstType: string | null;
+    gstTypeRaw: string;
     gstPct: number | null;
     gstAmount: number | null;
     qty: number | null;
@@ -622,6 +645,10 @@ export async function loadSecondaryOrders(
       const dealerOrderValueIncl = toNum(at("dealerOrderValueIncl"));
       const basicOrderValue = toNum(at("basicOrderValue"));
       const gstAmount = toNum(at("gstAmount"));
+      const cityRaw = toRawSourceText(at("city"));
+      const gstTypeRaw = toRawSourceText(at("gstType"));
+      const city = normalizeProductWiseNullableText(at("city"));
+      const gstType = normalizeProductWiseNullableText(at("gstType"));
 
       if (salesUserName && !unresolvedRawUsers.has(salesUserName)) {
         unresolvedRawUsers.add(salesUserName); // collect for resolution pass
@@ -634,8 +661,8 @@ export async function loadSecondaryOrders(
       const hashParts = [
          rawDatetime.toISOString(), orderStatus, salesUserName, toText(at("retailerName")),
          dealerId, toText(at("retailerMobile")), toText(at("distributorName")), cpCode,
-        toText(at("state")), toText(at("district")), toText(at("city")),
-        toText(at("pincode")), categoryName, productCode, toNum(at("gstPct")),
+        toText(at("state")), toText(at("district")), city, cityRaw,
+        toText(at("pincode")), categoryName, productCode, gstType, gstTypeRaw, toNum(at("gstPct")),
          gstAmount, toNum(at("qty")), parseDiscountPct(at("discountPct")),
          toNum(at("discountAmount")), dealerOrderValueIncl, basicOrderValue,
       ];
@@ -651,11 +678,14 @@ export async function loadSecondaryOrders(
         cpCode,
          state: toText(at("state")),
          district: toText(at("district")),
-         city: toText(at("city")),
+         city,
+         cityRaw,
          pincode: toText(at("pincode")),
         categoryName,
         segmentCanon,
         productCode,
+         gstType,
+         gstTypeRaw,
          gstPct: toNum(at("gstPct")),
          gstAmount,
          qty: toNum(at("qty")),
@@ -892,24 +922,25 @@ export async function loadSecondaryOrders(
               (source_era, source_kind, fiscal_year, period_completeness, source_id, manifest_id, manifest_sha256,
                order_id, order_datetime, order_status, sales_user_name, sales_user_id,
               customer_name, dealer_id, dealer_mobile, cp_name, cp_code,
-              state, district, city, pincode,
+               state, district, city, city_raw, pincode,
              category_name, segment_canon, product_code, occurrence, source_row_number,
              content_hash, is_exact_duplicate_export,
-              gst_pct, gst_amount, qty, discount_pct, discount_amount,
+               gst_type, gst_type_raw, gst_pct, gst_amount, qty, discount_pct, discount_amount,
               dealer_order_value, basic_order_value, source_file)
            VALUES
                 ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-                $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
+                $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37,
+                $38, $39)
            RETURNING id`,
           [
             "product_wise_crm", "product_wise",
              fiscalYearFromDate(r.orderDatetime), manifest.completeness, sourceFile, manifest.version, sourceSha256,
              r.orderId, r.orderDatetime, r.orderStatus, r.salesUserName, salesUserId,
             r.customerName, r.dealerId, r.dealerMobile, r.cpName, r.cpCode,
-            r.state, r.district, r.city, r.pincode,
+             r.state, r.district, r.city, r.cityRaw, r.pincode,
             r.categoryName, r.segmentCanon, r.productCode, r.occurrence, r.sourceRowNumber,
             r.contentHash, r.isExactDuplicateExport,
-            r.gstPct, r.gstAmount, r.qty, r.discountPct, r.discountAmount,
+             r.gstType, r.gstTypeRaw, r.gstPct, r.gstAmount, r.qty, r.discountPct, r.discountAmount,
              r.dealerOrderValue, r.basicOrderValue, sourceFile,
           ],
         );

@@ -23,6 +23,8 @@ export type ApprovedProductWiseManifest = {
   discountMedian: number;
   discountMax: number;
   discountNulls: number;
+  cityUnavailableLiterals: number;
+  blankGstTypes: number;
   absentOrderId: string;
 };
 
@@ -52,6 +54,8 @@ export const APPROVED_PRODUCT_WISE_MANIFESTS: readonly ApprovedProductWiseManife
     discountMedian: 47.46,
     discountMax: 70.8,
     discountNulls: 0,
+    cityUnavailableLiterals: 160,
+    blankGstTypes: 110,
     absentOrderId: "SORD-161782",
   },
 ];

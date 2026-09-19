@@ -6664,6 +6664,14 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
       ON CONFLICT (employee_id_key, sales_user_name_key, effective_from) DO NOTHING;
     `,
   },
+  {
+    id: "134_secondary_order_raw_city_gst_evidence",
+    sql: `
+      ALTER TABLE secondary_order_line
+        ADD COLUMN IF NOT EXISTS city_raw TEXT,
+        ADD COLUMN IF NOT EXISTS gst_type_raw TEXT;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

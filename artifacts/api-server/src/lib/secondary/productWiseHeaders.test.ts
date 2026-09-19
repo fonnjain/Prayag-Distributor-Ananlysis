@@ -5,7 +5,10 @@ import {
   validateProductWiseValues,
 } from "./productWiseHeaders.js";
 import { prepareProductWiseAug26Load, prepareProductWiseRangeLoad } from "./productWiseAug26.js";
-import { assertPrompt121Sep26Controls } from "../secondaryOrders/loader.js";
+import {
+  assertPrompt121Sep26Controls,
+  normalizeProductWiseNullableText,
+} from "../secondaryOrders/loader.js";
 
 const AUGUST = [
   "Date", "Order ID", "Sales User Name", "Customer Name", "Dealer ID",
@@ -79,6 +82,13 @@ describe("Product-Wise header contract", () => {
     expect(validateProductWiseValues([{ basicOrderValue: 1000, dealerOrderValueIncl: 1180, gstAmount: 180 }]).ratio).toBe(1);
   });
 
+  it("normalizes source unavailable markers without turning NA into a city", () => {
+    expect(normalizeProductWiseNullableText("NA")).toBeNull();
+    expect(normalizeProductWiseNullableText(" na ")).toBeNull();
+    expect(normalizeProductWiseNullableText("")).toBeNull();
+    expect(normalizeProductWiseNullableText("PURNEA")).toBe("PURNEA");
+  });
+
   it("rejects a workbook whose value columns contain swapped semantics", () => {
     expect(() => validateProductWiseValues([
       { basicOrderValue: 1180, dealerOrderValueIncl: 1000, gstAmount: 180 },
@@ -105,11 +115,22 @@ describe("Product-Wise header contract", () => {
       basicOrderValue: index === 0 ? 61305811 : 0,
       dealerOrderValueIncl: index === 0 ? 72137897.6878 : 0,
       gstAmount: index === 0 ? 10974385.4472 : 0,
+      city: null,
+      cityRaw: index < 160 ? "NA" : "CITY",
+      gstType: index < 110 ? null : "GST EXTRA",
+      gstTypeRaw: index < 110 ? "" : "GST EXTRA",
     }));
     expect(assertPrompt121Sep26Controls(
       rows, 8437, 0,
       "14ac994927c3137db0354fb654afca3946057d7dfd26b0dfeb48b59e7a0800f4",
-    )).toMatchObject({ rows: 8437, orders: 1338, retailers: 1094, distributors: 119 });
+    )).toMatchObject({
+      rows: 8437,
+      orders: 1338,
+      retailers: 1094,
+      distributors: 119,
+      cityUnavailableLiterals: 160,
+      blankGstTypes: 110,
+    });
   });
 
   it("rejects a synthetic September workbook with swapped value semantics", async () => {

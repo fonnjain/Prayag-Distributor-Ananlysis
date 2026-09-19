@@ -65,11 +65,17 @@ export const secondaryOrderLines = pgTable(
     state: text("state"),
     district: text("district"),
     city: text("city"),
+    // Verbatim source evidence. Normalized city maps unavailable sentinels
+    // such as "NA" to null; raw retains the workbook literal.
+    cityRaw: text("city_raw"),
     pincode: text("pincode"),
     categoryName: text("category_name"),                // verbatim — never overwritten
     segmentCanon: text("segment_canon"),                // mapped via group_map.json, nullable
     productCode: text("product_code").notNull(),
     gstType: text("gst_type"),
+    // Blank is retained as "" so a present-but-blank source cell remains
+    // distinguishable from older rows loaded before this evidence column.
+    gstTypeRaw: text("gst_type_raw"),
     occurrence: integer("occurrence").notNull(),          // one-based within (order_id, product_code), source order
     sourceRowNumber: integer("source_row_number").notNull(),
     contentHash: text("content_hash").notNull(),          // SHA-256 of stored source values
