@@ -9,11 +9,11 @@ Product-Wise CRM is a source seam, not a rewrite: map its August-onward retailer
 
 **How to apply:** For Product-Wise loads, populate `net_amount` only from Basic Order Value; leave incompatible gross fields null and do not create gross-required mirrors. Require the approved source fingerprint, one-month replacement scope, retained provenance, and the frozen July RET# population-continuity gate. Do not add scheduling or ID-based consumer rewiring until a genuine recurring source is approved.
 
-Product-Wise month permanence shares the existing `register_month_state` and the shared month-freeze clock: a month locks at midnight UTC on the 8th of the next month, after the inclusive 1st–7th grace window. Frozen replacements require an explicit, append-only audited override; each Product-Wise row retains source filename and freeze evidence.
+The August raw-SKU copy keeps the existing `register_month_state` freeze policy. From September 2026, Product-Wise order bookings instead have one authoritative home in `secondary_order_line`; do not duplicate them into `secondary_sku_line`. Each approved source is a versioned manifest with fingerprint, cutoff, completeness, and freeze time. Replacements must be monotonic (never earlier cutoff or complete→partial), and September stays replaceable through 31 December 2026 before freezing at 1 January 2027 IST.
 
-**Why:** Manual exports routinely include an already-closed month. A separate Product-Wise clock could disagree with the register/margin state and reintroduce duplicate or altered historical figures.
+**Why:** September introduced recurring partial Product-Wise exports. Writing the same source independently to two tables can diverge, while a fixed next-month lock would block the approved later full-month replacement.
 
-**How to apply:** Keep all Product-Wise loaders on the shared freeze decision/state; never add a bypass or reset endpoint. The API status must expose every month/source pair's frozen state and source evidence.
+**How to apply:** Keep August’s protected raw-SKU path separate. For September onward, load only an approved manifest into the order table using transactional month replacement, strict identity collision checks, retained duplicate occurrences, post-write reconciliation, and persisted operator/source evidence.
 
 Product-Wise and PSCode3 have a permanent source seam. PSCode3 ends on 31 July
 2026; Product-Wise begins on 1 August 2026, so no overlapping CRM month exists
