@@ -25,6 +25,15 @@ import StateFilter from "../ui/StateFilter";
 import { useToast } from "@/hooks/use-toast";
 import { hydrateGlobalFilterFromUrl, serializeGlobalFilterToUrl, HydrationLock, statesEqual } from "@/data/global-filter-codec";
 
+export function downloadFilename(response: Pick<Response, "headers">, fallback: string): string {
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const utf8 = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const quoted = disposition.match(/filename="([^"]+)"/i)?.[1];
+  const plain = disposition.match(/filename=([^;]+)/i)?.[1];
+  const candidate = utf8 ? decodeURIComponent(utf8) : quoted ?? plain?.trim() ?? fallback;
+  return candidate.replace(/[\\/]/g, "_");
+}
+
 // ── Types (matching server CompanyReportsPayload) ─────────────────────────────
 
 type ReportRow = {
@@ -834,9 +843,75 @@ export default function CompanyReports() {
 
   const [quotaWait, setQuotaWait] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
+  const [zipDownloading, setZipDownloading] = useState(false);
 
   const dataUrl = `/api/company-reports?fy=${encodeURIComponent(fy)}${filterQuery}`;
   useSnapshotRefresh(data?.meta, dataUrl, (fresh) => setData(fresh as Payload));
+
+  const downloadCompleteZip = useCallback(async () => {
+    if (zipDownloading) return;
+    setZipDownloading(true);
+    const date = new Date().toISOString().slice(0, 10);
+    const suffix = filtersActive ? "_filtered" : "";
+    const reportFallback = `Company_Reports_${fy}${suffix}_${date}.xlsx`;
+    const workingFallback = `Company_Reports_Working_Data_${fy}${suffix}_${date}.xlsx`;
+    const reportUrl = `/api/company-reports/export?fy=${encodeURIComponent(fy)}${filterQuery}`;
+    const workingUrl = `/api/company-reports/working-data?fy=${encodeURIComponent(fy)}${filterQuery}`;
+    try {
+      // The API deliberately allows one export at a time. Fetch sequentially
+      // so the second workbook cannot be rejected by the concurrency guard.
+      const reportResponse = await fetch(reportUrl);
+      if (!reportResponse.ok) {
+        const body = await reportResponse.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error ?? `Report export failed (HTTP ${reportResponse.status})`);
+      }
+      const reportBlob = await reportResponse.blob();
+      const reportName = downloadFilename(reportResponse, reportFallback);
+
+      const workingResponse = await fetch(workingUrl);
+      if (!workingResponse.ok) {
+        const body = await workingResponse.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error ?? `Working-data export failed (HTTP ${workingResponse.status})`);
+      }
+      const workingBlob = await workingResponse.blob();
+      const workingName = downloadFilename(workingResponse, workingFallback);
+
+      const { default: JSZip } = await import("jszip");
+      const zip = new JSZip();
+      zip.file(reportName, reportBlob);
+      zip.file(workingName, workingBlob);
+      zip.file("README.txt", [
+        `Company Reports 1-7 complete export`,
+        `Fiscal year: ${fy}`,
+        `Generated: ${new Date().toISOString()}`,
+        `Filters: ${filtersActive ? "active — filenames include _filtered" : "none"}`,
+        "",
+        `${reportName}: presentation-ready Reports 1-7 workbook.`,
+        `${workingName}: verification-oriented helper ranges, source provenance, and reconciliation data.`,
+      ].join("\n"));
+      const archive = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+      const url = URL.createObjectURL(archive);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `Company_Reports_Complete_${fy}${suffix}_${date}.zip`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      toast({
+        title: "Complete ZIP downloaded",
+        description: "Includes the Reports 1–7 workbook, working data, and a contents note.",
+      });
+    } catch (error) {
+      toast({
+        title: "ZIP download failed",
+        description: error instanceof Error ? error.message : "Could not build the complete report archive.",
+        variant: "destructive",
+      });
+    } finally {
+      setZipDownloading(false);
+    }
+  }, [filterQuery, filtersActive, fy, toast, zipDownloading]);
 
   useEffect(() => {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -891,6 +966,15 @@ export default function CompanyReports() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void downloadCompleteZip()}
+            disabled={zipDownloading}
+            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-wait disabled:opacity-60"
+          >
+            {zipDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {zipDownloading ? "Building complete ZIP…" : "Download complete ZIP"}
+          </button>
           <a
             href={`/api/company-reports/export?fy=${encodeURIComponent(fy)}${filterQuery}`}
             download
