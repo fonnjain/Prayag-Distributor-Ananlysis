@@ -1,5 +1,6 @@
 export type ProductWiseColumn =
-  | "date" | "orderId" | "salesUserName" | "retailerName" | "retailerId"
+  | "date" | "orderId" | "salesUserName" | "employeeId" | "reportingManager"
+  | "retailerName" | "retailerId"
   | "retailerMobile" | "distributorName" | "distributorCode" | "state"
   | "district" | "city" | "pincode" | "categoryName" | "productCode"
   | "gstType" | "gstPct" | "gstAmount" | "qty" | "discountPct"
@@ -11,6 +12,8 @@ const ALIASES: Record<ProductWiseColumn, readonly string[]> = {
   date: ["Date"],
   orderId: ["Order ID"],
   salesUserName: ["Sales User Name"],
+  employeeId: ["Employee ID"],
+  reportingManager: ["Reporting Manager"],
   retailerName: ["Customer Name", "Retailer Company Name"],
   retailerId: ["Dealer ID", "Retailer ID"],
   retailerMobile: ["Dealer Mobile", "Retailer Mobile"],
@@ -34,7 +37,6 @@ const ALIASES: Record<ProductWiseColumn, readonly string[]> = {
 };
 
 const OPTIONAL = new Set<ProductWiseColumn>(["gstType"]);
-const RECOGNIZED_OPTIONAL_HEADERS = new Set(["Employee ID", "Reporting Manager"]);
 
 export function resolveProductWiseHeaders(headers: readonly string[]): ProductWiseColumnIndexes {
   const known = new Map<string, ProductWiseColumn>();
@@ -42,7 +44,8 @@ export function resolveProductWiseHeaders(headers: readonly string[]): ProductWi
     for (const alias of aliases) known.set(alias, column);
   }
   const indexes: ProductWiseColumnIndexes = {
-    date: undefined, orderId: undefined, salesUserName: undefined, retailerName: undefined,
+    date: undefined, orderId: undefined, salesUserName: undefined,
+    employeeId: undefined, reportingManager: undefined, retailerName: undefined,
     retailerId: undefined, retailerMobile: undefined, distributorName: undefined,
     distributorCode: undefined, state: undefined, district: undefined, city: undefined,
     pincode: undefined, categoryName: undefined, productCode: undefined, gstType: undefined,
@@ -53,7 +56,6 @@ export function resolveProductWiseHeaders(headers: readonly string[]): ProductWi
   const unknown: string[] = [];
   headers.forEach((header, index) => {
     const column = known.get(header);
-    if (!column && RECOGNIZED_OPTIONAL_HEADERS.has(header)) return;
     if (!column) {
       unknown.push(header || `<blank column ${index + 1}>`);
       return;

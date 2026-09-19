@@ -219,6 +219,10 @@ export type Prompt121Sep26Controls = {
   distributors: number;
   codes: number;
   salesUsers: number;
+  employeeIds: number;
+  reportingManagers: number;
+  employeeIdNulls: number;
+  reportingManagerNulls: number;
   statuses: string[];
   discountMin: number;
   discountMedian: number;
@@ -236,6 +240,8 @@ type SepControlRow = {
   cpCode: string;
   productCode: string;
   salesUserName: string | null;
+  employeeId: string | null;
+  reportingManager: string | null;
   orderStatus: string;
   discountPct: number | null;
   basicOrderValue: number | null;
@@ -307,6 +313,10 @@ export function assertPrompt121Sep26Controls(
     distributors: new Set(rows.map((row) => row.cpCode)).size,
     codes: new Set(rows.map((row) => row.productCode)).size,
     salesUsers: new Set(rows.map((row) => row.salesUserName)).size,
+    employeeIds: new Set(rows.map((row) => row.employeeId).filter((value): value is string => value != null)).size,
+    reportingManagers: new Set(rows.map((row) => row.reportingManager).filter((value): value is string => value != null)).size,
+    employeeIdNulls: rows.filter((row) => row.employeeId == null).length,
+    reportingManagerNulls: rows.filter((row) => row.reportingManager == null).length,
     statuses: [...new Set(rows.map((row) => row.orderStatus))].sort(),
     discountMin: discounts[0] ?? NaN,
     discountMedian: discounts.length % 2 ? discounts[Math.floor(discounts.length / 2)]! : (discounts[discounts.length / 2 - 1]! + discounts[discounts.length / 2]!) / 2,
@@ -323,6 +333,12 @@ export function assertPrompt121Sep26Controls(
   if (indiaDates[0] !== expectedMin || indiaDates[indiaDates.length - 1] !== expectedMax) errors.push("date range is not the reviewed 1–17 Sep-26 range");
   if (!near(basic, manifest.basic) || !near(inclusive, manifest.inclusive, true) || !near(gst, manifest.gst, true)) errors.push(`value controls basic=${basic}, inclusive=${inclusive}, gst=${gst}`);
   if (controls.retailers !== manifest.retailers || controls.distributors !== manifest.distributors || controls.codes !== manifest.codes || controls.salesUsers !== manifest.salesUsers) errors.push("identity/code control totals do not match reviewed Sep-26 controls");
+  if (
+    controls.employeeIds !== manifest.employeeIds ||
+    controls.reportingManagers !== manifest.reportingManagers ||
+    controls.employeeIdNulls !== manifest.employeeIdNulls ||
+    controls.reportingManagerNulls !== manifest.reportingManagerNulls
+  ) errors.push("employee/reporting-manager controls do not match reviewed Sep-26 controls");
   if (controls.statuses.length !== manifest.statuses.length || controls.statuses[0] !== manifest.statuses[0]) errors.push(`statuses=${controls.statuses.join(",")}; expected ${manifest.statuses.join(",")}`);
   if (controls.discountMin !== manifest.discountMin || controls.discountMedian !== manifest.discountMedian || controls.discountMax !== manifest.discountMax || controls.discountNulls !== manifest.discountNulls) errors.push("discount controls do not match reviewed Sep-26 controls");
   if (controls.cityUnavailableLiterals !== manifest.cityUnavailableLiterals) errors.push(`city unavailable literals=${controls.cityUnavailableLiterals}; expected ${manifest.cityUnavailableLiterals}`);
@@ -579,6 +595,8 @@ export async function loadSecondaryOrders(
     orderDatetime: Date;
     orderStatus: string;
     salesUserName: string | null;
+    employeeId: string | null;
+    reportingManager: string | null;
     customerName: string | null;
     dealerId: string;
     dealerMobile: string | null;
@@ -641,6 +659,8 @@ export async function loadSecondaryOrders(
 
       const orderStatus = toText(at("orderStatus")) ?? "PENDING";
       const salesUserName = toText(at("salesUserName"));
+      const employeeId = toText(at("employeeId"));
+      const reportingManager = toText(at("reportingManager"));
       const categoryName = toText(at("categoryName"));
       const dealerOrderValueIncl = toNum(at("dealerOrderValueIncl"));
       const basicOrderValue = toNum(at("basicOrderValue"));
@@ -659,7 +679,8 @@ export async function loadSecondaryOrders(
 
       const sourceRowNumber = rowsScanned + 1; // worksheet rows are header + data
       const hashParts = [
-         rawDatetime.toISOString(), orderStatus, salesUserName, toText(at("retailerName")),
+         rawDatetime.toISOString(), orderStatus, salesUserName, employeeId, reportingManager,
+         toText(at("retailerName")),
          dealerId, toText(at("retailerMobile")), toText(at("distributorName")), cpCode,
         toText(at("state")), toText(at("district")), city, cityRaw,
         toText(at("pincode")), categoryName, productCode, gstType, gstTypeRaw, toNum(at("gstPct")),
@@ -671,6 +692,8 @@ export async function loadSecondaryOrders(
         orderDatetime: rawDatetime,
         orderStatus,
         salesUserName,
+        employeeId,
+        reportingManager,
          customerName: toText(at("retailerName")),
         dealerId,
          dealerMobile: toText(at("retailerMobile")),
@@ -921,6 +944,7 @@ export async function loadSecondaryOrders(
           `INSERT INTO secondary_order_line
               (source_era, source_kind, fiscal_year, period_completeness, source_id, manifest_id, manifest_sha256,
                order_id, order_datetime, order_status, sales_user_name, sales_user_id,
+               employee_id, reporting_manager,
               customer_name, dealer_id, dealer_mobile, cp_name, cp_code,
                state, district, city, city_raw, pincode,
              category_name, segment_canon, product_code, occurrence, source_row_number,
@@ -928,14 +952,15 @@ export async function loadSecondaryOrders(
                gst_type, gst_type_raw, gst_pct, gst_amount, qty, discount_pct, discount_amount,
               dealer_order_value, basic_order_value, source_file)
            VALUES
-                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-                $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37,
-                $38, $39)
+                 ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37,
+                 $38, $39, $40, $41)
            RETURNING id`,
           [
             "product_wise_crm", "product_wise",
              fiscalYearFromDate(r.orderDatetime), manifest.completeness, sourceFile, manifest.version, sourceSha256,
              r.orderId, r.orderDatetime, r.orderStatus, r.salesUserName, salesUserId,
+              r.employeeId, r.reportingManager,
             r.customerName, r.dealerId, r.dealerMobile, r.cpName, r.cpCode,
              r.state, r.district, r.city, r.cityRaw, r.pincode,
             r.categoryName, r.segmentCanon, r.productCode, r.occurrence, r.sourceRowNumber,
@@ -1007,6 +1032,9 @@ export async function loadSecondaryOrders(
       rows: string; orders: string; date_min: Date; date_max: Date;
       basic: string; inclusive: string; gst: string; retailers: string;
       distributors: string; codes: string; sales_users: string;
+      employee_ids: string; reporting_managers: string;
+      employee_id_nulls: string; reporting_manager_nulls: string;
+      city_unavailable_literals: string; blank_gst_types: string;
       statuses: string[]; discount_min: string; discount_median: string;
       discount_max: string; discount_nulls: string; absent: string;
     }>(
@@ -1019,6 +1047,16 @@ export async function loadSecondaryOrders(
               COUNT(DISTINCT cp_code)::text AS distributors,
               COUNT(DISTINCT product_code)::text AS codes,
               COUNT(DISTINCT sales_user_name)::text AS sales_users,
+               COUNT(DISTINCT employee_id)::text AS employee_ids,
+               COUNT(DISTINCT reporting_manager)::text AS reporting_managers,
+               COUNT(*) FILTER (WHERE employee_id IS NULL)::text AS employee_id_nulls,
+               COUNT(*) FILTER (WHERE reporting_manager IS NULL)::text AS reporting_manager_nulls,
+               COUNT(*) FILTER (
+                 WHERE city IS NULL AND UPPER(TRIM(COALESCE(city_raw, ''))) = 'NA'
+               )::text AS city_unavailable_literals,
+               COUNT(*) FILTER (
+                 WHERE gst_type IS NULL AND COALESCE(gst_type_raw, '') = ''
+               )::text AS blank_gst_types,
               ARRAY_AGG(DISTINCT order_status) AS statuses,
               MIN(discount_pct)::text AS discount_min,
               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY discount_pct)::text AS discount_median,
@@ -1039,6 +1077,12 @@ export async function loadSecondaryOrders(
       Number(checked.distributors) === sep26Controls.distributors &&
       Number(checked.codes) === sep26Controls.codes &&
       Number(checked.sales_users) === sep26Controls.salesUsers &&
+       Number(checked.employee_ids) === sep26Controls.employeeIds &&
+       Number(checked.reporting_managers) === sep26Controls.reportingManagers &&
+       Number(checked.employee_id_nulls) === sep26Controls.employeeIdNulls &&
+       Number(checked.reporting_manager_nulls) === sep26Controls.reportingManagerNulls &&
+       Number(checked.city_unavailable_literals) === sep26Controls.cityUnavailableLiterals &&
+       Number(checked.blank_gst_types) === sep26Controls.blankGstTypes &&
       Math.abs(Number(checked.basic) - sep26Controls.basic) <= manifest.valueToleranceCents &&
       Math.abs(Number(checked.inclusive) - sep26Controls.inclusive) <= manifest.valueToleranceCents &&
       Math.abs(Number(checked.gst) - sep26Controls.gst) <= manifest.valueToleranceCents &&

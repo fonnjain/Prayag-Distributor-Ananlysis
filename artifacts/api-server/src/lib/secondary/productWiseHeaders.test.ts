@@ -187,6 +187,8 @@ describe("Product-Wise header contract", () => {
       cpCode: `DIST#${index % 119}`,
       productCode: String(index % 1545),
       salesUserName: `USER-${index % 116}`,
+      employeeId: `EMP-${index % 116}`,
+      reportingManager: `MANAGER-${index % 32}`,
       orderStatus: "APPROVED",
       discountPct: index === 0 ? 6 : index === 8436 ? 70.8 : 47.46,
       basicOrderValue: index === 0 ? 61305811 : 0,
@@ -205,9 +207,18 @@ describe("Product-Wise header contract", () => {
       orders: 1338,
       retailers: 1094,
       distributors: 119,
+      employeeIds: 116,
+      reportingManagers: 32,
+      employeeIdNulls: 0,
+      reportingManagerNulls: 0,
       cityUnavailableLiterals: 160,
       blankGstTypes: 110,
     });
+    expect(() => assertPrompt121Sep26Controls(
+      rows.map((row, index) => index === 0 ? { ...row, employeeId: null } : row),
+      8437, 0,
+      "14ac994927c3137db0354fb654afca3946057d7dfd26b0dfeb48b59e7a0800f4",
+    )).toThrow(/employee\/reporting-manager controls/);
   });
 
   it("rejects a synthetic September workbook with swapped value semantics", async () => {
@@ -224,5 +235,9 @@ describe("Product-Wise header contract", () => {
     const duplicate = [...AUGUST];
     duplicate[4] = "Customer Name";
     expect(() => resolveProductWiseHeaders(duplicate)).toThrow(/duplicates canonical field/);
+    expect(() => resolveProductWiseHeaders(AUGUST.filter((header) => header !== "Employee ID")))
+      .toThrow(/missing required headers: employeeId/);
+    expect(() => resolveProductWiseHeaders(AUGUST.filter((header) => header !== "Reporting Manager")))
+      .toThrow(/missing required headers: reportingManager/);
   });
 });

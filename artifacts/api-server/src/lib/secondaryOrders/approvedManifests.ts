@@ -18,6 +18,10 @@ export type ApprovedProductWiseManifest = {
   distributors: number;
   codes: number;
   salesUsers: number;
+  employeeIds: number;
+  reportingManagers: number;
+  employeeIdNulls: number;
+  reportingManagerNulls: number;
   statuses: readonly ["APPROVED"];
   discountMin: number;
   discountMedian: number;
@@ -49,6 +53,10 @@ export const APPROVED_PRODUCT_WISE_MANIFESTS: readonly ApprovedProductWiseManife
     distributors: 119,
     codes: 1545,
     salesUsers: 116,
+    employeeIds: 116,
+    reportingManagers: 32,
+    employeeIdNulls: 0,
+    reportingManagerNulls: 0,
     statuses: ["APPROVED"],
     discountMin: 6,
     discountMedian: 47.46,
