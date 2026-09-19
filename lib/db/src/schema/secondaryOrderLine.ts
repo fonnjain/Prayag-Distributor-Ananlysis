@@ -46,6 +46,8 @@ export const secondaryOrderLines = pgTable(
     fiscalYear: text("fiscal_year").notNull(),
     periodCompleteness: text("period_completeness").notNull(),
     sourceId: text("source_id"),
+    manifestId: text("manifest_id"),
+    manifestSha256: text("manifest_sha256"),
     orderId: text("order_id").notNull(),                // SORD-nnnn
     orderDatetime: timestamp("order_datetime", { withTimezone: true }).notNull(),
     orderStatus: text("order_status"),                  // unavailable in legacy CRM
@@ -108,6 +110,8 @@ export const secondaryOrderUploads = pgTable(
     sourceFile: text("source_file").notNull(),
     sourceId: text("source_id"),
     entryPoint: text("entry_point"),
+    sourceNote: text("source_note"),
+    uploadedBy: text("uploaded_by"),
     sourceSha256: text("source_sha256").notNull(),
     sourceBytes: bigint("source_bytes", { mode: "number" }).notNull(),
     loadedAt: timestamp("loaded_at", { withTimezone: true }).defaultNow().notNull(),

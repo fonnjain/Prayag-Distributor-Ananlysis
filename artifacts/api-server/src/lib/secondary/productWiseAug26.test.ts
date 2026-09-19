@@ -10,6 +10,7 @@ import {
   productWiseAug26MonthStatus,
   productWiseMonthFreezeDecision,
   productWiseRangeMonthPlan,
+  assertProductWiseRangeSkuSourceAllowed,
   toProductWiseAug26RecordedProvenance,
   type PreparedProductWiseAug26Load,
 } from "./productWiseAug26.js";
@@ -140,6 +141,11 @@ describe("Product-Wise frozen/open range overlap", () => {
 });
 
 describe("Product-Wise range replacement coverage", () => {
+  it("keeps Sep-26 authoritative in secondary_order_line", () => {
+    expect(() => assertProductWiseRangeSkuSourceAllowed(["Sep-26"])).toThrow(/secondary_order_line/);
+    expect(() => assertProductWiseRangeSkuSourceAllowed(["Oct-26"])).not.toThrow();
+  });
+
   it("refuses a truncated range export before it can replace an established month", () => {
     expect(() => assertProductWiseRangeReplacementCoverage({
       rowsBefore: 1_000,

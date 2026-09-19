@@ -6538,6 +6538,22 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
         FROM changed;
     `,
   },
+  {
+    id: "131_secondary_order_upload_provenance",
+    sql: `
+      ALTER TABLE secondary_order_upload
+        ADD COLUMN IF NOT EXISTS source_note TEXT,
+        ADD COLUMN IF NOT EXISTS uploaded_by TEXT;
+    `,
+  },
+  {
+    id: "132_secondary_order_line_manifest_identity",
+    sql: `
+      ALTER TABLE secondary_order_line
+        ADD COLUMN IF NOT EXISTS manifest_id TEXT,
+        ADD COLUMN IF NOT EXISTS manifest_sha256 TEXT;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

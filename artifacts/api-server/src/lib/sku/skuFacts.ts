@@ -985,6 +985,7 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
         FROM secondary_sku_line sku
         LEFT JOIN secondary_sku_month_state state
           ON state.fy = sku.fy AND state.month_label = sku.month_label AND state.source = sku.source
+       WHERE sku.source <> 'productwise_xlsx'
        GROUP BY sku.month_label, sku.source
     `);
     const productSourceRows = await db.execute<{
@@ -998,7 +999,7 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
               SUM(COALESCE(sol.basic_order_value, 0)::numeric) FILTER
                 (WHERE sol.dealer_id IS NOT NULL)::text AS identified_value,
               SUM(COALESCE(sol.basic_order_value, 0)::numeric)::text AS total_value,
-             MAX(sol.loaded_at)::text AS cutoff,
+             MAX(sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::text AS cutoff,
              MAX(sol.period_completeness) AS completeness
         FROM secondary_order_line sol
        WHERE sol.source_kind = 'product_wise'

@@ -39,6 +39,7 @@
 import { Router, Request, Response, raw } from "express";
 import path from "node:path";
 import fs from "node:fs";
+import crypto from "node:crypto";
 import ExcelJS from "exceljs";
 import { pool } from "@workspace/db";
 import { isAdminToken } from "../lib/adminAuth.js";
@@ -78,6 +79,15 @@ type LoadJob =
   | { status: "error"; finishedAt: string; error: string };
 
 let loadJob: LoadJob = { status: "idle" };
+type SepDryRun = {
+  sha256: string;
+  expiresAt: number;
+  sourceNote: string;
+  uploadedBy: string;
+  sourceFile: string;
+  result: LoadResult;
+};
+let mostRecentSepDryRun: SepDryRun | null = null;
 
 type Prompt56LoadJob =
   | { status: "idle" }
@@ -250,8 +260,26 @@ router.post(
       return;
     }
 
+    const sourceNote = String(req.headers["x-source-note"] ?? "").trim();
+    const uploadedBy = String(req.headers["x-uploaded-by"] ?? "").trim();
+    const sourceFile = String(req.headers["x-source-file"] ?? "").trim();
+    if (!sourceNote || !uploadedBy || !sourceFile || sourceNote.length > 2000 || uploadedBy.length > 200 || sourceFile.length > 500) {
+      res.status(400).json({ error: "x-source-note, x-uploaded-by, and x-source-file are required and must fit provenance limits." });
+      return;
+    }
+    const commit = String(req.query.commit ?? "") === "true";
+    if (commit && process.env.NODE_ENV !== "production") {
+      res.status(409).json({ error: "Sep-26 commit is production-only; development loads are performed directly with the reviewed loader." });
+      return;
+    }
+    if (commit && String(req.query.confirm ?? "") !== "sep26-replace") {
+      res.status(400).json({ error: "Commit requires confirm=sep26-replace." });
+      return;
+    }
+
     // Determine file path
     let resolvedPath: string;
+    let temporaryPath: string | null = null;
     try {
       if (Buffer.isBuffer(req.body) && (req.body as Buffer).length > 0) {
         // Option B: raw body upload — write to attached_assets
@@ -260,6 +288,7 @@ router.post(
         const dest = path.join(dir, `Product-Wise-Secondary-Order-Report_upload_${Date.now()}.xlsx`);
         fs.writeFileSync(dest, req.body as Buffer);
         resolvedPath = dest;
+        temporaryPath = dest;
       } else if (req.body && !Buffer.isBuffer(req.body) && typeof req.body === "object" && (req.body as Record<string, unknown>)["workspacePath"]) {
         // Option C: allowlisted workspace path (JSON body)
         const wp = String((req.body as Record<string, unknown>)["workspacePath"]);
@@ -281,6 +310,50 @@ router.post(
       return;
     }
 
+    if (!commit) {
+      try {
+        const result = await loadSecondaryOrders({
+          filePath: resolvedPath, dryRun: true,
+          sourceNote, uploadedBy, declaredSourceFile: sourceFile,
+        });
+        mostRecentSepDryRun = {
+          sha256: result.sourceSha256, expiresAt: Date.now() + 30 * 60_000,
+          sourceNote, uploadedBy, sourceFile, result,
+        };
+        res.json({
+          dryRun: true,
+          workbookSha256: result.sourceSha256,
+          controls: result.sep26Controls,
+          result,
+          next: "Re-submit the identical workbook with ?commit=true&confirm=sep26-replace&dryRunSha256=<workbookSha256>.",
+        });
+      } catch (err) {
+        res.status(422).json({ error: String(err instanceof Error ? err.message : err) });
+      } finally {
+        if (temporaryPath) fs.rmSync(temporaryPath, { force: true });
+      }
+      return;
+    }
+    const dryRunSha256 = String(req.query.dryRunSha256 ?? "");
+    if (
+      !mostRecentSepDryRun ||
+      mostRecentSepDryRun.expiresAt < Date.now() ||
+      mostRecentSepDryRun.sha256 !== dryRunSha256 ||
+      mostRecentSepDryRun.sourceNote !== sourceNote ||
+      mostRecentSepDryRun.uploadedBy !== uploadedBy ||
+      mostRecentSepDryRun.sourceFile !== sourceFile
+    ) {
+      if (temporaryPath) fs.rmSync(temporaryPath, { force: true });
+      res.status(409).json({ error: "A matching successful Sep-26 dry-run with identical provenance and SHA is required within 30 minutes." });
+      return;
+    }
+    const currentSha256 = crypto.createHash("sha256").update(fs.readFileSync(resolvedPath)).digest("hex");
+    if (currentSha256 !== dryRunSha256) {
+      if (temporaryPath) fs.rmSync(temporaryPath, { force: true });
+      res.status(409).json({ error: "The commit workbook SHA does not match the successful dry-run." });
+      return;
+    }
+
     const startedAt = new Date().toISOString();
     loadJob = { status: "running", startedAt };
 
@@ -292,7 +365,11 @@ router.post(
     });
 
     // Fire-and-forget
-    loadSecondaryOrders({ filePath: resolvedPath })
+    loadSecondaryOrders({
+      filePath: resolvedPath,
+      sourceNote, uploadedBy, declaredSourceFile: sourceFile,
+      expectedSha: dryRunSha256,
+    })
       .then((result) => {
         loadJob = { status: "done", finishedAt: new Date().toISOString(), result };
         req.log.info({ rowsInserted: result.rowsInserted, collisions: result.collisions.length }, "[secondaryOrders] load done");
@@ -300,6 +377,9 @@ router.post(
       .catch((err) => {
         loadJob = { status: "error", finishedAt: new Date().toISOString(), error: String(err instanceof Error ? err.message : err) };
         req.log.error({ err }, "[secondaryOrders] load error");
+      })
+      .finally(() => {
+        if (temporaryPath) fs.rmSync(temporaryPath, { force: true });
       });
   },
 );
@@ -511,8 +591,8 @@ router.get("/secondary-orders/summary", async (req: Request, res: Response) => {
          MAX(sol.loaded_at)::text                         AS loaded_at,
          COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')) AS periods,
          COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY'))
-           FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_periods,
-         COUNT(*) FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_rows,
+            FILTER (WHERE sol.period_completeness = 'partial') AS incomplete_periods,
+          COUNT(*) FILTER (WHERE sol.period_completeness = 'partial') AS incomplete_rows,
         COUNT(*) FILTER (WHERE sol.order_status = 'APPROVED') AS approved_lines,
         COUNT(*) FILTER (WHERE sol.order_status = 'PENDING')  AS pending_lines
       FROM secondary_order_line sol
@@ -522,11 +602,10 @@ router.get("/secondary-orders/summary", async (req: Request, res: Response) => {
     const result = await pool.query(query, params);
     const r = result.rows[0];
     const rowCount = Number(r.rows);
-    const filteredRange = Boolean(filters.dateFrom || filters.dateTo);
     const incompletePeriods = Number(r.incomplete_periods ?? 0);
     const completeness = rowCount === 0
       ? "unavailable" as const
-      : filteredRange || incompletePeriods > 0
+      : incompletePeriods > 0
         ? "partial" as const
         : "complete" as const;
     const unavailableReason = rowCount === 0
@@ -693,8 +772,8 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
             MAX(sol.loaded_at)::text AS loaded_at,
             COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')) AS periods,
             COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY'))
-              FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_periods,
-            COUNT(*) FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_rows,
+            FILTER (WHERE sol.period_completeness = 'partial') AS incomplete_periods,
+            COUNT(*) FILTER (WHERE sol.period_completeness = 'partial') AS incomplete_rows,
            COUNT(*) FILTER (WHERE sol.order_status = 'APPROVED') AS approved_lines,
            COUNT(DISTINCT sol.order_id) FILTER (WHERE sol.order_status = 'APPROVED') AS approved_orders,
            COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status = 'APPROVED'), 0) AS approved_basic,
@@ -777,11 +856,10 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
     const s = summary.rows[0];
      const [states, distributors, stateHeads] = filterRows;
     const totalRows = Number(s?.lines ?? 0);
-     const filteredRange = Boolean(filters.dateFrom || filters.dateTo);
      const incompletePeriods = Number(s?.incomplete_periods ?? 0);
      const listCompleteness = totalRows === 0
        ? "unavailable"
-       : filteredRange || incompletePeriods > 0 ? "partial" : "complete";
+       : incompletePeriods > 0 ? "partial" : "complete";
      const pageRows = rows.rows.slice(0, pageSize);
      const nextCursor = rows.rows.length > pageSize ? encodeCursor(pageRows[pageRows.length - 1] as Record<string, unknown>) : null;
     res.json({
@@ -900,8 +978,8 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
            MAX(sol.loaded_at)::text AS loaded_at
            ,COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')) AS periods
            ,COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY'))
-             FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_periods
-           ,COUNT(*) FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_rows
+             FILTER (WHERE sol.period_completeness = 'partial') AS incomplete_periods
+           ,COUNT(*) FILTER (WHERE sol.period_completeness = 'partial') AS incomplete_rows
          FROM secondary_order_line sol ${where}`,
         params,
       ),
@@ -909,11 +987,10 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
 
     const s = summary.rows[0];
     const exportRows = Number(s.rows);
-    const filteredRange = Boolean(filters.dateFrom || filters.dateTo);
     const incompletePeriods = Number(s.incomplete_periods ?? 0);
     const exportCompleteness = exportRows === 0
       ? "unavailable"
-      : filteredRange || incompletePeriods > 0 ? "partial" : "complete";
+      : incompletePeriods > 0 ? "partial" : "complete";
     const exportUnavailableReason = exportRows === 0
       ? "No Product-Wise rows are loaded for the selected range; this export is unavailable, not a genuine zero."
       : null;

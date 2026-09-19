@@ -2,18 +2,20 @@
  * CLI script: Load the Product-Wise Secondary Order Report.
  *
  * Usage (from the api-server directory):
- *   # Use the file already in attached_assets (default):
+ *   # Safe read-only dry run (the default):
  *   pnpm run load-secondary-orders
  *
  *   # Specify an explicit file path:
  *   SOL_XLSX=/path/to/file.xlsx pnpm run load-secondary-orders
  *
- *   # Dry run (parse only, no DB writes):
- *   pnpm run load-secondary-orders --dry-run
+ *   # Commit requires explicit provenance and confirmation:
+ *   SOL_XLSX=/path/to/file.xlsx SOURCE_NOTE="reviewed" \
+ *   UPLOADED_BY="operator" SOURCE_FILE="September.xlsx" \
+ *   pnpm run load-secondary-orders --commit
  *
  * The script:
- *   1. Runs pending DB migrations (creates secondary_order_line if needed)
- *   2. Loads the XLSX file
+ *   1. Dry-run parses and validates without writes (default)
+ *   2. --commit first dry-runs the exact bytes, then writes atomically
  *   3. Prints verification output with all anchor stats
  *   4. Reports idempotency (re-running produces the same row count)
  *   5. Confirms secondary_sku_line / secondary_register_line / sale_line are unchanged
@@ -27,17 +29,23 @@ import {
 } from "./lib/secondaryOrders/loader.js";
 import process from "node:process";
 
-const isDryRun = process.argv.includes("--dry-run");
+const isCommit = process.argv.includes("--commit");
+const isDryRun = !isCommit;
 
 async function main() {
   console.log("=".repeat(70));
   console.log("Secondary Order Report Loader");
   console.log("=".repeat(70));
 
-  // Step 1: Run migrations
-  console.log("\n[1/4] Running migrations...");
-  await runMigrations();
-  console.log("      Migrations OK");
+  if (isCommit && process.argv.includes("--dry-run")) {
+    throw new Error("Choose either --dry-run (the default) or --commit, not both.");
+  }
+  const sourceNote = process.env.SOURCE_NOTE?.trim() ?? "";
+  const uploadedBy = process.env.UPLOADED_BY?.trim() ?? "";
+  const declaredSourceFile = process.env.SOURCE_FILE?.trim() ?? "";
+  if (isCommit && (!process.env.SOL_XLSX || !sourceNote || !uploadedBy || !declaredSourceFile)) {
+    throw new Error("Commit requires SOL_XLSX, SOURCE_NOTE, UPLOADED_BY, and SOURCE_FILE.");
+  }
 
   // Confirm file
   let filePath: string;
@@ -61,11 +69,18 @@ async function main() {
   `);
   const btBefore = sideTablesBefore.rows[0];
 
-  // Step 2: Load
+  // Step 2: Load (default is read-only; commit performs a same-process dry run first)
   console.log(`\n[3/4] Loading... (dryRun=${isDryRun})`);
   let result;
   try {
-    result = await loadSecondaryOrders({ dryRun: isDryRun });
+    const provenance = isCommit ? { sourceNote, uploadedBy, declaredSourceFile } : {};
+    const dryRun = await loadSecondaryOrders({ filePath, dryRun: true, ...provenance });
+    result = isCommit
+      ? (await runMigrations(),
+        await loadSecondaryOrders({
+          filePath, ...provenance, expectedSha: dryRun.sourceSha256,
+        }))
+      : dryRun;
   } catch (err) {
     console.error(`\n[ERROR] Load failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);

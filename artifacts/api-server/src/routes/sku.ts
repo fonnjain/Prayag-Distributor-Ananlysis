@@ -247,21 +247,42 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+const PRODUCTWISE_RETAILER_MONTHS: Record<string, {
+  start: string;
+  end: string;
+}> = {
+  "Aug-26": {
+    start: "2026-08-01 00:00:00+05:30",
+    end: "2026-09-01 00:00:00+05:30",
+  },
+  "Sep-26": {
+    start: "2026-09-01 00:00:00+05:30",
+    end: "2026-10-01 00:00:00+05:30",
+  },
+};
+
 // Isolated Product-Wise CRM booking view. This endpoint deliberately does not
 // feed SKU facts, trends, recommendations, discount, or breadth calculations.
-router.get("/sku/retailer-aug26", async (req: Request, res: Response): Promise<void> => {
+// The legacy August route remains as a compatibility alias for existing callers.
+async function retailerProductWiseMonth(req: Request, res: Response, legacyMonth?: string): Promise<void> {
   try {
     const fy = typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
       ? req.query.fy.trim() : "2026-27";
     if (fy !== "2026-27") {
-      res.status(400).json({ error: "The Product-Wise retailer item view is only available for FY 2026-27 August." });
+      res.status(400).json({ error: "The Product-Wise retailer item view is only available for FY 2026-27." });
+      return;
+    }
+    const month = legacyMonth ?? (typeof req.query.month === "string" ? req.query.month.trim() : "Aug-26");
+    const period = PRODUCTWISE_RETAILER_MONTHS[month];
+    if (!period) {
+      res.status(400).json({ error: "month must be Aug-26 or Sep-26." });
       return;
     }
     const limitRaw = Number(req.query.limit ?? 100);
     const offsetRaw = Number(req.query.offset ?? 0);
     const limit = Number.isFinite(limitRaw) ? Math.min(500, Math.max(1, Math.floor(limitRaw))) : 100;
     const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.floor(offsetRaw)) : 0;
-    const [result, countResult] = await Promise.all([
+    const [result, countResult, metadataResult] = await Promise.all([
       db.execute(sql`
        SELECT id, order_id, order_datetime::text AS order_datetime,
               dealer_id, customer_name, product_code,
@@ -272,8 +293,8 @@ router.get("/sku/retailer-aug26", async (req: Request, res: Response): Promise<v
         FROM secondary_order_line
         WHERE fiscal_year = ${fy}
           AND source_kind = 'product_wise'
-         AND order_datetime >= TIMESTAMPTZ '2026-08-01 00:00:00+05:30'
-         AND order_datetime <  TIMESTAMPTZ '2026-09-01 00:00:00+05:30'
+         AND order_datetime >= ${period.start}::timestamptz
+         AND order_datetime <  ${period.end}::timestamptz
        ORDER BY customer_name, product_code, order_datetime, id
        LIMIT ${limit} OFFSET ${offset}
       `),
@@ -282,16 +303,27 @@ router.get("/sku/retailer-aug26", async (req: Request, res: Response): Promise<v
           FROM secondary_order_line
          WHERE fiscal_year = ${fy}
            AND source_kind = 'product_wise'
-           AND order_datetime >= TIMESTAMPTZ '2026-08-01 00:00:00+05:30'
-           AND order_datetime < TIMESTAMPTZ '2026-09-01 00:00:00+05:30'
+            AND order_datetime >= ${period.start}::timestamptz
+            AND order_datetime < ${period.end}::timestamptz
+      `),
+      db.execute(sql`
+        SELECT MAX(order_datetime)::text AS cutoff,
+               MAX(loaded_at)::text AS loaded_at,
+               BOOL_AND(LOWER(COALESCE(period_completeness, '')) = 'complete') AS is_complete
+          FROM secondary_order_line
+         WHERE fiscal_year = ${fy}
+           AND source_kind = 'product_wise'
+           AND order_datetime >= ${period.start}::timestamptz
+           AND order_datetime < ${period.end}::timestamptz
       `),
     ]);
     const rows = result.rows as Array<Record<string, unknown>>;
     const total = Number((countResult.rows[0] as { total?: number } | undefined)?.total ?? 0);
+    const metaRow = (metadataResult.rows[0] ?? {}) as Record<string, unknown>;
     const adapted = await adaptProductWiseMrp(rows.map((row) => ({
       orderId: row.order_id == null ? null : String(row.order_id),
       productCode: String(row.product_code ?? ""),
-      month: "Aug-26",
+       month,
       transactionDate: String(row.order_datetime),
       segment: row.category_name == null ? null : String(row.category_name),
       discountPct: row.discount_pct == null ? null : Number(row.discount_pct),
@@ -300,6 +332,12 @@ router.get("/sku/retailer-aug26", async (req: Request, res: Response): Promise<v
     })));
     res.json({
       ...AUG26_RETAILER_VIEW,
+      month,
+      monthStart: period.start,
+      monthEndExclusive: period.end,
+      completeness: total === 0 ? "unavailable" : metaRow.is_complete ? "complete" : "partial",
+      cutoff: metaRow.cutoff ?? null,
+      loadedAt: metaRow.loaded_at ?? null,
       excludedFrom: ["B3", "cross-source secondary discount", "multi-month gap across the seam", "multi-month breadth across the seam", "cross-source trends", "recommendations"],
       pagination: { limit, offset, total, hasMore: offset + rows.length < total },
       rows: adapted.rows.map((row, index) => {
@@ -323,10 +361,13 @@ router.get("/sku/retailer-aug26", async (req: Request, res: Response): Promise<v
       }),
     });
   } catch (err) {
-    req.log.error({ err }, "isolated Aug-26 retailer Product-Wise view failed");
-    res.status(500).json({ error: "Could not load the isolated August Product-Wise view." });
+    req.log.error({ err }, "isolated Product-Wise retailer month view failed");
+    res.status(500).json({ error: "Could not load the isolated Product-Wise retailer month view." });
   }
-});
+}
+
+router.get("/sku/retailer-productwise", (req, res) => retailerProductWiseMonth(req, res));
+router.get("/sku/retailer-aug26", (req, res) => retailerProductWiseMonth(req, res, "Aug-26"));
 
 // ── GET /api/sku/capability ───────────────────────────────────────────────────
 

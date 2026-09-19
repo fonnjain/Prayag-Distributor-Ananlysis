@@ -23,6 +23,10 @@ import { pool } from "@workspace/db";
 import { canonGroupFromMap } from "../sku/catalogue.js";
 import { normSecKey } from "../mgmt/names.js";
 import { logger } from "../logger.js";
+import { invalidateSnapshotsAsync } from "../payloadSnapshot.js";
+import {
+  resolveApprovedProductWiseManifest,
+} from "./approvedManifests.js";
 import {
   evaluateSecondaryOrderAnalyticsApproval,
   evaluateSecondaryOrderUpload,
@@ -31,57 +35,17 @@ import {
   type SecondaryOrderAnalyticsApproval,
   type UploadQualityEvaluation,
 } from "./uploadQuality.js";
-
-// ── Expected column headers (exact, in column order) ─────────────────────────
-const EXPECTED_HEADERS = [
-  "Date",
-  "Order ID",
-  "Sales User Name",
-  "Customer Name",
-  "Dealer ID",
-  "Dealer Mobile",
-  "Channel Partner Name",
-  "CP Code",
-  "State",
-  "District",
-  "City",
-  "Pincode",
-  "Category Name",
-  "Product Code",
-  "GST (%)",
-  "GST Amount",
-  "Qty",
-  "Discount (%)",
-  "Discount Amount",
-  "Dealer Order Value",
-  "Basic Order Value",
-  "Order Status",
-] as const;
-
-type ColIndex = {
-  date: number;
-  orderId: number;
-  salesUserName: number;
-  customerName: number;
-  dealerId: number;
-  dealerMobile: number;
-  cpName: number;
-  cpCode: number;
-  state: number;
-  district: number;
-  city: number;
-  pincode: number;
-  categoryName: number;
-  productCode: number;
-  gstPct: number;
-  gstAmount: number;
-  qty: number;
-  discountPct: number;
-  discountAmount: number;
-  dealerOrderValue: number;
-  basicOrderValue: number;
-  orderStatus: number;
-};
+import {
+  resolveProductWiseHeaders,
+  validateProductWiseValues,
+  type ProductWiseColumnIndexes,
+  type ProductWiseSemanticValidation,
+} from "../secondary/productWiseHeaders.js";
+import {
+  assertGenericProductWiseOrderMonth,
+  indiaMonthLabel,
+  productWiseOrderMonthPlan,
+} from "./monthReplacement.js";
 
 function plainCellValue(v: unknown): string | number | null {
   if (v == null) return null;
@@ -226,8 +190,128 @@ export type LoadResult = {
   sourceFile: string;
   sourceSha256: string;
   sourceBytes: number;
+  rowsRemoved?: number;
+  sep26Controls?: Prompt121Sep26Controls;
+  semanticValidation?: ProductWiseSemanticValidation;
   uploadVerification?: SecondaryOrderUploadVerification;
 };
+
+export type Prompt121Sep26Controls = {
+  sourceSha256: string;
+  rows: number;
+  orders: number;
+  dateMin: string;
+  dateMax: string;
+  basic: number;
+  inclusive: number;
+  gst: number;
+  retailers: number;
+  distributors: number;
+  codes: number;
+  salesUsers: number;
+  statuses: string[];
+  discountMin: number;
+  discountMedian: number;
+  discountMax: number;
+  discountNulls: number;
+  months: string[];
+};
+
+type SepControlRow = {
+  orderId: string;
+  orderDatetime: Date;
+  dealerId: string;
+  cpCode: string;
+  productCode: string;
+  salesUserName: string | null;
+  orderStatus: string;
+  discountPct: number | null;
+  basicOrderValue: number | null;
+  dealerOrderValueIncl: number | null;
+  gstAmount: number | null;
+};
+
+export const PRODUCT_WISE_ORDER_SNAPSHOT_PREFIXES = [
+  "sku-facts-v5-source-metadata|",
+  "sku-trend-v6-identity-value-metadata|",
+  "mgmt-data|",
+  "analytics|",
+  "warnings|v3|",
+  "company-reports|v3|",
+] as const;
+
+export function assertManifestReplacementAllowed(input: {
+  incomingCutoff: Date;
+  incomingCompleteness: "partial" | "complete";
+  incomingManifestId: string;
+  incomingSha256: string;
+  existingMaxOrderDatetime: Date | null;
+  existingCompleteness: string[];
+  existingManifestIds: string[];
+  existingManifestShas: string[];
+}): void {
+  const exactReplay = input.existingManifestIds.length === 1 &&
+    input.existingManifestShas.length === 1 &&
+    input.existingManifestIds[0] === input.incomingManifestId &&
+    input.existingManifestShas[0] === input.incomingSha256;
+  if (exactReplay) return;
+  if (input.existingMaxOrderDatetime && input.incomingCutoff < input.existingMaxOrderDatetime) {
+    throw new Error("Product-Wise manifest replacement cutoff must be monotonic.");
+  }
+  if (input.existingCompleteness.includes("complete") && input.incomingCompleteness !== "complete") {
+    throw new Error("A complete Product-Wise manifest cannot be replaced by a partial manifest.");
+  }
+}
+
+export async function invalidateProductWiseOrderSnapshots(): Promise<void> {
+  await Promise.all(PRODUCT_WISE_ORDER_SNAPSHOT_PREFIXES.map((prefix) => invalidateSnapshotsAsync(prefix)));
+}
+
+export function assertPrompt121Sep26Controls(
+  rows: SepControlRow[],
+  rowsScanned: number,
+  rowsRejected: number,
+  sourceSha256: string,
+): Prompt121Sep26Controls {
+  const errors: string[] = [];
+  const manifest = resolveApprovedProductWiseManifest(sourceSha256);
+  const indiaDates = rows.map((row) => row.orderDatetime.getTime()).sort((a, b) => a - b);
+  const expectedMin = Date.parse(manifest.dateMin);
+  const expectedMax = Date.parse(manifest.dateMax);
+  const discounts = rows.map((row) => row.discountPct).filter((value): value is number => value != null).sort((a, b) => a - b);
+  const basic = rows.reduce((sum, row) => sum + (row.basicOrderValue ?? 0), 0);
+  const inclusive = rows.reduce((sum, row) => sum + (row.dealerOrderValueIncl ?? 0), 0);
+  const gst = rows.reduce((sum, row) => sum + (row.gstAmount ?? 0), 0);
+  const controls: Prompt121Sep26Controls = {
+    sourceSha256, rows: rows.length, orders: new Set(rows.map((row) => row.orderId)).size,
+    dateMin: indiaDates.length ? new Date(indiaDates[0]!).toISOString() : "",
+    dateMax: indiaDates.length ? new Date(indiaDates[indiaDates.length - 1]!).toISOString() : "",
+    basic, inclusive, gst,
+    retailers: new Set(rows.map((row) => row.dealerId)).size,
+    distributors: new Set(rows.map((row) => row.cpCode)).size,
+    codes: new Set(rows.map((row) => row.productCode)).size,
+    salesUsers: new Set(rows.map((row) => row.salesUserName)).size,
+    statuses: [...new Set(rows.map((row) => row.orderStatus))].sort(),
+    discountMin: discounts[0] ?? NaN,
+    discountMedian: discounts.length % 2 ? discounts[Math.floor(discounts.length / 2)]! : (discounts[discounts.length / 2 - 1]! + discounts[discounts.length / 2]!) / 2,
+    discountMax: discounts[discounts.length - 1] ?? NaN,
+    discountNulls: rows.length - discounts.length,
+    months: [...new Set(rows.map((row) => indiaMonthLabel(row.orderDatetime)))].sort(),
+  };
+  const near = (actual: number, expected: number, cents = false) => Math.abs(actual - expected) <= (cents ? manifest.valueToleranceCents : 0);
+  if (rowsScanned !== manifest.rows || rows.length !== manifest.rows) errors.push(`rows=${rows.length}; scanned=${rowsScanned}; expected ${manifest.rows}`);
+  if (rowsRejected !== manifest.rejectedRows) errors.push(`rowsRejected=${rowsRejected}; expected ${manifest.rejectedRows}`);
+  if (controls.orders !== manifest.orders) errors.push(`orders=${controls.orders}; expected ${manifest.orders}`);
+  if (indiaDates[0] !== expectedMin || indiaDates[indiaDates.length - 1] !== expectedMax) errors.push("date range is not the reviewed 1–17 Sep-26 range");
+  if (!near(basic, manifest.basic) || !near(inclusive, manifest.inclusive, true) || !near(gst, manifest.gst, true)) errors.push(`value controls basic=${basic}, inclusive=${inclusive}, gst=${gst}`);
+  if (controls.retailers !== manifest.retailers || controls.distributors !== manifest.distributors || controls.codes !== manifest.codes || controls.salesUsers !== manifest.salesUsers) errors.push("identity/code control totals do not match reviewed Sep-26 controls");
+  if (controls.statuses.length !== manifest.statuses.length || controls.statuses[0] !== manifest.statuses[0]) errors.push(`statuses=${controls.statuses.join(",")}; expected ${manifest.statuses.join(",")}`);
+  if (controls.discountMin !== manifest.discountMin || controls.discountMedian !== manifest.discountMedian || controls.discountMax !== manifest.discountMax || controls.discountNulls !== manifest.discountNulls) errors.push("discount controls do not match reviewed Sep-26 controls");
+  if (controls.months.length !== 1 || controls.months[0] !== manifest.month) errors.push(`months=${controls.months.join(",")}; expected ${manifest.month}`);
+  if (rows.some((row) => row.orderId === manifest.absentOrderId)) errors.push(`${manifest.absentOrderId} must remain absent`);
+  if (errors.length) throw new Error(`Reviewed Sep-26 controls refused: ${errors.join("; ")}`);
+  return controls;
+}
 
 export type SecondaryOrderUploadVerification = {
   uploadId: number;
@@ -300,6 +384,7 @@ async function recordUploadVerification(
   client: SecondaryOrderDbClient,
   source: { sourceFile: string; sourceSha256: string; sourceBytes: number; sourceId?: string; entryPoint?: string },
   metrics: SecondaryOrderUploadMetrics,
+  provenance: { sourceNote?: string; uploadedBy?: string } = {},
 ): Promise<SecondaryOrderUploadVerification> {
   const baselineResult = await client.query<UploadBaselineRow>(
     `SELECT id, verification
@@ -321,17 +406,17 @@ async function recordUploadVerification(
   );
   const inserted = await client.query<InsertedUploadRow>(
     `INSERT INTO secondary_order_upload
-      (source_file, source_id, entry_point, source_sha256, source_bytes, verification, comparison, assessment, material_reasons, analytics_status)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9::text[], $10)
+      (source_file, source_id, entry_point, source_sha256, source_bytes, source_note, uploaded_by, verification, comparison, assessment, material_reasons, analytics_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11::text[], $12)
      RETURNING id, loaded_at::text`,
     [
       source.sourceFile,
       source.sourceId ?? null,
       source.entryPoint ?? "load-secondary-orders",
       source.sourceSha256,
-      source.sourceBytes,
-      JSON.stringify(metrics), JSON.stringify(evaluation.comparison),
-      evaluation.assessment, evaluation.materialReasons, evaluation.analyticsStatus,
+       source.sourceBytes, provenance.sourceNote ?? null, provenance.uploadedBy ?? null,
+       JSON.stringify(metrics), JSON.stringify(evaluation.comparison),
+       evaluation.assessment, evaluation.materialReasons, evaluation.analyticsStatus,
     ],
   );
   const row = inserted.rows[0];
@@ -444,12 +529,21 @@ export async function loadSecondaryOrders(
   opts: {
     filePath?: string;
     dryRun?: boolean;
+    sourceNote?: string;
+    uploadedBy?: string;
+    declaredSourceFile?: string;
+    expectedSha?: string;
   } = {},
 ): Promise<LoadResult> {
   const filePath = resolveSecondaryOrderXlsx(opts.filePath);
-  const sourceFile = path.basename(filePath);
+  const localSourceFile = path.basename(filePath);
+  const sourceFile = opts.declaredSourceFile?.trim() || localSourceFile;
   const dryRun = opts.dryRun ?? false;
   const { sourceSha256, sourceBytes } = await sourceLineage(filePath);
+  if (opts.expectedSha && sourceSha256 !== opts.expectedSha) {
+    throw new Error(`Workbook SHA ${sourceSha256} does not match expected SHA ${opts.expectedSha}.`);
+  }
+  const manifest = resolveApprovedProductWiseManifest(sourceSha256);
 
   const workbook = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
     entries: "emit",
@@ -484,6 +578,7 @@ export async function loadSecondaryOrders(
     discountAmount: number | null;
     dealerOrderValue: number | null;
     basicOrderValue: number | null;
+    dealerOrderValueIncl: number | null;
     occurrence: number;
     sourceRowNumber: number;
     contentHash: string;
@@ -491,7 +586,7 @@ export async function loadSecondaryOrders(
   };
 
   const rows: RawRow[] = [];
-  let colIdx: ColIndex | null = null;
+  let colIdx: ProductWiseColumnIndexes | null = null;
   let rowsScanned = 0;
   let rowsRejected = 0;
   const unmappedCategories = new Set<string>();
@@ -503,42 +598,30 @@ export async function loadSecondaryOrders(
 
       // Header row detection
       if (colIdx === null) {
-        const headers = values.map((v) => toText(v) ?? "");
-        // Validate exact header shape
-        for (let i = 0; i < EXPECTED_HEADERS.length; i++) {
-          if (headers[i] !== EXPECTED_HEADERS[i]) {
-            throw new Error(
-              `Secondary order report header mismatch at column ${i + 1}: ` +
-              `expected "${EXPECTED_HEADERS[i]}", got "${headers[i]}"`,
-            );
-          }
-        }
-        colIdx = {
-          date: 0, orderId: 1, salesUserName: 2, customerName: 3, dealerId: 4,
-          dealerMobile: 5, cpName: 6, cpCode: 7, state: 8, district: 9, city: 10,
-          pincode: 11, categoryName: 12, productCode: 13, gstPct: 14, gstAmount: 15,
-          qty: 16, discountPct: 17, discountAmount: 18, dealerOrderValue: 19,
-          basicOrderValue: 20, orderStatus: 21,
-        };
+        colIdx = resolveProductWiseHeaders(values.map((v) => toText(v) ?? ""));
         continue;
       }
 
       rowsScanned++;
 
-      const orderId = toText(values[colIdx.orderId]);
-      const productCode = toText(values[colIdx.productCode]);
-      const dealerId = toText(values[colIdx.dealerId]);
-      const cpCode = toText(values[colIdx.cpCode]);
-      const rawDatetime = parseOrderDatetime(values[colIdx.date]);
+      const at = (column: keyof ProductWiseColumnIndexes) => colIdx?.[column] === undefined ? null : values[colIdx[column]!];
+      const orderId = toText(at("orderId"));
+      const productCode = toText(at("productCode"));
+      const dealerId = toText(at("retailerId"));
+      const cpCode = toText(at("distributorCode"));
+      const rawDatetime = parseOrderDatetime(at("date"));
 
       if (!orderId || !productCode || !dealerId || !cpCode || !rawDatetime) {
         rowsRejected++;
         continue; // skip malformed rows
       }
 
-      const orderStatus = toText(values[colIdx.orderStatus]) ?? "PENDING";
-      const salesUserName = toText(values[colIdx.salesUserName]);
-      const categoryName = toText(values[colIdx.categoryName]);
+      const orderStatus = toText(at("orderStatus")) ?? "PENDING";
+      const salesUserName = toText(at("salesUserName"));
+      const categoryName = toText(at("categoryName"));
+      const dealerOrderValueIncl = toNum(at("dealerOrderValueIncl"));
+      const basicOrderValue = toNum(at("basicOrderValue"));
+      const gstAmount = toNum(at("gstAmount"));
 
       if (salesUserName && !unresolvedRawUsers.has(salesUserName)) {
         unresolvedRawUsers.add(salesUserName); // collect for resolution pass
@@ -549,38 +632,38 @@ export async function loadSecondaryOrders(
 
       const sourceRowNumber = rowsScanned + 1; // worksheet rows are header + data
       const hashParts = [
-        rawDatetime.toISOString(), orderStatus, salesUserName, toText(values[colIdx.customerName]),
-        dealerId, toText(values[colIdx.dealerMobile]), toText(values[colIdx.cpName]), cpCode,
-        toText(values[colIdx.state]), toText(values[colIdx.district]), toText(values[colIdx.city]),
-        toText(values[colIdx.pincode]), categoryName, productCode, toNum(values[colIdx.gstPct]),
-        toNum(values[colIdx.gstAmount]), toNum(values[colIdx.qty]), parseDiscountPct(values[colIdx.discountPct]),
-        toNum(values[colIdx.discountAmount]), toNum(values[colIdx.dealerOrderValue]),
-        toNum(values[colIdx.basicOrderValue]),
+         rawDatetime.toISOString(), orderStatus, salesUserName, toText(at("retailerName")),
+         dealerId, toText(at("retailerMobile")), toText(at("distributorName")), cpCode,
+        toText(at("state")), toText(at("district")), toText(at("city")),
+        toText(at("pincode")), categoryName, productCode, toNum(at("gstPct")),
+         gstAmount, toNum(at("qty")), parseDiscountPct(at("discountPct")),
+         toNum(at("discountAmount")), dealerOrderValueIncl, basicOrderValue,
       ];
       rows.push({
         orderId,
         orderDatetime: rawDatetime,
         orderStatus,
         salesUserName,
-        customerName: toText(values[colIdx.customerName]),
+         customerName: toText(at("retailerName")),
         dealerId,
-        dealerMobile: toText(values[colIdx.dealerMobile]),
-        cpName: toText(values[colIdx.cpName]),
+         dealerMobile: toText(at("retailerMobile")),
+         cpName: toText(at("distributorName")),
         cpCode,
-        state: toText(values[colIdx.state]),
-        district: toText(values[colIdx.district]),
-        city: toText(values[colIdx.city]),
-        pincode: toText(values[colIdx.pincode]),
+         state: toText(at("state")),
+         district: toText(at("district")),
+         city: toText(at("city")),
+         pincode: toText(at("pincode")),
         categoryName,
         segmentCanon,
         productCode,
-        gstPct: toNum(values[colIdx.gstPct]),
-        gstAmount: toNum(values[colIdx.gstAmount]),
-        qty: toNum(values[colIdx.qty]),
-        discountPct: parseDiscountPct(values[colIdx.discountPct]),
-        discountAmount: toNum(values[colIdx.discountAmount]),
-        dealerOrderValue: toNum(values[colIdx.dealerOrderValue]),
-        basicOrderValue: toNum(values[colIdx.basicOrderValue]),
+         gstPct: toNum(at("gstPct")),
+         gstAmount,
+         qty: toNum(at("qty")),
+         discountPct: parseDiscountPct(at("discountPct")),
+         discountAmount: toNum(at("discountAmount")),
+         dealerOrderValue: dealerOrderValueIncl,
+         basicOrderValue,
+         dealerOrderValueIncl,
         occurrence: 0,
         sourceRowNumber,
         contentHash: createHash("sha256").update(JSON.stringify(hashParts)).digest("hex"),
@@ -592,6 +675,7 @@ export async function loadSecondaryOrders(
 
   if (!colIdx) throw new Error("No header row found in secondary order report XLSX");
   if (rows.length === 0) throw new Error("Secondary order report contains no valid data rows");
+  const semanticValidation = validateProductWiseValues(rows);
   // Must happen before any DB transaction/insert: Product-Wise is only valid
   // from its CRM-era start. There is deliberately no upper bound here.
   assertProductWiseEraStart(rows);
@@ -638,6 +722,15 @@ export async function loadSecondaryOrders(
     });
   }
   const exactDuplicateWarning = rows.length > 0 && exactDuplicateExportRows.length / rows.length > 0.005;
+  const rowsByMonth = new Map<string, RawRow[]>();
+  for (const row of rows) {
+    const month = indiaMonthLabel(row.orderDatetime);
+    assertGenericProductWiseOrderMonth(month);
+    const monthRows = rowsByMonth.get(month) ?? [];
+    monthRows.push(row);
+    rowsByMonth.set(month, monthRows);
+  }
+  const sep26Controls = assertPrompt121Sep26Controls(rows, rowsScanned, rowsRejected, sourceSha256);
 
   // Resolve sales user IDs in bulk
   const persons = await getPersons();
@@ -678,6 +771,8 @@ export async function loadSecondaryOrders(
       sourceFile,
       sourceSha256,
       sourceBytes,
+      semanticValidation,
+      sep26Controls,
     };
   }
 
@@ -687,6 +782,7 @@ export async function loadSecondaryOrders(
 
   let rowsInserted = 0;
   let rowsSkipped = 0;
+  let rowsRemoved = 0;
   const collisions: CollisionDetail[] = [];
   const changedLineIdentityKeys = new Set<string>();
 
@@ -699,12 +795,101 @@ export async function loadSecondaryOrders(
     await client.query("BEGIN");
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('secondary_order_upload'))`);
 
+    for (const [month, monthRows] of rowsByMonth) {
+      const monthPlan = productWiseOrderMonthPlan({
+        month,
+        incoming: monthRows.map((row) => ({ orderId: row.orderId, productCode: row.productCode, occurrence: row.occurrence })),
+        existing: [],
+      });
+      if (monthPlan.action === "frozen") {
+        throw new Error(`Product-Wise ${month} replacement is frozen from ${monthPlan.freezeAt?.toISOString()}.`);
+      }
+      if (monthPlan.freezeAt?.toISOString() !== new Date(manifest.freezeAt).toISOString()) {
+        throw new Error(`Approved manifest ${manifest.version} freeze window does not match the Product-Wise month policy.`);
+      }
+      const existingManifest = await client.query<{
+        max_order_datetime: Date | null;
+        completeness: string[];
+        manifest_ids: string[];
+        manifest_shas: string[];
+      }>(
+        `SELECT MAX(order_datetime) AS max_order_datetime,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT period_completeness), NULL) AS completeness,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT manifest_id), NULL) AS manifest_ids,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT manifest_sha256), NULL) AS manifest_shas
+           FROM secondary_order_line
+          WHERE source_era = 'product_wise_crm' AND source_kind = 'product_wise'
+            AND order_datetime >= $1 AND order_datetime < $2`,
+        [monthPlan.startUtc, monthPlan.endUtc],
+      );
+      const existing = existingManifest.rows[0];
+      assertManifestReplacementAllowed({
+        incomingCutoff: new Date(manifest.cutoff),
+        incomingCompleteness: manifest.completeness,
+        incomingManifestId: manifest.version,
+        incomingSha256: sourceSha256,
+        existingMaxOrderDatetime: existing?.max_order_datetime ?? null,
+        existingCompleteness: existing?.completeness ?? [],
+        existingManifestIds: existing?.manifest_ids ?? [],
+        existingManifestShas: existing?.manifest_shas ?? [],
+      });
+      if (month !== "Sep-26" || monthRows.some((row) => indiaMonthLabel(row.orderDatetime) !== month)) {
+        throw new Error(`Reviewed Sep-26 replacement received an unintended month: ${month}.`);
+      }
+      const outsideTarget = await client.query<{ count: string }>(
+        `WITH incoming(order_id, product_code, occurrence) AS (
+           SELECT * FROM UNNEST($3::text[], $4::text[], $5::int[])
+         )
+         SELECT COUNT(*)::text AS count
+           FROM secondary_order_line sol
+           JOIN incoming i USING (order_id, product_code, occurrence)
+          WHERE sol.source_era = 'product_wise_crm'
+            AND sol.source_kind = 'product_wise'
+            AND NOT (sol.order_datetime >= $1 AND sol.order_datetime < $2)`,
+        [
+          monthPlan.startUtc,
+          monthPlan.endUtc,
+          monthRows.map((row) => row.orderId),
+          monthRows.map((row) => row.productCode),
+          monthRows.map((row) => row.occurrence),
+        ],
+      );
+      if (Number(outsideTarget.rows[0]?.count ?? 0) > 0) {
+        throw new Error("Reviewed Sep-26 controls refused: an incoming Product-Wise identity already exists outside the target Sep-26 bounds.");
+      }
+      const overlap = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+           FROM secondary_order_line
+          WHERE order_id = ANY($1::text[])
+            AND source_era = 'product_wise_crm'
+            AND source_kind = 'product_wise'
+            AND order_datetime >= $2 AND order_datetime < $3`,
+        [
+          monthRows.map((row) => row.orderId),
+          productWiseOrderMonthPlan({ month: "Aug-26", incoming: [], existing: [] }).startUtc,
+          monthPlan.startUtc,
+        ],
+      );
+      if (Number(overlap.rows[0]?.count ?? 0) > 0) {
+        throw new Error("Reviewed Sep-26 controls refused: an incoming order ID overlaps an existing Aug-26 Product-Wise order.");
+      }
+      const removed = await client.query(
+        `DELETE FROM secondary_order_line
+          WHERE source_era = 'product_wise_crm'
+            AND source_kind = 'product_wise'
+            AND order_datetime >= $1 AND order_datetime < $2
+          RETURNING id`,
+        [monthPlan.startUtc, monthPlan.endUtc],
+      );
+      rowsRemoved += removed.rowCount ?? 0;
+    }
+
     for (const r of rows) {
         const salesUserId = r.salesUserName ? (nameToPersonId.get(r.salesUserName) ?? null) : null;
 
         const result = await client.query<{ id: number }>(
           `INSERT INTO secondary_order_line
-              (source_era, source_kind, fiscal_year, period_completeness, source_id,
+              (source_era, source_kind, fiscal_year, period_completeness, source_id, manifest_id, manifest_sha256,
                order_id, order_datetime, order_status, sales_user_name, sales_user_id,
               customer_name, dealer_id, dealer_mobile, cp_name, cp_code,
               state, district, city, pincode,
@@ -713,20 +898,19 @@ export async function loadSecondaryOrders(
               gst_pct, gst_amount, qty, discount_pct, discount_amount,
               dealer_order_value, basic_order_value, source_file)
            VALUES
-              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-               $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
-             ON CONFLICT (source_era, order_id, product_code, occurrence) DO NOTHING
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+                $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
            RETURNING id`,
           [
             "product_wise_crm", "product_wise",
-            fiscalYearFromDate(r.orderDatetime), "partial", sourceFile,
-            r.orderId, r.orderDatetime, r.orderStatus, r.salesUserName, salesUserId,
+             fiscalYearFromDate(r.orderDatetime), manifest.completeness, sourceFile, manifest.version, sourceSha256,
+             r.orderId, r.orderDatetime, r.orderStatus, r.salesUserName, salesUserId,
             r.customerName, r.dealerId, r.dealerMobile, r.cpName, r.cpCode,
             r.state, r.district, r.city, r.pincode,
             r.categoryName, r.segmentCanon, r.productCode, r.occurrence, r.sourceRowNumber,
             r.contentHash, r.isExactDuplicateExport,
             r.gstPct, r.gstAmount, r.qty, r.discountPct, r.discountAmount,
-            r.dealerOrderValue, r.basicOrderValue, sourceFile,
+             r.dealerOrderValue, r.basicOrderValue, sourceFile,
           ],
         );
 
@@ -788,6 +972,55 @@ export async function loadSecondaryOrders(
         }
     }
 
+    const reviewed = await client.query<{
+      rows: string; orders: string; date_min: Date; date_max: Date;
+      basic: string; inclusive: string; gst: string; retailers: string;
+      distributors: string; codes: string; sales_users: string;
+      statuses: string[]; discount_min: string; discount_median: string;
+      discount_max: string; discount_nulls: string; absent: string;
+    }>(
+      `SELECT COUNT(*)::text AS rows, COUNT(DISTINCT order_id)::text AS orders,
+              MIN(order_datetime) AS date_min, MAX(order_datetime) AS date_max,
+              COALESCE(SUM(basic_order_value), 0)::text AS basic,
+              COALESCE(SUM(dealer_order_value), 0)::text AS inclusive,
+              COALESCE(SUM(gst_amount), 0)::text AS gst,
+              COUNT(DISTINCT dealer_id)::text AS retailers,
+              COUNT(DISTINCT cp_code)::text AS distributors,
+              COUNT(DISTINCT product_code)::text AS codes,
+              COUNT(DISTINCT sales_user_name)::text AS sales_users,
+              ARRAY_AGG(DISTINCT order_status) AS statuses,
+              MIN(discount_pct)::text AS discount_min,
+              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY discount_pct)::text AS discount_median,
+              MAX(discount_pct)::text AS discount_max,
+              COUNT(*) FILTER (WHERE discount_pct IS NULL)::text AS discount_nulls,
+              COUNT(*) FILTER (WHERE order_id = 'SORD-161782')::text AS absent
+         FROM secondary_order_line
+        WHERE source_era = 'product_wise_crm' AND source_kind = 'product_wise'
+          AND order_datetime >= $1 AND order_datetime < $2`,
+      [productWiseOrderMonthPlan({ month: "Sep-26", incoming: [], existing: [] }).startUtc,
+        productWiseOrderMonthPlan({ month: "Sep-26", incoming: [], existing: [] }).endUtc],
+    );
+    const checked = reviewed.rows[0];
+    const reviewedNumbersMatch = checked &&
+      Number(checked.rows) === sep26Controls.rows &&
+      Number(checked.orders) === sep26Controls.orders &&
+      Number(checked.retailers) === sep26Controls.retailers &&
+      Number(checked.distributors) === sep26Controls.distributors &&
+      Number(checked.codes) === sep26Controls.codes &&
+      Number(checked.sales_users) === sep26Controls.salesUsers &&
+      Math.abs(Number(checked.basic) - sep26Controls.basic) <= manifest.valueToleranceCents &&
+      Math.abs(Number(checked.inclusive) - sep26Controls.inclusive) <= manifest.valueToleranceCents &&
+      Math.abs(Number(checked.gst) - sep26Controls.gst) <= manifest.valueToleranceCents &&
+      Number(checked.discount_min) === sep26Controls.discountMin &&
+      Number(checked.discount_median) === sep26Controls.discountMedian &&
+      Number(checked.discount_max) === sep26Controls.discountMax &&
+      Number(checked.discount_nulls) === sep26Controls.discountNulls &&
+      Number(checked.absent) === 0 &&
+      JSON.stringify((checked.statuses ?? []).slice().sort()) === JSON.stringify(sep26Controls.statuses);
+    if (!reviewedNumbersMatch || checked.date_min.getTime() !== Date.parse(manifest.dateMin) || checked.date_max.getTime() !== Date.parse(manifest.dateMax)) {
+      throw new Error("Reviewed Sep-26 controls refused: post-insert authoritative secondary_order_line controls do not match the approved manifest.");
+    }
+
     const repeatedPairRows = sourcePairCollisions.reduce((total, pair) => total + pair.occurrences.length, 0);
     const metrics: SecondaryOrderUploadMetrics = {
       rowsScanned,
@@ -812,6 +1045,7 @@ export async function loadSecondaryOrders(
       client,
       { sourceFile, sourceSha256, sourceBytes, sourceId: sourceFile, entryPoint: "load-secondary-orders" },
       metrics,
+      { sourceNote: opts.sourceNote, uploadedBy: opts.uploadedBy },
     );
     await client.query("COMMIT");
   } catch (err) {
@@ -830,9 +1064,11 @@ export async function loadSecondaryOrders(
       collisions: collisions.length,
       assessment: uploadVerification.assessment,
       sourceFile,
+      localSourceFile,
     },
     "[secondaryOrders] load complete",
   );
+  await invalidateProductWiseOrderSnapshots();
 
   return {
     rowsScanned,
@@ -849,6 +1085,8 @@ export async function loadSecondaryOrders(
     sourceFile,
     sourceSha256,
     sourceBytes,
+    rowsRemoved,
+    sep26Controls,
     uploadVerification,
   };
 }

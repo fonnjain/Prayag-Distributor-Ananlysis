@@ -8,6 +8,12 @@ import { canonGroupFromMap } from "../sku/catalogue.js";
 import { assertSkuWipeGuard } from "../sku/skuWipeGuard.js";
 import { isMonthFrozen, monthFreezeAt } from "../registers/monthlyReplace.js";
 import { logger } from "../logger.js";
+import {
+  resolveProductWiseHeaders,
+  validateProductWiseValues,
+  type ProductWiseColumnIndexes,
+  type ProductWiseSemanticValidation,
+} from "./productWiseHeaders.js";
 
 export const AUG26_PRODUCTWISE = {
   fy: "2026-27",
@@ -21,31 +27,6 @@ export const AUG26_PRODUCTWISE_APPROVED_SHA256 =
   "9b1d0de5de753eb413055196cf9d627b91628cda87b6b3720f697834b6be42d2";
 export const AUG26_PRODUCTWISE_SOURCE_FILE =
   "Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026_1787135138176.xlsx";
-
-const EXPECTED_HEADERS = [
-  "Date",
-  "Order ID",
-  "Sales User Name",
-  "Customer Name",
-  "Dealer ID",
-  "Dealer Mobile",
-  "Channel Partner Name",
-  "CP Code",
-  "State",
-  "District",
-  "City",
-  "Pincode",
-  "Category Name",
-  "Product Code",
-  "GST (%)",
-  "GST Amount",
-  "Qty",
-  "Discount (%)",
-  "Discount Amount",
-  "Dealer Order Value",
-  "Basic Order Value",
-  "Order Status",
-] as const;
 
 type ProductWiseRow = {
   orderId: string;
@@ -61,6 +42,8 @@ type ProductWiseRow = {
   qty: number;
   discountPct: number | null;
   basicOrderValue: number;
+  dealerOrderValueIncl: number | null;
+  gstAmount: number | null;
   occurrence: number;
 };
 
@@ -84,6 +67,7 @@ export type ProductWiseAug26Controls = {
   months: string[];
   meanDiscountPct: number | null;
   unmappedCategories: string[];
+  semanticValidation?: ProductWiseSemanticValidation;
 };
 
 export type PreparedProductWiseAug26Load = {
@@ -213,7 +197,17 @@ function parseOrderDate(value: unknown): Date | null {
 
 function toMonthLabel(date: Date): string {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${months[date.getUTCMonth()]}-${String(date.getUTCFullYear() % 100).padStart(2, "0")}`;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(date);
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new Error(`Could not derive India-calendar month from ${date.toISOString()}.`);
+  }
+  return `${months[month - 1]}-${String(year % 100).padStart(2, "0")}`;
 }
 
 function sha1(parts: string[]): string {
@@ -255,37 +249,34 @@ export async function prepareProductWiseAug26Load(
   let missingItemCode = 0;
   let missingBasicValue = 0;
   let pendingRows = 0;
+  let indexes: ProductWiseColumnIndexes | null = null;
   const unmappedCategories = new Set<string>();
 
   for await (const worksheet of workbook) {
     for await (const row of worksheet) {
       const values = ((row.values as unknown[]) ?? []).slice(1);
       if (!headerSeen) {
-        const headers = values.map((value) => text(value) ?? "");
-        for (let index = 0; index < EXPECTED_HEADERS.length; index++) {
-          if (headers[index] !== EXPECTED_HEADERS[index]) {
-            throw new Error(
-              `Product-Wise header mismatch at column ${index + 1}: expected "${EXPECTED_HEADERS[index]}", got "${headers[index]}"`,
-            );
-          }
-        }
+        indexes = resolveProductWiseHeaders(values.map((value) => text(value) ?? ""));
         headerSeen = true;
         continue;
       }
 
       rowsScanned++;
-      const orderId = text(values[1]);
-      const orderDate = parseOrderDate(values[0]);
-      const salesUserName = text(values[2]);
-      const retailer = text(values[3]);
-      const dealerId = text(values[4]);
-      const distributor = text(values[6]);
-      const cpCode = text(values[7]);
-      const categoryName = text(values[12]);
-      const itemCode = text(values[13]);
-      const qty = numeric(values[16]);
-      const basicOrderValue = numeric(values[20]);
-      const status = (text(values[21]) ?? "PENDING").toUpperCase();
+      const at = (column: keyof ProductWiseColumnIndexes) => indexes?.[column] === undefined ? null : values[indexes[column]!];
+      const orderId = text(at("orderId"));
+      const orderDate = parseOrderDate(at("date"));
+      const salesUserName = text(at("salesUserName"));
+      const retailer = text(at("retailerName"));
+      const dealerId = text(at("retailerId"));
+      const distributor = text(at("distributorName"));
+      const cpCode = text(at("distributorCode"));
+      const categoryName = text(at("categoryName"));
+      const itemCode = text(at("productCode"));
+      const qty = numeric(at("qty"));
+      const basicOrderValue = numeric(at("basicOrderValue"));
+      const dealerOrderValueIncl = numeric(at("dealerOrderValueIncl"));
+      const gstAmount = numeric(at("gstAmount"));
+      const status = (text(at("orderStatus")) ?? "PENDING").toUpperCase();
 
       if (!orderDate) {
         noMonth++;
@@ -331,7 +322,9 @@ export async function prepareProductWiseAug26Load(
         categoryName,
         itemCode,
         qty,
-        discountPct: discountPct(values[17]),
+         discountPct: discountPct(at("discountPct")),
+         dealerOrderValueIncl,
+         gstAmount,
         basicOrderValue,
         occurrence: 0,
       });
@@ -341,6 +334,7 @@ export async function prepareProductWiseAug26Load(
 
   if (!headerSeen) throw new Error("No Product-Wise header row found");
   if (parsed.length === 0) throw new Error(`Product-Wise report contains no valid ${options.allowRange ? "FY2026-27" : "August"} rows`);
+  const semanticValidation = validateProductWiseValues(parsed);
 
   const occurrences = new Map<string, number>();
   const rows: InsertSecSkuLine[] = parsed.map((row) => {
@@ -403,6 +397,7 @@ export async function prepareProductWiseAug26Load(
       months: [...new Set(rows.map((row) => row.monthLabel))].sort(),
       meanDiscountPct: discounts.length === 0 ? null : discounts.reduce((sum, value) => sum + value, 0) / discounts.length,
       unmappedCategories: [...unmappedCategories].sort(),
+       semanticValidation,
     },
   };
 }
@@ -432,6 +427,12 @@ export function assertProductWiseRangeReplacementCoverage(input: {
  * shape and FY boundary, but permits the expected frozen/open overlap. */
 export async function prepareProductWiseRangeLoad(filePath: string): Promise<PreparedProductWiseRangeLoad> {
   return prepareProductWiseAug26Load(filePath, { allowRange: true });
+}
+
+export function assertProductWiseRangeSkuSourceAllowed(months: Iterable<string>): void {
+  if (Array.from(months).includes("Sep-26")) {
+    throw new Error("Sep-26 Product-Wise is authoritative in secondary_order_line; the SKU range flow cannot write September to secondary_sku_line.");
+  }
 }
 
 export function assertProductWiseRangeControls(prepared: PreparedProductWiseRangeLoad): void {
@@ -507,6 +508,10 @@ const EMPTY_CONTROLS: ProductWiseAug26Controls = {
   missingNames: 0, missingItemCode: 0, missingBasicValue: 0, net: 0, qty: 0,
   retailers: 0, distributors: 0, itemCodes: 0, salespeople: 0, orders: 0,
   pendingRows: 0, months: [], meanDiscountPct: null, unmappedCategories: [],
+  semanticValidation: {
+    rowsChecked: 0, rowsComparable: 0, rowsWithinRs1: 0, ratio: 0,
+    reverseRowsWithinRs1: 0, reverseRatio: 0,
+  },
 };
 
 function parseControls(value: unknown): ProductWiseAug26Controls {
@@ -829,6 +834,7 @@ export async function commitProductWiseRangeLoad(
     if (rows) rows.push(row);
     else byMonth.set(row.monthLabel, [row]);
   }
+  assertProductWiseRangeSkuSourceAllowed(byMonth.keys());
   const results: ProductWiseRangeMonthResult[] = [];
 
   await db.transaction(async (tx) => {

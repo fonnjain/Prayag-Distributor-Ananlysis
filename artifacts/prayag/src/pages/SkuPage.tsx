@@ -36,6 +36,7 @@ import {
   hasEntityFilter,
   type EntityFilterValue,
 } from "@/components/dashboard/CompanyReportFilters";
+import { formatProductWiseMonthLabel } from "@/lib/productWiseMonthLabel";
 
 const BASE = (import.meta as { env: Record<string, string> }).env.BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -118,6 +119,14 @@ export default function SkuPage() {
   const [augTotal, setAugTotal] = useState(0);
   const [augLoading, setAugLoading] = useState(false);
   const [augViewError, setAugViewError] = useState<string | null>(null);
+  const [productWiseMonth, setProductWiseMonth] = useState<"Aug-26" | "Sep-26">("Aug-26");
+  const [productWiseMeta, setProductWiseMeta] = useState<{
+    month?: string;
+    completeness?: string;
+    cutoff?: string | null;
+    monthStart?: string;
+    monthEndExclusive?: string;
+  } | null>(null);
 
   // Fetch state — drill
   const [drillData, setDrillData] = useState<FactsResponse | null>(null);
@@ -191,20 +200,22 @@ export default function SkuPage() {
     setAugLoading(true);
     setAugViewError(null);
     setAugRows([]);
-    fetch(`${BASE}/api/sku/retailer-aug26?fy=${encodeURIComponent(fy)}&limit=100&offset=0`)
+    setProductWiseMeta(null);
+    fetch(`${BASE}/api/sku/retailer-productwise?fy=${encodeURIComponent(fy)}&month=${productWiseMonth}&limit=100&offset=0`)
       .then((r) => r.ok
-        ? r.json() as Promise<{ rows?: Array<Record<string, unknown>>; pagination?: { total: number } }>
+        ? r.json() as Promise<{ rows?: Array<Record<string, unknown>>; pagination?: { total: number }; month?: string; completeness?: string; cutoff?: string | null; monthStart?: string; monthEndExclusive?: string }>
         : r.json().then((body: { error?: string }) => Promise.reject(new Error(body.error ?? `HTTP ${r.status}`))))
       .then((d) => {
         if (!cancelled) {
           setAugRows(d.rows ?? []);
           setAugTotal(d.pagination?.total ?? 0);
+          setProductWiseMeta(d);
         }
       })
       .catch((e: Error) => { if (!cancelled) setAugViewError(e.message); })
       .finally(() => { if (!cancelled) setAugLoading(false); });
     return () => { cancelled = true; };
-  }, [level, fy]);
+  }, [level, fy, productWiseMonth]);
 
   // ── Fetch drill (single segment) ─────────────────────────────────────────────
 
@@ -316,10 +327,10 @@ export default function SkuPage() {
         ? { level, scope: "head", scopeId: scopeHead }
         : { level, scope: "company" },
     );
-    // Prompt 120 requires the permanent July PSCode3 → August Product-Wise
-    // seam to be visible together, regardless of the global period selection.
+    // Prompt 120/121 require July PSCode3 plus August and September
+    // Product-Wise points together, regardless of the global period selection.
     params.set("monthFrom", "4");
-    params.set("monthTo", "5");
+    params.set("monthTo", "6");
     fetch(`${BASE}/api/sku/trend?${params}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -711,7 +722,7 @@ export default function SkuPage() {
             <div className="mb-4 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
               <p className="font-semibold">Monthly source metadata</p>
               {Object.entries(overviewData.sourceMetadata).map(([month, entries]) => entries.map((meta, index) => (
-                <p key={`${month}-${meta.source}-${meta.valueBasis}-${index}`}><b>{month}</b>: {meta.source} · {meta.valueBasis} · cutoff {meta.cutoff} · {meta.completeness} · {meta.included ? "included" : "excluded"} · identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}{meta.exclusionReason ? ` · ${meta.exclusionReason}` : ""}</p>
+                <p key={`${month}-${meta.source}-${meta.valueBasis}-${index}`}><b>{formatProductWiseMonthLabel(meta)}</b>: {meta.source} · {meta.valueBasis} · cutoff {meta.cutoff} · {meta.completeness} · {meta.included ? "included" : "excluded"} · identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}{meta.exclusionReason ? ` · ${meta.exclusionReason}` : ""}</p>
               )))}
             </div>
           )
@@ -727,12 +738,28 @@ export default function SkuPage() {
         )}
         {section === "overview" && level === "retailer" && (
           <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/40">
-            <h3 className="text-sm font-semibold">August 2026 · isolated retailer × item view</h3>
-            <p className="mt-1 text-xs text-muted-foreground">August uses individual Product-Wise CRM source rows, valued as Basic Order Value ex-GST. Each row keeps its own order date and observed discount; this isolated view does not combine July PSCode3 net amount with August.</p>
+             <div className="flex flex-wrap items-center justify-between gap-2">
+               <h3 className="text-sm font-semibold">{productWiseMonth} · isolated retailer × item view</h3>
+               <label className="flex items-center gap-2 text-xs">
+                 <span className="text-muted-foreground">Product-Wise month</span>
+                 <select
+                   value={productWiseMonth}
+                   onChange={(event) => setProductWiseMonth(event.target.value as "Aug-26" | "Sep-26")}
+                   className="rounded border bg-background px-2 py-1"
+                 >
+                   <option value="Aug-26">Aug-26</option>
+                   <option value="Sep-26">Sep-26</option>
+                 </select>
+               </label>
+             </div>
+             <p className="mt-1 text-xs text-muted-foreground">This view uses individual Product-Wise CRM source rows, valued as Basic Order Value ex-GST. Each row keeps its own order date and observed discount; it does not combine Product-Wise with PSCode3.</p>
+              {productWiseMeta?.completeness === "partial" && (
+                <p className="text-xs font-medium text-amber-700 dark:text-amber-300">{formatProductWiseMonthLabel(productWiseMeta, { partial: true }) || `${productWiseMonth} (partial)`} · cutoff {productWiseMeta.cutoff ?? "not recorded"}</p>
+             )}
             <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Rupees are not added or compared across this change; counts are.</p>
-            {augLoading ? <p className="mt-3 text-xs text-muted-foreground">Loading August retailer items…</p>
-              : augViewError ? <p role="alert" className="mt-2 text-xs text-destructive">Could not load retailer items: {augViewError}</p>
-              : augRows.length === 0 ? <p className="mt-3 text-xs text-muted-foreground">No August Product-Wise retailer items were returned for FY {fy}.</p>
+             {augLoading ? <p className="mt-3 text-xs text-muted-foreground">Loading {productWiseMonth} retailer items…</p>
+               : augViewError ? <p role="alert" className="mt-2 text-xs text-destructive">Could not load {productWiseMonth} retailer items: {augViewError}</p>
+               : augRows.length === 0 ? <p className="mt-3 text-xs text-muted-foreground">No {productWiseMonth} Product-Wise retailer items were returned for FY {fy}.</p>
               : (
               <div className="mt-3 max-h-64 overflow-auto">
                 <table className="w-full text-xs">

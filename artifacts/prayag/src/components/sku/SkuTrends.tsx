@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { useTheme } from "next-themes";
+import { formatProductWiseMonthLabel } from "@/lib/productWiseMonthLabel";
 
 // ── Types (mirror API response) ───────────────────────────────────────────────
 
@@ -126,6 +127,12 @@ export function chronologicalMonthKey(label: string): number {
   return (2000 + Number(match[2])) * 12 + MONTH_NUMBER[match[1]];
 }
 
+export function hasJulAugSourceSeam(level: string, monthly: TrendMonthRow[]): boolean {
+  return level === "retailer" &&
+    monthly.some((row) => row.fyMonth === "Jul-26") &&
+    monthly.some((row) => row.fyMonth === "Aug-26");
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SkuTrends({ data }: Props) {
@@ -135,9 +142,7 @@ export default function SkuTrends({ data }: Props) {
   const tickColor = isDark ? "#98999C" : "#71717a";
 
   const { fys, fyMonths, everSold, monthly, fyTotals, fyNetTotals } = data;
-  const julAugSeam = data.level === "retailer" &&
-    monthly.some((row) => row.fyMonth === "Jul-26") &&
-    monthly.some((row) => row.fyMonth === "Aug-26");
+  const julAugSeam = hasJulAugSourceSeam(data.level, monthly);
   const sourceEntries = useMemo(
     () => Object.entries(data.sourceMetadata ?? {})
       .sort(([a], [b]) => chronologicalMonthKey(a) - chronologicalMonthKey(b))
@@ -282,7 +287,7 @@ export default function SkuTrends({ data }: Props) {
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className="rounded border border-amber-400/60 px-2 py-1 font-medium">Jul-26 · PSCode3 net amount</span>
             <span aria-label="source seam marker" className="font-bold text-amber-700 dark:text-amber-300">│ source changes │</span>
-            <span className="rounded border border-amber-400/60 px-2 py-1 font-medium">Aug-26 · Product-Wise ex-GST</span>
+            <span className="rounded border border-amber-400/60 px-2 py-1 font-medium">{formatProductWiseMonthLabel({ month: "Aug-26", completeness: "complete" })} · Product-Wise ex-GST</span>
           </div>
           <p className="mt-2 font-medium">Rupees are not added or compared across this change; counts are.</p>
         </div>
@@ -299,7 +304,7 @@ export default function SkuTrends({ data }: Props) {
             </p>
             {sourceEntries.map(({ month, meta }) => (
               <p key={`${month}-${meta.source}`}>
-                <b>{month}</b>: {meta.source} - {meta.value_basis ?? meta.valueBasis} - cutoff {meta.cutoff} - {meta.completeness} - identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}
+                <b>{formatProductWiseMonthLabel(meta)}</b>: {meta.source} - {meta.value_basis ?? meta.valueBasis} - cutoff {meta.cutoff} - {meta.completeness} - identity coverage {meta.identityCoverage == null ? "n/a" : `${(meta.identityCoverage * 100).toFixed(1)}%`}
                 {meta.identityValueCoverage == null ? "" : ` of rows / ${(meta.identityValueCoverage * 100).toFixed(1)}% of value`}
                 {meta.included ? " - included" : " - excluded"}
                 {meta.exclusionReason ? ` - ${meta.exclusionReason}` : ""}
@@ -378,8 +383,12 @@ export default function SkuTrends({ data }: Props) {
             <Tooltip
               formatter={(val: number, name: string) => [`${val}%`, name]}
               labelFormatter={(label: string) => {
-                const meta = data.sourceMetadata?.[label]?.map((entry) => `${entry.source} · ${entry.valueBasis}${entry.included ? "" : " · excluded"}`).join(" | ");
-                return meta ? `${label} · ${meta}` : label;
+                const entries = data.sourceMetadata?.[label];
+                const meta = entries?.map((entry) => `${entry.source} · ${entry.valueBasis}${entry.included ? "" : " · excluded"}`).join(" | ");
+                const monthLabel = entries?.[0]
+                  ? formatProductWiseMonthLabel(entries[0])
+                  : label;
+                return meta ? `${monthLabel} · ${meta}` : monthLabel;
               }}
               contentStyle={{
                 fontSize: 12,

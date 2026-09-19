@@ -1,3 +1,5 @@
+import { formatProductWiseMonthLabel } from "@/lib/productWiseMonthLabel";
+
 type Props = {
   months: string[];
   secondaryCoverage?: {
@@ -20,6 +22,10 @@ function periodLabel(months: string[]): string {
   ).join(", ");
 }
 
+function secondaryPartialLabel(item: { month: string; through: string }): string {
+  return formatProductWiseMonthLabel({ month: item.month, cutoff: item.through }, { partial: true });
+}
+
 /** Quiet, shared reminder that open primary-register figures can still change. */
 export default function ProvisionalMonthsBanner({ months, secondaryCoverage }: Props) {
   if (!months.length && !secondaryCoverage?.sourceError && !secondaryCoverage?.partialMonths.length && !secondaryCoverage?.unavailableMonths.length) return null;
@@ -31,7 +37,7 @@ export default function ProvisionalMonthsBanner({ months, secondaryCoverage }: P
   const secondaryText = [
     secondaryCoverage?.sourceError ? "Secondary coverage source unavailable (not treated as missing months)" : null,
     partial.length
-      ? `Secondary ${partial.map((item) => `${item.month} (partial through ${new Date(item.through).toLocaleDateString("en-IN", { day: "numeric", month: "long" })})`).join(", ")}`
+      ? `Secondary ${partial.map(secondaryPartialLabel).join(", ")}`
       : null,
     unavailable.length ? `Secondary ${unavailable.join(", ")} unavailable` : null,
   ].filter(Boolean).join("; ");

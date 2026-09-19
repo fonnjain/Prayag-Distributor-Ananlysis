@@ -54,6 +54,8 @@ PSCode3 values through July use net amount. A view crossing the seam may
 compare explicitly labelled counts, but must not add or compare rupees.
 Discount/gross is **derived from MRP** where an effective price exists; a
 missing price is unavailable for that period, never a zero.
+CRM Product-Wise `Discount Amount` is a **per-unit** discount
+(`Discount % × implied MRP per piece`), not a line-total discount.
 
 **Implemented not-offered behaviour:** a closed-period sale with no
 effective-dated MRP row is excluded from discount and realisation calculations.
@@ -145,6 +147,8 @@ Development migrations are replay-safe and transactional, with stable ledger
 IDs and conditional writes that do not overwrite administrator edits.
 Production schema changes use Publish. Keep production objects represented in
 development and do not rely on NULLS NOT DISTINCT constraints.
+CRM export headers can change without notice. Loads map by header name with
+explicit aliases and apply semantic value checks before accepting rows.
 
 ## 14. Known blocked or absent
 

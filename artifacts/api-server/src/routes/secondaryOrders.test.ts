@@ -39,12 +39,20 @@ describe("Secondary Orders export gate", () => {
     expect(source).toContain('availability: rowCount > 0 ? "value" : "unavailable-with-reason"');
     expect(source).toContain("No Product-Wise rows are loaded for the selected range");
     expect(source).toContain('["Completeness", exportCompleteness]');
-    expect(source).toContain("COALESCE(sol.period_completeness, 'partial') <> 'complete'");
+    expect(source).toContain("sol.period_completeness = 'partial'");
     expect(source).toContain("incomplete_periods");
-    expect(source).toContain("const filteredRange = Boolean(filters.dateFrom || filters.dateTo)");
     expect(source).toContain("sol.source_kind = 'product_wise'");
     expect(source).toContain("2026-08-01 00:00:00+05:30");
     expect(source).toContain("source_kind = 'product_wise'");
+  });
+
+  it("keeps Sep-26 route fail-closed behind a matching dry-run", () => {
+    const source = readFileSync(new URL("./secondaryOrders.ts", import.meta.url), "utf8");
+    expect(source).toContain('confirm ?? "") !== "sep26-replace"');
+    expect(source).toContain("dryRunSha256");
+    expect(source).toContain("mostRecentSepDryRun");
+    expect(source).toContain("x-source-note");
+    expect(source).toContain("production-only; development loads are performed directly");
   });
 });
 

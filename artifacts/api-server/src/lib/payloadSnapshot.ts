@@ -24,6 +24,12 @@ type AnyPayload = Record<string, unknown>;
 
 const _cache = new Map<string, { payload: AnyPayload; expiresAt: number }>();
 const _inFlight = new Map<string, Promise<AnyPayload>>();
+const _pendingSaves = new Map<string, Set<Promise<void>>>();
+let _generation = 0;
+
+export function isSnapshotGenerationCurrent(captured: number, current: number): boolean {
+  return captured === current;
+}
 
 async function saveSnapshot(key: string, payload: AnyPayload): Promise<void> {
   try {
@@ -37,6 +43,21 @@ async function saveSnapshot(key: string, payload: AnyPayload): Promise<void> {
   } catch (err) {
     logger.warn({ err, key }, "payload snapshot: save failed");
   }
+}
+
+function trackSnapshotSave(key: string, payload: AnyPayload, generation: number): void {
+  const pending = (async () => {
+    if (!isSnapshotGenerationCurrent(generation, _generation)) return;
+    await saveSnapshot(key, payload);
+  })();
+  const writes = _pendingSaves.get(key) ?? new Set<Promise<void>>();
+  writes.add(pending);
+  _pendingSaves.set(key, writes);
+  void pending.finally(() => {
+    const current = _pendingSaves.get(key);
+    current?.delete(pending);
+    if (current?.size === 0) _pendingSaves.delete(key);
+  });
 }
 
 async function loadSnapshot(
@@ -65,10 +86,12 @@ function buildAndCache<T extends AnyPayload>(
 ): Promise<T> {
   const pending = _inFlight.get(key);
   if (pending) return pending as Promise<T>;
+  const generation = _generation;
   const p = (async () => {
     const payload = await build();
+    if (!isSnapshotGenerationCurrent(generation, _generation)) return payload;
     _cache.set(key, { payload, expiresAt: Date.now() + ttlMs });
-    void saveSnapshot(key, payload);
+    trackSnapshotSave(key, payload, generation);
     return payload;
   })().finally(() => _inFlight.delete(key));
   _inFlight.set(key, p);
@@ -83,15 +106,36 @@ function buildAndCache<T extends AnyPayload>(
  * to avoid matching unrelated keys.
  */
 export function invalidateSnapshots(prefix: string): void {
+  void invalidateSnapshotsAsync(prefix).catch(() => undefined);
+}
+
+/** Awaitable variant for transactional writers that must not resolve before
+ * persisted snapshots have been removed. */
+export async function invalidateSnapshotsAsync(prefix: string): Promise<void> {
+  _generation++;
   for (const key of _cache.keys()) {
     if (key.startsWith(prefix)) _cache.delete(key);
   }
-  void db
+  const matchingInflight = [..._inFlight.entries()]
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([, promise]) => promise);
+  const matchingWrites = [..._pendingSaves.entries()]
+    .filter(([key]) => key.startsWith(prefix))
+    .flatMap(([, writes]) => [...writes]);
+  await Promise.allSettled([...matchingInflight, ...matchingWrites]);
+  // A build that was resolving concurrently can only publish if it captured
+  // the old generation; wait once more for any write it registered.
+  const lateWrites = [..._pendingSaves.entries()]
+    .filter(([key]) => key.startsWith(prefix))
+    .flatMap(([, writes]) => [...writes]);
+  if (lateWrites.length) await Promise.allSettled(lateWrites);
+  await db
     .delete(routePayloadSnapshots)
     .where(like(routePayloadSnapshots.key, `${prefix.replace(/[%_\\]/g, "\\$&")}%`))
-    .catch((err: unknown) =>
-      logger.warn({ err, prefix }, "payload snapshot: invalidation failed"),
-    );
+    .catch((err: unknown) => {
+      logger.warn({ err, prefix }, "payload snapshot: invalidation failed");
+      throw err;
+    });
 }
 
 /**
@@ -127,7 +171,9 @@ export async function serveWithSnapshot<T extends AnyPayload>(opts: {
   const cached = _cache.get(key);
   if (cached && Date.now() < cached.expiresAt) return cached.payload as T;
 
+  const generation = _generation;
   const snap = await loadSnapshot(key);
+  if (!isSnapshotGenerationCurrent(generation, _generation)) return serveWithSnapshot(opts);
   if (snap) {
     if (opts.frozen && (opts.frozenSince === undefined || snap.savedAt.getTime() >= opts.frozenSince)) {
       // Frozen source data: the snapshot is authoritative. Re-warm the
@@ -174,7 +220,9 @@ export async function prewarmSnapshot<T extends AnyPayload>(opts: {
   ttlMs: number;
   build: () => Promise<T>;
 }): Promise<"exists" | "built"> {
+  const generation = _generation;
   const existing = await loadSnapshot(opts.key);
+  if (!isSnapshotGenerationCurrent(generation, _generation)) return prewarmSnapshot(opts);
   if (existing) return "exists";
   await buildAndCache(opts.key, opts.ttlMs, opts.build);
   return "built";

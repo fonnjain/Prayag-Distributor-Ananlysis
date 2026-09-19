@@ -35,4 +35,16 @@ describe("secondary open coverage", () => {
     );
     expect(result.unavailableMonths).toContain("Sep-26");
   });
+
+  it("reports September Product-Wise data as partial through the loaded date", () => {
+    const result = classifySecondaryOpenCoverage(
+      [{ month_number: 9, max_order_date: "2026-09-17", has_partial: true, has_complete: false }],
+      "2026-27",
+      NOW,
+    );
+    expect(result.partialMonths).toEqual([
+      { month: "Sep-26", through: "2026-09-17T00:00:00.000Z" },
+    ]);
+    expect(result.unavailableMonths).not.toContain("Sep-26");
+  });
 });
