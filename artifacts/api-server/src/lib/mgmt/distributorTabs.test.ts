@@ -75,6 +75,10 @@ describe("Prompt 118 secondary seam reconciliation guards", () => {
     const source = readFileSync(new URL("./distributorTabs.ts", import.meta.url), "utf8");
     expect(source).toContain("cp_code IS NOT NULL");
     expect(source).toContain("NULLIF(BTRIM(cp_code), '')");
+    const normalizedDistributor =
+      "COALESCE(NULLIF(BTRIM(cp_name), ''), NULLIF(BTRIM(cp_code), ''))";
+    expect(source).toContain(`SELECT ${normalizedDistributor} AS distributor`);
+    expect(source).toContain(`GROUP BY ${normalizedDistributor}`);
   });
 });
 

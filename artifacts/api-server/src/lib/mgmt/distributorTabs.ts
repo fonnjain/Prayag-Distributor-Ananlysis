@@ -277,7 +277,7 @@ export async function buildDistributorRecon(fy: string): Promise<DistributorReco
   // That source is valid only from FY2026-27 onward.
   const productWiseSecRows = fy >= "2026-27"
     ? await db.execute<{ distributor: string; value: string }>(sql`
-        SELECT COALESCE(cp_name, cp_code) AS distributor,
+        SELECT COALESCE(NULLIF(BTRIM(cp_name), ''), NULLIF(BTRIM(cp_code), '')) AS distributor,
                SUM(COALESCE(basic_order_value, 0)::numeric)::text AS value
           FROM secondary_order_line
          WHERE fiscal_year = ${fy} AND source_kind = 'product_wise'
