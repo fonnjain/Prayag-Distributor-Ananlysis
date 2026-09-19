@@ -23,6 +23,30 @@ describe("Prompt 119 D Product-Wise identity controls", () => {
     expect(result.byStateHead.get("west")).toBe(81 * 890000);
     expect(result.byStateHead.get("east")).toBe(80 * 890000 + 810000);
   });
+
+  it("merges approved head-name variants in both E-table sources", () => {
+    const headMonth = aggregateAugustSecondaryHeadRows([
+      { head_canon: "Member A", state_head: "Aqil Rizvi", ordered_amount: 10 },
+      { head_canon: "Member B", state_head: "Syed Aqil Rizvi", ordered_amount: 20 },
+      { head_canon: "Member C", state_head: "Pawan Sharma", ordered_amount: 30 },
+      { head_canon: "Member D", state_head: "Pawan Kumar Sharma", ordered_amount: 40 },
+      { head_canon: "Member E", state_head: "Narendra Sharma", ordered_amount: 50 },
+      { head_canon: "Member F", state_head: "Narendra Kumar Sharma", ordered_amount: 60 },
+    ]);
+    expect(headMonth.byStateHead.get("syedaqilrizvi")).toBe(30);
+    expect(headMonth.byStateHead.get("pawankumarsharma")).toBe(70);
+    expect(headMonth.byStateHead.get("narendrakumarsharma")).toBe(110);
+
+    const productWise = resolveProductWiseRows([
+      { employee_id: "A", sales_user_name: null, basic_order_value: 10 },
+      { employee_id: "B", sales_user_name: null, basic_order_value: 20 },
+    ], [
+      { canonical_name: "Member A", employee_code: "A", norm_key: "membera", person_id: 10, state_head: "Aqil Rizvi" },
+      { canonical_name: "Member B", employee_code: "B", norm_key: "memberb", person_id: 11, state_head: "Syed Aqil Rizvi" },
+    ]);
+    expect(productWise.productWiseByStateHead.get("syedaqilrizvi")).toBe(30);
+  });
+
   it("uses employee code first and keeps name fallback only for absent/unresolved code", () => {
     const result = resolveProductWiseRows([
       { employee_id: "PRG-353", sales_user_name: "Wrong Name", basic_order_value: 100 },

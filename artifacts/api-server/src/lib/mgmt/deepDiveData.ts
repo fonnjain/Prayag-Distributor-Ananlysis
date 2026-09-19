@@ -58,7 +58,7 @@ const DATA_TAB_NAME = "Data";
 
 // Import from names.ts (single authoritative definition) and re-export so
 // all callers keep their existing `import { normSecKey } from "...deepDiveData.js"`.
-import { normSecKey } from "./names.js";
+import { normSecKey, resolveHeadKey } from "./names.js";
 export { normSecKey };
 
 // ── Cell helpers ──────────────────────────────────────────────────────────────
@@ -1297,7 +1297,7 @@ export function aggregateAugustSecondaryHeadRows(
     const headKey = normSecKey(row.head_canon);
     byHead.set(headKey, (byHead.get(headKey) ?? 0) + value);
     if (row.state_head) {
-      const stateHeadKey = row.state_head.trim().toLowerCase();
+      const stateHeadKey = resolveHeadKey(row.state_head);
       byStateHead.set(stateHeadKey, (byStateHead.get(stateHeadKey) ?? 0) + value);
     }
   }
@@ -1367,7 +1367,7 @@ export function resolveProductWiseRows(
     const key = person.norm_key;
     out.values.set(key, (out.values.get(key) ?? 0) + value);
     if (person.state_head) {
-      const headKey = person.state_head.trim().toLowerCase();
+      const headKey = resolveHeadKey(person.state_head);
       out.productWiseByStateHead.set(headKey, (out.productWiseByStateHead.get(headKey) ?? 0) + value);
     }
     out.mappedCount++;
@@ -1622,9 +1622,9 @@ export async function loadDeepDiveData(
       reasons: productWise.reasonCounts,
     };
     teamSummary.augustSecondaryHeadOrdered =
-      productWise.augustByStateHead.get(selectedStateHead!.trim().toLowerCase()) ?? null;
+      productWise.augustByStateHead.get(resolveHeadKey(selectedStateHead)) ?? null;
     teamSummary.stateHeadComparison = stateHeads.map((stateHead) => {
-      const key = stateHead.trim().toLowerCase();
+      const key = resolveHeadKey(stateHead);
       const p = productWise.productWiseByStateHead.get(key) ?? null;
       const h = productWise.augustByStateHead.get(key) ?? null;
       return {
@@ -1728,7 +1728,7 @@ export async function loadDeepDiveData(
       reasons: productWise.reasonCounts,
     },
     augustSecondaryHeadOrdered: selectedStateHead
-      ? productWise.augustByStateHead.get(selectedStateHead.trim().toLowerCase()) ?? null
+      ? productWise.augustByStateHead.get(resolveHeadKey(selectedStateHead)) ?? null
       : null,
     stateHeadComparison: selectedStateHead ? teamSummary?.stateHeadComparison : undefined,
   };
