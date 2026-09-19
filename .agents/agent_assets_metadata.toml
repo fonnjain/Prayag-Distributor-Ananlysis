@@ -1122,3 +1122,31 @@ mtime_ms = 1789817358159
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/e82d82b9-c5f1-4793-bd9a-d44c32d1df3f/6f9dfaa8-e8b8-4c04-ab5f-e8ea474fd566"
 storage_version_token = "1789820288640810"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "qf1IcRlSCCZPGo7DxxXTT"
+uri = "file://reports/prompt-121-head-member-reconciliation.md"
+type = "text"
+title = "All-head CRM vs head_month reconciliation"
+description = "Production head summary, every missing/below-90% member, and the Aqil overage offset."
+logical_id = "14348dd9-89cb-4155-8725-8707f8f4121b"
+content_hash = "sha256:acc38fa9d8921d6be31859c06b6928da54ddef4267f68bb7a1bfc71fbd886bba"
+size = 9539
+mtime_ms = 1789827965739
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/14348dd9-89cb-4155-8725-8707f8f4121b/46febbec-b62f-4b1c-a107-57c04f91fa17"
+storage_version_token = "1789827978204073"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "cRmLZoySt7MZllpQ_DB20"
+uri = "file://reports/prompt-121-head-member-exceptions.csv"
+type = "table"
+title = "CRM vs head_month member exceptions"
+description = "CSV of all members missing from head_month or below 90% coverage."
+logical_id = "642e8027-b8ba-429d-9bc6-bcc95ca1424a"
+content_hash = "sha256:a1c115a0b489f47c4aaa37817b4beff4865bc6021ba6498afcff57a03b9428fe"
+size = 5672
+mtime_ms = 1789827906662
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/642e8027-b8ba-429d-9bc6-bcc95ca1424a/e6bef091-f767-48f0-b5db-230da0c0eb7c"
+storage_version_token = "1789827981410944"
+content_type = "text/csv"
