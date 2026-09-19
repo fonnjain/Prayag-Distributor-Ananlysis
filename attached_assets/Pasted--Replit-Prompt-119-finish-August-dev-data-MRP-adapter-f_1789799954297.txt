@@ -1,0 +1,168 @@
+# Replit Prompt 119 — finish August: dev data, MRP adapter fix, publish
+
+**Date:** 19 September 2026
+**Follows:** your Prompt 118 report.
+
+**Verified by me:** 417b54a, 7254719, 8efa614 and d74b058 are all on origin/main, and d74b058 is HEAD. The Step 5 findings are accepted. Holding back publication was correct.
+
+**Standing rules:**
+- every figure names dev or prod and its source table
+- nothing in Prayag's files is changed
+
+---
+
+## A. Dev has the wrong August data. Fix the data, not the code.
+
+I checked the source file, Aug_month_order_booking.xlsx, myself:
+
+```
+rows               28,185
+Basic Order Value  Rs 19,57,88,289   (matches your production figure exactly)
+Discount (%)       0 null, 0 zero    (min 4, median 47.75, max 99)
+Qty, Product Code  0 null
+Order Status       all APPROVED
+retailers / codes  2,832 / 2,380
+```
+
+Dev has 8,602 partial rows with every discount field null. That is a
+broken or old dev load. The CRM data itself is complete.
+
+- **A1.** Reload August Product-Wise into dev through the same validated
+  loader production used, from the same file. Dev must then match prod:
+  28,185 rows, Rs 19,57,88,289, and 0 null discounts.
+- **A2.** Print a dev vs prod parity line for August: rows, value, null
+  discounts, retailers and codes. They must be identical.
+- **A3.** Rerun the dev acceptance.
+
+---
+
+## B. The MRP adapter never uses MRP. This is a real defect.
+
+In productWiseMrpAdapter.ts:
+
+```
+gross = basicOrderValueExGst / (1 - discountPct/100)
+```
+
+MRP is fetched, but it is only used as an include/exclude gate. The gross
+is really the CRM's implied gross, rebuilt from the CRM's own discount %,
+yet it is labelled "derived from MRP". The label is wrong, and nothing is
+checked against the price list.
+
+- **B1.** Compute TWO measures and label each one honestly:
+
+  ```
+  gross_mrp     = effective MRP x Qty
+                  label: "derived from price list (MRP)"
+  discount_mrp  = 1 - basic / gross_mrp
+
+  gross_crm     = basic / (1 - Discount%/100)
+                  label: "derived from CRM discount %"
+  ```
+
+- **B2.** GST BASIS. Basic Order Value is ex-GST (GST Type = "GST EXTRA",
+  18%). Use exactly the same MRP basis convention that primary discount
+  uses. State which one it is, and show one worked row from SORD-9 end to
+  end.
+- **B3.** AGREEMENT CHECK. This is the bridge we never had. For each code:
+
+  ```
+  implied_mrp = basic / Qty / (1 - Discount%/100)
+  ```
+
+  Compare it with the catalogue MRP. Report the counts of codes within
+  1%, within 5%, and outside 5%, with their value. If the typical ratio
+  is about 1.18 or about 0.85, that is GST, and you should say so.
+- **B4.** UNIT PROBLEMS. In my check, 102 of 2,380 codes have an implied
+  MRP that varies by more than 2% within August, for example:
+
+  ```
+  120-WS   0.04 to 146      (3,569x)
+  127      4.6  to 252
+  PW 61    2,070 to 23,115
+  PU-13    397  to 4,367
+  ```
+
+  These are Qty unit or pack differences, like tanks recorded in litres
+  vs pieces. Flag them as UNIT_MISMATCH. Exclude them from gross_mrp and
+  count them. Do not price them.
+- **B5.** The discount shown on surfaces uses discount_mrp. The CRM
+  Discount % is shown alongside as observed. Where the two differ by
+  more than 2 points, flag the row.
+
+---
+
+## C. MRP inside the open FY must be effective-dated
+
+The current rule prices every open-FY month at today's mrp_synced. Your
+own label on the price list is authoritative_master_2026_09_01. If
+prices changed on 1 September, August is being priced at September
+prices.
+
+- **C1.** For any COMPLETED month, including months in the open FY, use
+  the MRP effective on the transaction date:
+  - mrp_history first
+  - mrp_synced only when no history row covers that date
+- **C2.** Report how many August codes changed MRP between Aug and Sep,
+  and the value affected.
+- **C3.** Apply the same rule to primary discount, and report any change
+  in August primary discount.
+
+---
+
+## D. Sales Deep Dive — secondary (Step 3 row 7). Approved as follows.
+
+- **D1.** Member-performance figures keep secondary_head_month as the
+  measure. It has August: 162 rows, ordered Rs 14.41 Cr. SHOW AUGUST from
+  it now. It does not depend on Product-Wise.
+- **D2.** ADD a second, separately labelled line: "Product-Wise order
+  value (ex-GST)", per member. Map it via the Product-Wise Employee ID
+  (e.g. PRG-025) to the person_registry employee code, with Sales User
+  Name as the fallback. Report the mapped and unmapped counts.
+- **D3.** Never add the two lines together, and never replace one with
+  the other.
+
+---
+
+## E. Where does the Rs 5.16 Cr sit? Read-only.
+
+The Product-Wise total is Rs 19.58 Cr and secondary_head_month ordered is
+Rs 14.41 Cr.
+
+- Print a per-state-head table for August with these columns:
+  - Product-Wise value, grouped by Reporting Manager → state head
+  - head_month ordered
+  - difference and %
+- Tell me whether the gap is spread evenly or concentrated in a few heads.
+- Change nothing.
+
+---
+
+## F. Close these items
+
+- **5.1** Freeze stamps: accepted. They are absent in prod, so there is no
+  fix to apply.
+- **5.2** The anchor is 12,870 / Rs 30,41,93,273.69. Record the 12,878
+  figure as an unrecoverable earlier generation and close it.
+- **5.4** September loads manually through the validated loader when
+  Prayag sends the file. Until then, surfaces show "unavailable with
+  reason". Accepted.
+
+---
+
+## G. Then publish
+
+1. After A, B, C and D, rerun dev acceptance items 1–5.
+2. If all pass, publish and run the same five checks on production.
+3. Then close H2.
+
+**Report back with:**
+- A2 parity
+- B2 worked row
+- B3 agreement counts
+- B4 count
+- C2 changes
+- D2 mapping counts
+- E table
+- dev and prod acceptance results
+- commit SHAs
