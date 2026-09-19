@@ -1,4 +1,7 @@
 import ExcelJS from "exceljs";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   resolveProductWiseHeaders,
@@ -11,11 +14,11 @@ import {
 } from "../secondaryOrders/loader.js";
 
 const AUGUST = [
-  "Date", "Order ID", "Sales User Name", "Customer Name", "Dealer ID",
-  "Dealer Mobile", "Channel Partner Name", "CP Code", "State", "District",
-  "City", "Pincode", "Category Name", "Product Code", "GST (%)",
-  "GST Amount", "Qty", "Discount (%)", "Discount Amount",
-  "Dealer Order Value", "Basic Order Value", "Order Status",
+  "Date", "Order ID", "Sales User Name", "Employee ID", "Reporting Manager",
+  "Customer Name", "Dealer ID", "Dealer Mobile", "Channel Partner Name",
+  "CP Code", "State", "District", "City", "Pincode", "Category Name",
+  "Product Code", "GST Type", "GST (%)", "GST Amount", "Qty", "Discount (%)",
+  "Discount Amount", "Dealer Order Value", "Basic Order Value", "Order Status",
 ];
 const SEPTEMBER = [
   "Date", "Order ID", "Sales User Name", "Employee ID", "Reporting Manager",
@@ -35,12 +38,36 @@ async function syntheticWorkbook(headers: string[], values: unknown[]): Promise<
   return file;
 }
 
+function findProtectedAugustFixture(): string | null {
+  if (process.env.AUGUST_PRODUCT_WISE_XLSX && fs.existsSync(process.env.AUGUST_PRODUCT_WISE_XLSX)) {
+    return process.env.AUGUST_PRODUCT_WISE_XLSX;
+  }
+  for (const dir of [
+    path.resolve(process.cwd(), "attached_assets"),
+    path.resolve(process.cwd(), "../../attached_assets"),
+  ]) {
+    if (!fs.existsSync(dir)) continue;
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.includes("Aug_month_order_booking_") || !name.endsWith(".xlsx")) continue;
+      const candidate = path.join(dir, name);
+      const sha256 = crypto.createHash("sha256").update(fs.readFileSync(candidate)).digest("hex");
+      if (sha256 === "cd3df6cc6cf0ff264b9e2611e357df893f67c71c35e66b53823f5df125a98c51") {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+const protectedAugustFixture = findProtectedAugustFixture();
+
 describe("Product-Wise header contract", () => {
   it("accepts the reviewed August workbook shape", async () => {
     const file = await syntheticWorkbook(AUGUST, [
-      "02-08-2026 00:00:00", "SORD-A", "USER", "Retailer", "RET#1", "1",
-      "Distributor", "DIST#1", "State", "District", "City", "1", "CP",
-      "100", 18, 180, 1, 50, 100, 1180, 1000, "APPROVED",
+      "02-08-2026 00:00:00", "SORD-A", "USER", "PRG-001", "MANAGER",
+      "Retailer", "RET#1", "1", "Distributor", "DIST#1", "State", "District",
+      "City", "1", "CP", "100", "GST EXTRA", 18, 180, 1, 50, 100, 1180,
+      1000, "APPROVED",
     ]);
     const prepared = await prepareProductWiseAug26Load(file);
     expect(prepared.controls.rows).toBe(1);
@@ -53,11 +80,61 @@ describe("Product-Wise header contract", () => {
         if (!resolved) resolved = resolveProductWiseHeaders(values);
       }
     }
-    expect(resolved?.basicOrderValue).toBe(20);
-    expect(resolved?.dealerOrderValueIncl).toBe(19);
-    expect(resolved?.gstType).toBeUndefined();
+    expect(resolved?.basicOrderValue).toBe(23);
+    expect(resolved?.dealerOrderValueIncl).toBe(22);
+    expect(resolved?.gstType).toBe(16);
     expect(validateProductWiseValues([{ basicOrderValue: 1000, dealerOrderValueIncl: 1180, gstAmount: 180 }]).ratio).toBe(1);
   });
+
+  it.skipIf(!protectedAugustFixture)("accepts the protected real 28,185-row August fixture", async () => {
+    const workbook = new ExcelJS.stream.xlsx.WorkbookReader(protectedAugustFixture!, {
+      worksheets: "emit", entries: "emit", sharedStrings: "cache", styles: "ignore",
+    });
+    let columns: ReturnType<typeof resolveProductWiseHeaders> | null = null;
+    let rows = 0;
+    let basic = 0;
+    const orders = new Set<string>();
+    const retailers = new Set<string>();
+    const distributors = new Set<string>();
+    const codes = new Set<string>();
+    const users = new Set<string>();
+    for await (const worksheet of workbook) {
+      for await (const row of worksheet) {
+        const values = ((row.values as unknown[]) ?? []).slice(1);
+        if (!columns) {
+          columns = resolveProductWiseHeaders(values.map((value) => String(value ?? "")));
+          continue;
+        }
+        rows++;
+        const text = (index: number) => String(values[index] ?? "").trim();
+        const number = (index: number) => Number(text(index).replace(/,/g, "")) || 0;
+        basic += number(columns.basicOrderValue!);
+        orders.add(text(columns.orderId!));
+        retailers.add(text(columns.retailerId!));
+        distributors.add(text(columns.distributorCode!));
+        codes.add(text(columns.productCode!));
+        users.add(text(columns.salesUserName!));
+      }
+      break;
+    }
+    expect({
+      rows,
+      basic,
+      orders: orders.size,
+      retailers: retailers.size,
+      distributors: distributors.size,
+      codes: codes.size,
+      users: users.size,
+    }).toEqual({
+      rows: 28_185,
+      basic: 195_788_289,
+      orders: 4_000,
+      retailers: 2_832,
+      distributors: 169,
+      codes: 2_380,
+      users: 149,
+    });
+  }, 120_000);
 
   it("accepts September aliases and reversed value positions", async () => {
     const file = await syntheticWorkbook(SEPTEMBER, [
