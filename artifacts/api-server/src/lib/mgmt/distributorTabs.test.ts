@@ -30,6 +30,7 @@
 //   in scripts/distributor-tab-guard-check.mjs.
 
 import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { db, pool } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import {
@@ -43,6 +44,39 @@ import {
 import { toPriorYearMonths, loadDistDdSnapshotOnly, normDistKey } from "./distributorDeepDive.js";
 import { loadDistributorDirectory } from "./distributorDirectory.js";
 import { normSecKey } from "./names.js";
+
+describe("Prompt 118 secondary seam reconciliation guards", () => {
+  it("segments source totals and refuses a cross-source scalar", () => {
+    const source = readFileSync(new URL("./distributorTabs.ts", import.meta.url), "utf8");
+    expect(source).toContain("secondaryValuesBySource");
+    expect(source).toContain("secondaryValueUnavailableReason");
+    expect(source).toContain("secondaryMatchedValue = secondaryValuesComparable");
+    expect(source).toContain("secondaryTotalValue = secondaryValuesComparable");
+    expect(source).not.toContain("secondaryTotalValue += v");
+    expect(source).not.toContain("secondaryMatchedValue += v");
+  });
+
+  it("does not claim PSCode3 completeness without recorded provenance", () => {
+    const source = readFileSync(new URL("./distributorTabs.ts", import.meta.url), "utf8");
+    expect(source).toContain('cutoff: "not recorded in secondary_sku_line"');
+    expect(source).toContain('completeness: "unavailable"');
+    expect(source).not.toContain('cutoff: "secondary source load"');
+  });
+
+  it("uses loaded source months, not positive rupee totals, for seam detection", () => {
+    const source = readFileSync(new URL("./distributorTabs.ts", import.meta.url), "utf8");
+    expect(source).toContain("legacyMonthRows.rows.length > 0");
+    expect(source).toContain("productWiseMonthRows.rows.length > 0");
+    expect(source).not.toContain("secondaryValuesBySource.pscode3.total > 0");
+    expect(source).not.toContain("secondaryValuesBySource.productwise.total > 0");
+  });
+
+  it("includes Product-Wise rows identified only by cp_code", () => {
+    const source = readFileSync(new URL("./distributorTabs.ts", import.meta.url), "utf8");
+    expect(source).toContain("cp_code IS NOT NULL");
+    expect(source).toContain("NULLIF(BTRIM(cp_code), '')");
+  });
+});
 
 // ── Directory mock ────────────────────────────────────────────────────────────
 // Hoisted by vitest before any imports so distributorTabs.ts receives the mock
@@ -442,6 +476,15 @@ describe("monthCond — SQL filter correctness (seeded DB)", () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("buildSecondaryTab — period filter through the full query chain", () => {
+  it("refuses mixed Jul-Aug rupee aggregation and never fabricates Product-Wise gross", () => {
+    const source = readFileSync(new URL("./distributorTabs.ts", import.meta.url), "utf8");
+    expect(source).toContain("requestedSources.size > 1");
+    expect(source).toContain("Rupees are unavailable for mixed-source Distributor SKU periods");
+    expect(source).toContain("grossAmount: useProductWise ? null : gross");
+    expect(source).toContain("grossUnavailableReason");
+    expect(source).not.toContain("'0' AS gross");
+  });
+
   it("filtered netAmount contains only selected months' data — never the FY total", async () => {
     const result = await buildSecondaryTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
     // If monthCond is dropped from ANY query inside buildSecondaryTab, netAmount

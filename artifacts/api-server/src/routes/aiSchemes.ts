@@ -9,6 +9,7 @@ import {
 } from "@workspace/api-zod";
 import { currentOpenFy } from "../lib/fyAnchors.js";
 import { getAiSchemesAnalytics } from "../lib/aiSchemesAnalytics.js";
+import { SecondarySourceSeamError } from "../lib/secondary/sourceContract.js";
 import {
   generateAiSchemesHistoryProposal,
   readAiSchemesHistory,
@@ -31,6 +32,14 @@ router.get("/ai-schemes/analytics", async (req, res): Promise<void> => {
     res.json(GetAiSchemesAnalyticsResponse.parse(result));
   } catch (err) {
     req.log.error({ err, fys }, "ai-schemes analytics error");
+    if (err instanceof SecondarySourceSeamError) {
+      res.status(409).json({
+        error: err.message,
+        code: err.code,
+        comparability: "unprovable_from_crm",
+      });
+      return;
+    }
     res.status(500).json({ error: "Failed to compute AI Schemes analytics" });
   }
 });

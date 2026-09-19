@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { AUG26_RETAILER_VIEW, includedInStandardRetailerAnalytics, paginateRows, type SourceSeamEntry } from "./sourceSeam.js";
+import { AUG26_RETAILER_VIEW, includedInStandardRetailerAnalytics, paginateRows, PERMANENT_SEAM_NOTICE, type SourceSeamEntry } from "./sourceSeam.js";
 
 describe("SKU source seam contract", () => {
+  it("publishes the permanent seam notice", () => {
+    expect(PERMANENT_SEAM_NOTICE).toBe(
+      "From Aug 2026: new CRM (Product-Wise), valued ex-GST on basic order value. Jul 2026 and earlier: PSCode3 net amount. Rupees are not compared across this change; counts are.",
+    );
+  });
+
   it("keeps the exact isolated August labels", () => {
     expect(AUG26_RETAILER_VIEW).toEqual({
       source: "Product-Wise CRM order booking, August 2026",

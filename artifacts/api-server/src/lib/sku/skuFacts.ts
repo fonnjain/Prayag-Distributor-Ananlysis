@@ -164,6 +164,8 @@ export type SkuFactsResult = {
 export type SkuSourceMetadata = {
   source: string;
   valueBasis: string;
+  /** Wire-format aliases retained for API consumers using the source contract. */
+  value_basis?: string;
   month: string;
   cutoff: string;
   completeness: "complete" | "partial" | "unavailable";
@@ -210,13 +212,22 @@ export async function getSkuCapability(fy: string): Promise<SkuCapability> {
   `).catch(() => null);
   const ddCount = ddRows ? parseInt(ddRows.rows[0]?.cnt ?? "0", 10) : 0;
 
-  // Retailer (secondary_sku_line)
+  // Retailer secondary source: Product-Wise order lines supersede the legacy
+  // SKU register from Aug-26 onward. Empty Product-Wise months stay unavailable.
   const secRows = await db.execute<{ cnt: string }>(sql`
     SELECT COUNT(*)::text AS cnt
     FROM secondary_sku_line
     WHERE fy = ${fy}
+      AND (fy < '2026-27' OR (fy = '2026-27' AND month_label IN ('Apr-26','May-26','Jun-26','Jul-26')))
   `).catch(() => null);
-  const secCount = secRows ? parseInt(secRows.rows[0]?.cnt ?? "0", 10) : 0;
+  const productWiseRows = await db.execute<{ cnt: string }>(sql`
+    SELECT COUNT(*)::text AS cnt
+    FROM secondary_order_line
+    WHERE fiscal_year = ${fy} AND source_kind = 'product_wise'
+  `).catch(() => null);
+  const secCount =
+    (parseInt(secRows?.rows[0]?.cnt ?? "0", 10) || 0)
+    + (parseInt(productWiseRows?.rows[0]?.cnt ?? "0", 10) || 0);
 
   // Project / Govt channel
   const projRows = await db.execute<{ cnt: string }>(sql`
@@ -455,6 +466,11 @@ export async function resolveHeadForSecondary(
     SELECT DISTINCT head_canon AS hc
     FROM secondary_sku_line
     WHERE fy = ${fy} AND head_canon IS NOT NULL
+    UNION
+    SELECT DISTINCT lower(regexp_replace(trim(sales_user_name), '\s+', ' ', 'g')) AS hc
+    FROM secondary_order_line
+    WHERE fiscal_year = ${fy} AND source_kind = 'product_wise'
+      AND sales_user_name IS NOT NULL
   `);
   const vocab = new Map<string, string>(); // exact key → head_canon
   const vocabBare = new Map<string, string>(); // parenthetical-stripped key → head_canon
@@ -500,8 +516,12 @@ export async function getSecondarySkuFacts(
       source,
       value_basis: expectedSecondaryValueBasis(source),
       month,
-      cutoff: "selected period",
-      completeness: "complete" as const,
+      // The source contract only validates the shape here.  Actual presence,
+      // cutoff and completeness are populated below from the source rows in
+      // loadSkuFacts; never claim a selected period is complete merely because
+      // it was requested.
+      cutoff: "source load metadata pending",
+      completeness: "partial" as const,
     };
   });
   assertSecondaryAggregationAllowed(contractRows);
@@ -511,19 +531,53 @@ export async function getSecondarySkuFacts(
     : sql`AND sku.source <> 'productwise_xlsx'`;
 
   const scopeFilter =
-    scope === "customer" && scopeId
-      ? sql`AND sku.retailer = ${scopeId}`
-      : scope === "head" && headKeys && headKeys.length > 0
-        ? sql`AND sku.head_canon = ANY(ARRAY[${sql.join(headKeys.map((k) => sql`${k}`), sql`, `)}])`
-        : scope === "head" && scopeId
-          ? sql`AND sku.head_canon = ${scopeId}`
-          : sql``;
+    selectedSource === "productwise_xlsx"
+      ? scope === "customer" && scopeId
+        ? sql`AND UPPER(BTRIM(sol.dealer_id)) = UPPER(BTRIM(${scopeId}))`
+        : scope === "head" && headKeys && headKeys.length > 0
+          ? sql`AND lower(regexp_replace(trim(COALESCE(sol.sales_user_name, '')), '\s+', ' ', 'g')) = ANY(ARRAY[${sql.join(headKeys.map((k) => sql`${secRegKey(k)}`), sql`, `)}])`
+          : scope === "head" && scopeId
+            ? sql`AND lower(regexp_replace(trim(COALESCE(sol.sales_user_name, '')), '\s+', ' ', 'g')) = ${secRegKey(scopeId)}`
+            : sql``
+      : scope === "customer" && scopeId
+        ? sql`AND sku.retailer = ${scopeId}`
+        : scope === "head" && headKeys && headKeys.length > 0
+          ? sql`AND sku.head_canon = ANY(ARRAY[${sql.join(headKeys.map((k) => sql`${k}`), sql`, `)}])`
+          : scope === "head" && scopeId
+            ? sql`AND sku.head_canon = ${scopeId}`
+            : sql``;
 
   const segmentFilter = segment
     ? sql`AND sku.segment_canon = ${segment}`
     : sql``;
 
-  const rows = await db.execute<{
+  const rows = selectedSource === "productwise_xlsx"
+    ? await db.execute<{
+        code: string;
+        segment_canon: string;
+        item_name: string | null;
+        month_label: string;
+        qty: string;
+        net: string;
+      }>(sql`
+        SELECT
+          sol.product_code AS code,
+          COALESCE(sol.segment_canon, NULLIF(sol.category_name, ''), 'Unmapped') AS segment_canon,
+          im.item_name,
+          to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY') AS month_label,
+          SUM(COALESCE(sol.qty, 0)::numeric)::text AS qty,
+          SUM(COALESCE(sol.basic_order_value, 0)::numeric)::text AS net
+        FROM secondary_order_line sol
+        LEFT JOIN item_master im ON im.code = sol.product_code
+        WHERE sol.fiscal_year = ${fy}
+          AND sol.source_kind = 'product_wise'
+          AND to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY') = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
+          ${scopeFilter}
+          ${segment ? sql`AND COALESCE(sol.segment_canon, NULLIF(sol.category_name, ''), 'Unmapped') = ${segment}` : sql``}
+        GROUP BY sol.product_code, COALESCE(sol.segment_canon, NULLIF(sol.category_name, ''), 'Unmapped'), im.item_name, to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')
+        ORDER BY COALESCE(sol.segment_canon, NULLIF(sol.category_name, ''), 'Unmapped'), sol.product_code, month_label
+      `)
+    : await db.execute<{
     code: string;
     segment_canon: string;
     item_name: string | null;
@@ -549,7 +603,17 @@ export async function getSecondarySkuFacts(
     ORDER BY COALESCE(sku.segment_canon, 'Unmapped'), sku.item_code, sku.month_label
   `);
 
-  const facts = await buildFactsFromRows(rows.rows, fy);
+  const productWiseBreadth = selectedSource === "productwise_xlsx"
+    ? new Map(
+        [...rows.rows.reduce((groups, row) => {
+          const codes = groups.get(row.segment_canon) ?? new Set<string>();
+          codes.add(row.code);
+          groups.set(row.segment_canon, codes);
+          return groups;
+        }, new Map<string, Set<string>>())].map(([segment, codes]) => [segment, codes.size]),
+      )
+    : undefined;
+  const facts = await buildFactsFromRows(rows.rows, fy, productWiseBreadth);
   if (!facts) return facts;
   // Product-Wise is usable on its own Basic Order Value basis. Historical
   // unbought enrichment would cross the permanent source seam, so it stops here.
@@ -755,7 +819,13 @@ export type SkuTrendMonthRow = {
   monthIdx: number;
   segment: string;
   codesBought: number;
-  net: number;
+  /**
+   * Monetary values are intentionally unavailable for Product-Wise points in
+   * this shared trend shape: PSCode3 net_amount and Product-Wise
+   * basic_order_value_ex_gst cannot be compared across the permanent seam.
+   * Counts remain available for those points.
+   */
+  net: number | null;
 };
 
 export type SkuTrendFyRow = {
@@ -869,6 +939,32 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
       net: parseFloat(r.net) || 0,
     }));
     fyTotalsRaw = fyRes.rows;
+    // Product-Wise months are a separate monetary basis.  They may appear as
+    // monthly points (with a seam marker), but are never folded into the
+    // PSCode3 FY totals.
+    const productTrendRows = await db.execute<RawTrendRow>(sql`
+      SELECT
+        sol.fiscal_year AS fy,
+        to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY') AS month_label,
+        COALESCE(sol.segment_canon, NULLIF(sol.category_name, ''), 'Unmapped') AS segment,
+        COUNT(DISTINCT sol.product_code)::text AS codes_bought,
+        SUM(COALESCE(sol.basic_order_value, 0)::numeric)::text AS net
+      FROM secondary_order_line sol
+      WHERE sol.source_kind = 'product_wise'
+        AND sol.product_code IS NOT NULL AND BTRIM(sol.product_code) <> ''
+        ${monthFilterFor(sql`to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')`)}
+         ${scope === "customer" && scopeId ? sql`AND UPPER(BTRIM(sol.dealer_id)) = UPPER(BTRIM(${scopeId}))` : sql``}
+        ${scope === "head" && scopeId ? sql`AND lower(regexp_replace(trim(COALESCE(sol.sales_user_name, '')), '\s+', ' ', 'g')) = ${secRegKey(scopeId)}` : sql``}
+        ${segment ? sql`AND COALESCE(sol.segment_canon, NULLIF(sol.category_name, ''), 'Unmapped') = ${segment}` : sql``}
+      GROUP BY sol.fiscal_year,
+        to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY'),
+        COALESCE(sol.segment_canon, NULLIF(sol.category_name, ''), 'Unmapped')
+    `).catch(() => ({ rows: [] as RawTrendRow[] }));
+    monthly.push(...productTrendRows.rows.map((r) => ({
+      fy: r.fy, fyMonth: r.month_label, monthIdx: monthLabelToFiscalIdx(r.month_label),
+      segment: r.segment, codesBought: parseInt(r.codes_bought, 10) || 0,
+       net: null,
+    })));
     const sourceRows = await db.execute<{
       month_label: string; source: string; rows: string; identified: string;
       cutoff: string | null; state_status: string | null;
@@ -882,6 +978,22 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
           ON state.fy = sku.fy AND state.month_label = sku.month_label AND state.source = sku.source
        GROUP BY sku.month_label, sku.source
     `);
+    const productSourceRows = await db.execute<{
+      month_label: string; rows: string; identified: string;
+      cutoff: string | null; completeness: string | null;
+    }>(sql`
+      SELECT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY') AS month_label,
+             COUNT(*)::text AS rows,
+             COUNT(*) FILTER (WHERE sol.dealer_id IS NOT NULL)::text AS identified,
+             MAX(sol.loaded_at)::text AS cutoff,
+             MAX(sol.period_completeness) AS completeness
+        FROM secondary_order_line sol
+       WHERE sol.source_kind = 'product_wise'
+       GROUP BY to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')
+    `).catch(() => ({ rows: [] as Array<{
+      month_label: string; rows: string; identified: string;
+      cutoff: string | null; completeness: string | null;
+    }> }));
     for (const row of sourceRows.rows) {
       const rows = Number(row.rows);
       const meta: SkuSourceMetadata = {
@@ -900,6 +1012,24 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
       if (row.source === "productwise_xlsx") {
         excludedMonths[row.month_label] = "Permanently excluded from cross-source trends: Product-Wise and PSCode3 have no overlapping CRM month.";
       }
+    }
+    for (const row of productSourceRows.rows) {
+      const rows = Number(row.rows);
+      sourceMetadata[row.month_label] = [
+        ...(sourceMetadata[row.month_label] ?? []),
+        {
+          source: "Product-Wise CRM order booking",
+          valueBasis: "Basic Order Value, ex-GST",
+          value_basis: "basic_order_value_ex_gst",
+          month: row.month_label,
+          cutoff: row.cutoff ?? "No source cutoff recorded",
+          completeness: row.completeness === "complete" ? "complete" : "partial",
+          identityCoverage: rows ? Number(row.identified) / rows : null,
+          included: false,
+          exclusionReason: "Rupees are not comparable with PSCode3 across the permanent source seam; this is a count/month point only.",
+        },
+      ];
+      excludedMonths[row.month_label] = "Rupees are not comparable with PSCode3 across the permanent source seam; this is a count/month point only.";
     }
   } else {
     const trendProjectHead = sql`AND (sl.head_canon IS NULL OR sl.head_canon != ${PROJECT_HEAD_CANON})`;
@@ -1145,7 +1275,16 @@ export async function loadSkuFacts(
        WHERE sku.fy = ${fy}
           AND sku.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
        GROUP BY sku.month_label, sku.source
-       ORDER BY sku.month_label
+      UNION ALL
+      SELECT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY') AS month_label,
+             'productwise_xlsx' AS source, COUNT(*)::text AS rows,
+             COUNT(*) FILTER (WHERE sol.dealer_id IS NOT NULL)::text AS identified,
+             MAX(sol.loaded_at)::text AS cutoff, NULL AS state_status
+        FROM secondary_order_line sol
+       WHERE sol.fiscal_year = ${fy} AND sol.source_kind = 'product_wise'
+         AND to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY') = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
+       GROUP BY to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')
+        ORDER BY month_label
     `);
     sourceMetadata = {};
     for (const r of provenance.rows) {
@@ -1157,6 +1296,9 @@ export async function loadSkuFacts(
         valueBasis: r.source === "productwise_xlsx"
           ? "Basic Order Value, ex-GST"
           : "SKU NET (Sub Total)",
+        value_basis: r.source === "productwise_xlsx"
+          ? "basic_order_value_ex_gst"
+          : "net_amount",
         month: r.month_label,
         cutoff: r.cutoff ?? "No verified cutoff recorded",
         completeness: rows === 0 ? "unavailable"
@@ -1172,14 +1314,21 @@ export async function loadSkuFacts(
     }
     for (const month of monthLabels) {
       sourceMetadata[month] ??= [{
-        source: "No retailer SKU source loaded",
-        valueBasis: "Unavailable",
+        source: secondarySourceForMonth(month) === "productwise_xlsx"
+          ? "Product-Wise CRM order booking"
+          : "PSCode3 secondary SKU register",
+        valueBasis: secondarySourceForMonth(month) === "productwise_xlsx"
+          ? "Basic Order Value, ex-GST"
+          : "SKU NET (Sub Total)",
+        value_basis: expectedSecondaryValueBasis(secondarySourceForMonth(month)),
         month,
-        cutoff: "No source loaded",
+        cutoff: "No source loaded for this month",
         completeness: "unavailable",
         identityCoverage: null,
         included: false,
-        exclusionReason: "No source loaded for this month.",
+        exclusionReason: secondarySourceForMonth(month) === "productwise_xlsx"
+          ? "Product-Wise month is unavailable; no order-line source was loaded."
+          : "No PSCode3 source loaded for this month.",
       }];
     }
 

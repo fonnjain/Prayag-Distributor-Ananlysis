@@ -191,12 +191,14 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       netSource:
         level === "retailer"
           ? monthLabels.every((month) => secondarySourceForMonth(month) === "productwise_xlsx")
-            ? "secondary_sku_line.net_amount mapped from Product-Wise Basic Order Value, ex-GST"
+            ? "secondary_order_line.basic_order_value (Product-Wise, ex-GST)"
             : "secondary_sku_line.net_amount (PSCode3 SKU NET / Sub Total)"
           : "sale_line.amount (taxable value / net invoice amount)",
       segmentSource:
         level === "retailer"
-          ? "secondary_sku_line.segment_canon derived from Segment column via group_map.json"
+          ? monthLabels.every((month) => secondarySourceForMonth(month) === "productwise_xlsx")
+            ? "secondary_order_line.segment_canon/category_name (Product-Wise)"
+            : "secondary_sku_line.segment_canon derived from Segment column via group_map.json"
           : "COALESCE(sale_line.group_canon, sale_line.group_raw, 'Unmapped') — never type_raw",
       // breadthDenominator: codesEverSold per segment (cross-FY distinct codes in
       // sale_line). Each SkuSegmentFact carries its own codesEverSold + codesInCatalogue.

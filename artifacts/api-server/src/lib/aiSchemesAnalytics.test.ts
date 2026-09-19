@@ -13,9 +13,12 @@ describe("AI Schemes E2/E3 arithmetic", () => {
   it("guards the production query seams for identity, signed pairs, bands, and margin coverage", () => {
     const source = readFileSync(new URL("./aiSchemesAnalytics.ts", import.meta.url), "utf8");
     expect(source).toContain("BTRIM(retailer_id)");
-    expect(source).not.toContain("BTRIM(dealer_id)");
+    expect(source).toContain("BTRIM(dealer_id)");
     expect(source).not.toContain("AND net_amount > 0");
-    expect(source).toContain("HAVING SUM(net_amount) > 0");
+    expect(source).toContain("HAVING SUM(value) > 0");
+    expect(source).toContain("FROM secondary_order_line");
+    expect(source).toContain("basic_order_value::numeric");
+    expect(source).toContain("Product-Wise");
     expect(source).toContain("const soldCodes: CatalogueCode[] = primaryRows.rows");
     expect(source).toContain("const dormantCodes: CatalogueCode[] = catalogueCodes");
     expect(source).toContain("secondaryValue");
@@ -29,6 +32,8 @@ describe("AI Schemes E2/E3 arithmetic", () => {
     expect(source).toContain('measure, product: hold.scopeProduct, requestedPeriods: [], strictFiscalYear: true');
     expect(source).toContain("const matchingHoldScopes = marginHeld.metadata");
     expect(source).toContain('const depth = marginTier === "RICH" ? 8 : marginTier === "MID" ? 6 : marginTier === "THIN" ? 4 : 0;');
+    expect(source).toContain("AI Schemes monetary pair arithmetic is unavailable");
+    expect(source).toContain("secondarySourceForMonth");
   });
 
   it("returns the full pair-value distribution and decile averages", () => {

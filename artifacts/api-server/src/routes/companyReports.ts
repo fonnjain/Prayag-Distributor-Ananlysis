@@ -899,6 +899,7 @@ export async function buildWorkingDataWorkbook(p: CompanyReportsPayload, filter?
     ["Provisional months", await provisionalMonthsExportInfo(p.fy)],
     ["Note", "Figures are territory + project combined as shown on the page. Quantity is never summed across groups (litres vs pieces)."],
     ["Source — all sale figures", "sale_line taxable amount (primary sales), filtered by FY, complete months, head/state/customer scope; server-computed values are authoritative. C1 export comparisons apply those explicit filters directly to both FYs."],
+    ["Secondary Product-Wise basis", "Not applicable to Company Reports 1-7: these are primary dispatch/sales reports only. Secondary PSCode3 net_amount through Jul-26 and Product-Wise basic_order_value ex-GST from Aug-26 onward must not be mixed with or compared in rupees to these primary figures."],
     ["Report 1 district source", "customer_master.company exact normalized match to sale customer. District is blank when no unique exact district exists; this metadata lookup never joins sale rows."],
     ["Report 2 month source", "sale_line grouped independently by state/month and customer/month using the same explicit head/state/customer filters in both FYs. Future/incomplete current-FY months and prior-only rows are intentionally blank."],
     ["Party detail cap", partyCapNote(p)],

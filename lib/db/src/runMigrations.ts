@@ -6361,6 +6361,80 @@ Any published figure labelled only ''Visits'' is ambiguous unless it also identi
       END $verify$;
     `,
   },
+  {
+    id: "130_prompt118_source_change_register",
+    sql: `
+      -- Prompt 118 Step 4. The August request was a source-change record, not
+      -- an export still owed by Prayag. Normalize every existing H2 variant
+      -- (including rows rewritten by Prompt 116) to the same non-blocking,
+      -- informational PENDING record. This deliberately keeps H2 open until
+      -- the Step 3 acceptance gate is explicitly completed.
+      UPDATE resolution_item
+         SET type = 'PENDING',
+             title = 'H2 — PERMANENT SOURCE CHANGE: PSCode3 to Product-Wise',
+             category = 'data quality',
+             fiscal_year = NULL,
+             month = 'Aug-26 onward',
+             scope_product = 'secondary SKU',
+             scope_measure = NULL,
+             reason = 'PSCode3 ended on 31 July 2026. Product-Wise is the sole secondary source from 1 August 2026 onward. This is a permanent source change with no overlapping CRM month; July and earlier use PSCode3 net_amount and August onward uses Product-Wise basic_order_value_ex_gst. Cross-source rupee comparisons remain unavailable, while counts remain comparable.',
+             evidence = '[Source: Prompt 118 Step 4; production Product-Wise source chronology and secondary_order_line, read-only evidence dated 18 September 2026] No August PSCode3 export is expected or required. SORD-9 is dated 1 August 2026. Product-Wise August data is present and usable on its explicit ex-GST basis. Effective-dated MRP can provide derived discount/gross where priced; historical observed PSCode3 MRP/gross columns are not recreated.',
+             owner = 'internal',
+             blocks_api = FALSE,
+             resolution_note = 'Kept open as an informational source-change record until the Prompt 118 Step 3 acceptance checks are proven. It no longer blocks any API and does not represent an outstanding Prayag export request.',
+             status = 'open',
+             updated_at = now()
+       WHERE code = 'H2';
+
+      -- Q-UGD is informational and deliberately leaves the ten codes
+      -- unmapped until Prayag supplies Item Type. Never drop them from a
+      -- register or price cache because their grouping is pending.
+      INSERT INTO resolution_item
+        (code,type,title,category,scope_product,reason,evidence,value_at_stake,
+         raised_on,raised_by,owner,priority,status,blocks_api)
+      VALUES
+        ('Q-UGD','PENDING','UGD Self Fit Pipe codes need Item Type',
+         'master data',
+         'U-11CS,U-12CS,U-13CS,U-14CS,U-15CS,U-16CS,U-11BS,U-12BS,U-13BS,U-14BS',
+         'Confirm Item Type for all ten UGD Self Fit Pipe codes. Until confirmed, retain every code and show it as Unmapped; do not infer a category from the code spelling or nearby series.',
+         '[Source: Prompt 118 Step 4; production active MRP cache evidence documented 18 September 2026] Production active cache contains all ten literal codes with prices effective 10 August 2026. Development active cache evidence is stale and is missing every requested literal code: U-11CS, U-12CS, U-13CS, U-14CS, U-15CS, U-16CS, U-11BS, U-12BS, U-13BS, U-14BS. Development contains only the shorter U-11C through U-16C and U-11B through U-14B spellings; these are not confirmed aliases. No code is dropped; until Prayag confirms Item Type, all ten remain Unmapped.',
+         0,DATE '2026-09-19','Prompt 118','Prayag','high'::resolution_priority,'open',FALSE)
+      ON CONFLICT (code) DO UPDATE
+         SET type = EXCLUDED.type,
+             title = EXCLUDED.title,
+             category = EXCLUDED.category,
+             scope_product = EXCLUDED.scope_product,
+             reason = EXCLUDED.reason,
+             evidence = EXCLUDED.evidence,
+             owner = EXCLUDED.owner,
+             priority = EXCLUDED.priority,
+             status = EXCLUDED.status,
+             blocks_api = EXCLUDED.blocks_api,
+             updated_at = now();
+
+      DO $verify$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code='H2' AND status='open' AND type='PENDING'
+             AND owner='internal' AND blocks_api=FALSE
+             AND resolution_note ILIKE '%informational source-change record%'
+        ) THEN
+          RAISE EXCEPTION 'Prompt 118 H2 source-change record is not open and non-blocking';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM resolution_item
+           WHERE code='Q-UGD' AND type='PENDING' AND owner='Prayag'
+             AND status='open' AND blocks_api=FALSE
+             AND scope_product LIKE '%U-11CS%'
+             AND reason ILIKE '%Unmapped%'
+             AND evidence ILIKE '%missing every requested literal code%'
+        ) THEN
+          RAISE EXCEPTION 'Prompt 118 Q-UGD entry is incomplete';
+        END IF;
+      END $verify$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

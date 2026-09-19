@@ -53,6 +53,7 @@ import {
   getRegistry,
 } from "../lib/mgmt/deepDiveData.js";
 import { splitAnnualToMonth, getSeasonalCalibration } from "../lib/seasonal.js";
+import { SecondarySourceSeamError } from "../lib/secondary/sourceContract.js";
 import {
   buildPrimaryTargetMapFromStateTargets,
   periodTarget as dbPeriodTarget,
@@ -2452,6 +2453,14 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
     else if (tab === "push") res.json(await tabs.buildPushTab(fy, dist, months));
     else res.status(400).json({ error: "tab must be secondary | sku | push" });
   } catch (err) {
+    if (err instanceof SecondarySourceSeamError) {
+      res.status(409).json({
+        error: err.message,
+        code: err.code,
+        comparability: "unprovable_from_crm",
+      });
+      return;
+    }
     req.log.error({ err }, "mgmt/distributor-tab: handler threw");
     res.status(500).json({ error: (err as Error).message });
   }

@@ -4,6 +4,9 @@ export const AUG26_RETAILER_VIEW = {
   comparability: "Permanently not comparable with PSCode3 SKU NET: the CRM systems have no overlapping month",
 } as const;
 
+export const PERMANENT_SEAM_NOTICE =
+  "From Aug 2026: new CRM (Product-Wise), valued ex-GST on basic order value. Jul 2026 and earlier: PSCode3 net amount. Rupees are not compared across this change; counts are.";
+
 export type SourceSeamEntry = {
   source: string;
   valueBasis: string;

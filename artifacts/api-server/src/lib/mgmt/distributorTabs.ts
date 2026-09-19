@@ -31,6 +31,8 @@ import { normaliseStateCanon } from "../stateCanon.js";
 import { getSkuPushList, type PushListResult } from "../sku/skuPushList.js";
 import { computeCategoryMultipliers } from "../customers/laspeyres.js";
 import { logger } from "../logger.js";
+import { secondarySourceForMonth, SecondarySourceSeamError } from "../secondary/sourceContract.js";
+import type { ProductWiseMrpControls } from "../secondary/productWiseMrpAdapter.js";
 
 // ── State compatibility (sale_line vocab vs sheet vocab) ─────────────────────
 
@@ -115,12 +117,26 @@ export type DistributorRecon = {
   unmatchedTop: { name: string; state: string | null; district: string | null; value: number }[];
   /** Sheet distributors with zero matched primary purchases this FY. */
   sheetNoPrimary: { name: string; normKey: string; states: string[] }[];
-  secondaryMatchedValue: number;  // secondary_sku_line ₹ joined by normKey
-  secondaryTotalValue: number;
+  /** Scalar secondary rupee totals are only populated when one source basis is
+   * present. A FY spanning Jul/Aug deliberately returns null here. */
+  secondaryMatchedValue: number | null;
+  secondaryTotalValue: number | null;
+  secondaryValueUnavailableReason: string | null;
+  secondaryValuesBySource: {
+    pscode3: { matched: number; total: number };
+    productwise: { matched: number; total: number };
+  };
   /** normKey → raw secondary_sku_line.distributor names. */
   secondaryNamesByKey: Record<string, string[]>;
   monthsLoaded: string[];         // secondary months present for the FY (coverage note)
   builtAt: number;
+  secondarySourceMetadata?: {
+    source: "pscode3_xlsx" | "productwise_xlsx";
+    value_basis: "net_amount" | "basic_order_value_ex_gst";
+    month: string;
+    cutoff: string;
+    completeness: "complete" | "partial" | "unavailable";
+  }[];
 };
 
 const reconCache = new Map<string, { v: DistributorRecon; until: number }>();
@@ -249,28 +265,110 @@ export async function buildDistributorRecon(fy: string): Promise<DistributorReco
   const unmatchedValue = unmatchedTerr.reduce((a, b) => a + b.value, 0);
 
   // Secondary register join (sheet vocabulary — direct normKey join).
-  const secRows = await db.execute<{ distributor: string; value: string }>(sql`
+  const legacySecRows = await db.execute<{ distributor: string; value: string }>(sql`
     SELECT distributor, SUM(net_amount::numeric)::text AS value
     FROM secondary_sku_line
-    WHERE fy = ${fy} AND distributor IS NOT NULL AND BTRIM(distributor) <> ''
+    WHERE fy = ${fy}
+      AND (fy < '2026-27' OR (fy = '2026-27' AND month_label IN ('Apr-26','May-26','Jun-26','Jul-26')))
+      AND distributor IS NOT NULL AND BTRIM(distributor) <> ''
     GROUP BY distributor
   `);
+  // Keep historical/test databases independent of the Product-Wise table.
+  // That source is valid only from FY2026-27 onward.
+  const productWiseSecRows = fy >= "2026-27"
+    ? await db.execute<{ distributor: string; value: string }>(sql`
+        SELECT COALESCE(cp_name, cp_code) AS distributor,
+               SUM(COALESCE(basic_order_value, 0)::numeric)::text AS value
+          FROM secondary_order_line
+         WHERE fiscal_year = ${fy} AND source_kind = 'product_wise'
+           AND (
+             (cp_name IS NOT NULL AND BTRIM(cp_name) <> '')
+             OR (cp_code IS NOT NULL AND BTRIM(cp_code) <> '')
+           )
+         GROUP BY COALESCE(NULLIF(BTRIM(cp_name), ''), NULLIF(BTRIM(cp_code), ''))
+      `)
+    : { rows: [] as Array<{ distributor: string; value: string }> };
+  const secRows = [
+    ...legacySecRows.rows.map((row) => ({ ...row, source: "pscode3" as const })),
+    ...productWiseSecRows.rows.map((row) => ({ ...row, source: "productwise" as const })),
+  ];
   const secondaryNamesByKey: Record<string, string[]> = {};
-  let secondaryMatchedValue = 0, secondaryTotalValue = 0;
-  for (const r of secRows.rows) {
+  const secondaryValuesBySource = {
+    pscode3: { matched: 0, total: 0 },
+    productwise: { matched: 0, total: 0 },
+  };
+  for (const r of secRows) {
     const v = parseFloat(r.value) || 0;
-    secondaryTotalValue += v;
+    secondaryValuesBySource[r.source].total += v;
     const k = normDistKey(r.distributor);
     if (sheetByNorm.has(k)) {
-      secondaryMatchedValue += v;
+      secondaryValuesBySource[r.source].matched += v;
       (secondaryNamesByKey[k] ??= []).push(r.distributor);
     }
   }
 
-  const monthRows = await db.execute<{ m: string }>(sql`
-    SELECT DISTINCT month_label AS m FROM secondary_sku_line WHERE fy = ${fy}
+  const legacyMonthRows = await db.execute<{ m: string }>(sql`
+    SELECT DISTINCT month_label AS m
+      FROM secondary_sku_line
+     WHERE fy = ${fy}
+       AND (fy < '2026-27' OR (fy = '2026-27' AND month_label IN ('Apr-26','May-26','Jun-26','Jul-26')))
   `);
-  const monthsLoaded = sortMonths(monthRows.rows.map((r) => r.m));
+  const productWiseMonthRows = fy >= "2026-27"
+    ? await db.execute<{ m: string }>(sql`
+        SELECT DISTINCT to_char(order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY') AS m
+          FROM secondary_order_line
+         WHERE fiscal_year = ${fy} AND source_kind = 'product_wise'
+      `)
+    : { rows: [] as Array<{ m: string }> };
+  const monthsLoaded = sortMonths(
+    [...legacyMonthRows.rows, ...productWiseMonthRows.rows].map((r) => r.m),
+  );
+  const productWiseMetadataRows = fy >= "2026-27"
+    ? await db.execute<{
+        month: string; cutoff: string | null; completeness: string | null; rows: string;
+      }>(sql`
+        SELECT to_char(order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY') AS month,
+               MAX(loaded_at)::text AS cutoff,
+               MIN(period_completeness) AS completeness,
+               COUNT(*)::text AS rows
+          FROM secondary_order_line
+         WHERE fiscal_year = ${fy} AND source_kind = 'product_wise'
+         GROUP BY to_char(order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')
+      `)
+    : { rows: [] as Array<{ month: string; cutoff: string | null; completeness: string | null; rows: string }> };
+  const metadataByMonth = new Map<string, NonNullable<DistributorRecon["secondarySourceMetadata"]>[number]>();
+  for (const month of legacyMonthRows.rows.map((row) => row.m)) {
+    metadataByMonth.set(month, {
+      source: "pscode3_xlsx",
+      value_basis: "net_amount",
+      month,
+      // secondary_sku_line has no load timestamp/completeness field. Explicitly
+      // disclose that provenance is unavailable; never claim complete.
+      cutoff: "not recorded in secondary_sku_line",
+      completeness: "unavailable",
+    });
+  }
+  for (const row of productWiseMetadataRows.rows) {
+    metadataByMonth.set(row.month, {
+      source: "productwise_xlsx",
+      value_basis: "basic_order_value_ex_gst",
+      month: row.month,
+      cutoff: row.cutoff ?? "unknown",
+      completeness: row.completeness === "complete" ? "complete" : "partial",
+    });
+  }
+  // Source comparability is determined by loaded rows/months, never by rupee
+  // totals. A source can legitimately contain signed rows that net to zero, or
+  // rows whose selected distributor has no attributed value.
+  const sourceCount = Number(legacyMonthRows.rows.length > 0) +
+    Number(productWiseMonthRows.rows.length > 0);
+  const secondaryValuesComparable = sourceCount <= 1;
+  const secondaryMatchedValue = secondaryValuesComparable
+    ? secondaryValuesBySource.pscode3.matched + secondaryValuesBySource.productwise.matched
+    : null;
+  const secondaryTotalValue = secondaryValuesComparable
+    ? secondaryValuesBySource.pscode3.total + secondaryValuesBySource.productwise.total
+    : null;
 
   const recon: DistributorRecon = {
     fy,
@@ -296,9 +394,15 @@ export async function buildDistributorRecon(fy: string): Promise<DistributorReco
       .map((d) => ({ name: d.name, normKey: d.normKey, states: d.states })),
     secondaryMatchedValue,
     secondaryTotalValue,
+    secondaryValueUnavailableReason: secondaryValuesComparable ? null :
+      "FY contains PSCode3 net_amount and Product-Wise basic_order_value_ex_gst. Rupee totals are not comparable across the permanent Jul/Aug seam.",
+    secondaryValuesBySource,
     secondaryNamesByKey,
     monthsLoaded,
     builtAt: Date.now(),
+    secondarySourceMetadata: monthsLoaded
+      .map((month) => metadataByMonth.get(month))
+      .filter((entry): entry is NonNullable<typeof entry> => !!entry),
   };
   reconCache.set(fy, { v: recon, until: Date.now() + RECON_TTL_MS });
   return recon;
@@ -350,8 +454,12 @@ export type SecondaryTabResult = {
   coverageNote: string;
   // headline (source: secondary register, item-code level)
   netAmount: number;
-  grossAmount: number;
+  grossAmount: number | null;
   effectiveDiscountPct: number | null;
+  grossBasis: "observed" | "derived_from_mrp" | null;
+  grossUnavailableReason: string | null;
+  mrpControls: ProductWiseMrpControls | null;
+  sourceMetadata: NonNullable<DistributorRecon["secondarySourceMetadata"]>;
   retailerCount: number;
   activeRetailerCount: number;    // net > 0 in the loaded months
   codeCount: number;
@@ -419,12 +527,43 @@ export async function buildSecondaryTab(
 
   const secNames = unionNames(scope.keys, recon.secondaryNamesByKey);
   const saleNames = unionNames(scope.keys, recon.saleNamesByKey);
+  const requestedMonths = months && months.length > 0 ? months : recon.monthsLoaded;
+  const requestedSources = new Set(requestedMonths.map((month) => secondarySourceForMonth(month)));
+  if (requestedSources.size > 1) {
+    throw new SecondarySourceSeamError(
+      "Secondary source seam: Jul-26 and Aug-26 use different CRM systems and value bases. Rupees are unavailable for mixed-source Distributor SKU periods; select one source period. Counts may be compared separately.",
+    );
+  }
 
   // Secondary rows for this distributor (item-code register).
   // Retailer identity: key on RET# when the row carries one (retailer names
   // are display-only — identical names can be different retailers), falling
   // back to the lowercased name only for rows without an ID.
-  const secAgg = secNames.length === 0 ? { rows: [] as any[] } : await db.execute<{
+  const productWiseMonths = requestedMonths.filter((month) => secondarySourceForMonth(month) === "productwise_xlsx");
+  const useProductWise = productWiseMonths.length > 0;
+  const secAgg = secNames.length === 0 ? { rows: [] as any[] } : useProductWise
+    ? await db.execute<{
+      item_code: string; segment: string | null; month_label: string;
+      rkey: string | null; retailer: string | null; head: string | null;
+      qty: string; net: string; gross: string;
+    }>(sql`
+      SELECT sol.product_code AS item_code,
+             COALESCE(sol.segment_canon, NULLIF(sol.category_name, ''), 'Unmapped') AS segment,
+             to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY') AS month_label,
+             sol.dealer_id AS rkey, MAX(sol.customer_name) AS retailer,
+             MAX(sol.sales_user_name) AS head,
+             SUM(COALESCE(sol.qty, 0)::numeric)::text AS qty,
+              SUM(COALESCE(sol.basic_order_value, 0)::numeric)::text AS net,
+              NULL::text AS gross
+        FROM secondary_order_line sol
+       WHERE sol.fiscal_year = ${fy} AND sol.source_kind = 'product_wise'
+         AND COALESCE(sol.cp_name, sol.cp_code) IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})
+         AND to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')
+             IN (${sql.join(productWiseMonths.map((m) => sql`${m}`), sql`, `)})
+       GROUP BY sol.product_code, COALESCE(sol.segment_canon, NULLIF(sol.category_name, ''), 'Unmapped'),
+                to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY'), sol.dealer_id
+    `)
+    : await db.execute<{
     item_code: string; segment: string | null; month_label: string;
     rkey: string | null; retailer: string | null; head: string | null;
     qty: string; net: string; gross: string;
@@ -436,7 +575,7 @@ export async function buildSecondaryTab(
            SUM(net_amount::numeric)::text AS net,
            SUM(gross_amount::numeric)::text AS gross
     FROM secondary_sku_line
-    WHERE fy = ${fy} AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})${monthCond(months)}
+     WHERE fy = ${fy} AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})${monthCond(requestedMonths)}
     GROUP BY item_code, segment_canon, month_label, rkey, head_canon
   `);
 
@@ -477,7 +616,7 @@ export async function buildSecondaryTab(
              SUM(amount::numeric)::text AS value
       FROM sale_line_current
       WHERE fy = ${fy} AND code IS NOT NULL AND is_territory = true
-        AND customer IN (${sql.join(saleNames.map((n) => sql`${n}`), sql`, `)})${monthCond(months)}
+         AND customer IN (${sql.join(saleNames.map((n) => sql`${n}`), sql`, `)})${monthCond(requestedMonths)}
       GROUP BY code
     `);
     for (const r of priRows.rows) {
@@ -491,7 +630,7 @@ export async function buildSecondaryTab(
 
   // Map secondary codes to the primary group vocabulary where the code exists there.
   const allCodes = [...new Set([...priByCode.keys(), ...secByCode.keys()])];
-  const flowGapByCode: FlowGapCode[] = allCodes.map((code) => {
+  const flowGapByCode: FlowGapCode[] = useProductWise ? [] : allCodes.map((code) => {
     const p = priByCode.get(code);
     const s = secByCode.get(code);
     const primaryInValue = p?.value ?? 0;
@@ -541,8 +680,8 @@ export async function buildSecondaryTab(
   const primaryInTotal = [...priByCode.values()].reduce((a, b) => a + b.value, 0);
   const topRet = [...byRetailer.entries()].sort((a, b) => b[1].net - a[1].net);
   const top5 = topRet.slice(0, 5).reduce((a, [, v]) => a + v.net, 0);
-  const monthsLoaded = months && months.length > 0
-    ? recon.monthsLoaded.filter((m) => months.includes(m))
+  const monthsLoaded = requestedMonths.length > 0
+    ? recon.monthsLoaded.filter((m) => requestedMonths.includes(m))
     : recon.monthsLoaded;
 
   return {
@@ -555,8 +694,14 @@ export async function buildSecondaryTab(
       ? `Secondary register covers ${monthsLoaded[0]}–${monthsLoaded[monthsLoaded.length - 1]} (${monthsLoaded.length} month${monthsLoaded.length === 1 ? "" : "s"} loaded)`
       : "No secondary register months loaded for this FY",
     netAmount: net,
-    grossAmount: gross,
-    effectiveDiscountPct: gross > 0 ? ((gross - net) / gross) * 100 : null,
+    grossAmount: useProductWise ? null : gross,
+    grossBasis: useProductWise ? null : "observed",
+    grossUnavailableReason: useProductWise
+      ? "Product-Wise has no observed gross_amount. Use the Secondary Discount view for derived-from-MRP gross with its coverage controls."
+      : null,
+    mrpControls: null,
+    sourceMetadata: (recon.secondarySourceMetadata ?? []).filter((entry) => requestedMonths.includes(entry.month)),
+    effectiveDiscountPct: useProductWise ? null : gross > 0 ? ((gross - net) / gross) * 100 : null,
     retailerCount: byRetailer.size,
     activeRetailerCount: [...byRetailer.values()].filter((r) => r.net > 0).length,
     codeCount: secByCode.size,
@@ -575,17 +720,21 @@ export async function buildSecondaryTab(
       salesperson: v.salesperson,
     })),
     top5SharePct: net > 0 ? (top5 / net) * 100 : null,
-    primaryMatched: saleNames.length > 0,
-    primarySaleNames: saleNames,
-    primaryInTotal,
+    // Product-Wise basic order value and PSCode3/primary register rupees have
+    // no overlap month and must never be turned into a cross-source flow gap.
+    primaryMatched: !useProductWise && saleNames.length > 0,
+    primarySaleNames: useProductWise ? [] : saleNames,
+    primaryInTotal: useProductWise ? 0 : primaryInTotal,
     secondaryOutTotal: net,
-    flowGapTotal: saleNames.length > 0 ? primaryInTotal - net : null,
+    flowGapTotal: !useProductWise && saleNames.length > 0 ? primaryInTotal - net : null,
     flowGapBySegment: [...segGap.entries()]
       .map(([segment, v]) => ({ segment, primaryIn: v.primaryIn, secondaryOut: v.secondaryOut, gap: v.primaryIn - v.secondaryOut }))
       .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap)),
     flowGapByCode: flowGapByCode.slice(0, 200),
     flaggedCodes: flowGapByCode.filter((c) => c.flagged).length,
-    unattributedNote: `${recon.unmatchedPct.toFixed(1)}% of FY ${fy} territory primary value (₹${(recon.unmatchedValue / 1e7).toFixed(2)} Cr) is not attributable to any sheet distributor; figures joining the two registers cover matched names only.`,
+    unattributedNote: useProductWise
+      ? "Product-Wise order booking is valued as basic_order_value_ex_gst. Rupees are not compared with PSCode3 or primary-register periods across the Jul/Aug source seam; counts remain available."
+      : `${recon.unmatchedPct.toFixed(1)}% of FY ${fy} territory primary value (₹${(recon.unmatchedValue / 1e7).toFixed(2)} Cr) is not attributable to any sheet distributor; figures joining the two registers cover matched names only.`,
   };
 }
 
@@ -627,7 +776,10 @@ async function mapRegisterNamesForKey(
 // ── Tab 2: Existing vs New vs Lost SKU ───────────────────────────────────────
 
 export type SkuPopulationSide = {
-  source: "primary register (sale_line)" | "secondary register (secondary_sku_line)";
+  source:
+    | "primary register (sale_line)"
+    | "secondary register (secondary_sku_line)"
+    | "secondary order booking (Product-Wise basic_order_value_ex_gst)";
   baselineMonths: string[];
   currentMonths: string[];
   baselineNote: string;
@@ -697,6 +849,22 @@ async function codeMapPrimary(fy: string, months: string[], saleNames: string[])
 async function codeMapSecondary(fy: string, months: string[], secNames: string[]) {
   const map = new Map<string, { value: number; group: string | null }>();
   if (secNames.length === 0 || months.length === 0) return map;
+  const productWise = months.some((month) => secondarySourceForMonth(month) === "productwise_xlsx");
+  if (productWise) {
+    const rows = await db.execute<{ code: string; grp: string | null; value: string }>(sql`
+      SELECT sol.product_code AS code,
+             MAX(COALESCE(sol.segment_canon, NULLIF(sol.category_name, ''), 'Unmapped')) AS grp,
+             SUM(COALESCE(sol.basic_order_value, 0)::numeric)::text AS value
+        FROM secondary_order_line sol
+       WHERE sol.fiscal_year = ${fy} AND sol.source_kind = 'product_wise'
+         AND to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')
+             IN (${sql.join(months.map((m) => sql`${m}`), sql`, `)})
+         AND COALESCE(sol.cp_name, sol.cp_code) IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})
+       GROUP BY sol.product_code
+    `);
+    for (const r of rows.rows) map.set(r.code, { value: parseFloat(r.value) || 0, group: r.grp });
+    return map;
+  }
   const rows = await db.execute<{ code: string; grp: string | null; value: string }>(sql`
     SELECT item_code AS code, MAX(segment_canon) AS grp, SUM(net_amount::numeric)::text AS value
     FROM secondary_sku_line
@@ -795,6 +963,9 @@ export async function buildSkuEvolution(
   const baseSecNames = anyBase
     ? [...new Set(baseParts.flatMap((b) => b?.secNames ?? []))]
     : secNames;
+  const secondaryCrossesSeam =
+    curMonths.some((month) => secondarySourceForMonth(month) === "productwise_xlsx")
+    && baseMonths.some((month) => secondarySourceForMonth(month) === "pscode3_xlsx");
 
   let multipliers: Map<string, number> | null = null;
   try {
@@ -807,7 +978,7 @@ export async function buildSkuEvolution(
   const [priBase, priCur, secBase, secCur] = await Promise.all([
     codeMapPrimary(baselineFy, baseMonths, baseSaleNames),
     codeMapPrimary(fy, curMonths, saleNames),
-    codeMapSecondary(baselineFy, baseMonths, baseSecNames),
+    secondaryCrossesSeam ? Promise.resolve(new Map<string, { value: number; group: string | null }>()) : codeMapSecondary(baselineFy, baseMonths, baseSecNames),
     codeMapSecondary(fy, curMonths, secNames),
   ]);
 
@@ -815,7 +986,17 @@ export async function buildSkuEvolution(
     ? buildSide("primary register (sale_line)", priBase, priCur, baseMonths, curMonths, baselineNote, multipliers)
     : null;
   const secondary = secCur.size > 0 || secBase.size > 0
-    ? buildSide("secondary register (secondary_sku_line)", secBase, secCur, baseMonths, curMonths, baselineNote, multipliers)
+     ? buildSide(
+       "secondary order booking (Product-Wise basic_order_value_ex_gst)",
+       secBase,
+       secCur,
+       secondaryCrossesSeam ? [] : baseMonths,
+       curMonths,
+       secondaryCrossesSeam
+         ? "Product-Wise begins Aug-26. The prior PSCode3 period is shown as unavailable rather than compared in rupees across the permanent source seam."
+         : baselineNote,
+       secondaryCrossesSeam ? null : multipliers,
+     )
     : null;
 
   const side = secondary ?? primary;

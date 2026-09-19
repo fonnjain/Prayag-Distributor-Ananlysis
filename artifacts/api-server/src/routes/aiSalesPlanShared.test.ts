@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { completeLikeMonthNames, historyFlag, isValidDistId, isValidRetId, lookupFrozenStateKey, median, targetAnchoredQuintile } from "./aiSalesPlanShared";
+import { readFileSync } from "node:fs";
+import { completeLikeMonthNames, crossesSecondarySourceSeam, historyFlag, isValidDistId, isValidRetId, lookupFrozenStateKey, median, missingSecondaryMonths, targetAnchoredQuintile } from "./aiSalesPlanShared";
 
 describe("Prompt 105 shared computation pure rules", () => {
   it("anchors quintile on target and applies floor", () => {
@@ -30,5 +31,25 @@ describe("Prompt 105 shared computation pure rules", () => {
     expect(isValidDistId("DIST#34")).toBe(true);
     expect(isValidDistId("DIS#34")).toBe(false);
     expect(isValidDistId("RET#31724")).toBe(false);
+  });
+  it("refuses monetary penetration arithmetic across the July/August source seam", () => {
+    expect(crossesSecondarySourceSeam(["Jul-26", "Aug-26"])).toBe(true);
+    expect(crossesSecondarySourceSeam(["Aug-26"])).toBe(false);
+    expect(crossesSecondarySourceSeam(["Jul-26"])).toBe(false);
+  });
+  it("requires full month labels so wrong-source or wrong-year rows cannot mark a period loaded", () => {
+    expect(missingSecondaryMonths(["Aug-26"], ["Aug"])).toEqual(["Aug-26"]);
+    expect(missingSecondaryMonths(["Aug-26"], ["Aug-26"])).toEqual([]);
+    expect(missingSecondaryMonths(["Jan-27", "Feb-27", "Mar-27"], ["Aug-26"])).toEqual(["Jan-27", "Feb-27", "Mar-27"]);
+  });
+  it("guards Product-Wise penetration against line-weighted and lexical-period arithmetic", () => {
+    const source = readFileSync(new URL("./aiSalesPlanShared.ts", import.meta.url), "utf8");
+    expect(source).toContain("GROUP BY dealer_id, product_code");
+    expect(source).toContain("secondarySourceForMonth(period)");
+    expect(source).toContain("TO_CHAR(order_datetime AT TIME ZONE 'Asia/Kolkata','Mon-YY')=ANY");
+    expect(source).toContain("No secondary rows loaded for requested month(s)");
+    expect(source).toContain("source_kind='product_wise'");
+    expect(source).toContain("entry.month === month && entry.source === source");
+    expect(source).not.toContain('period >= "Aug-26"');
   });
 });

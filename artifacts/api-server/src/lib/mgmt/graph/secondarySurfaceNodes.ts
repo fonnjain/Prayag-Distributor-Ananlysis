@@ -23,7 +23,15 @@ export const PRODUCTWISE_PENDING_PREDICATE =
 
 /** Pure policy helper used by tests and by callers rendering month segments. */
 export function sourceSegmentPolicy(source: "pscode3" | "productwise", month: string) {
-  const isAugustOnward = month >= "2026-08";
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    const year = Number(month.slice(0, 4));
+    const monthNumber = Number(month.slice(5, 7));
+    const isAugustOnward = year > 2026 || (year === 2026 && monthNumber >= 8);
+    return source === "productwise" ? isAugustOnward : !isAugustOnward;
+  }
+  const monthName = month.slice(0, 3);
+  const year = Number(month.slice(-2));
+  const isAugustOnward = year > 26 || (year === 26 && !["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"].includes(monthName));
   return source === "productwise" ? isAugustOnward : !isAugustOnward;
 }
 
@@ -50,11 +58,36 @@ function pct(value: number | null, label: string, basis: Basis, availability: Me
   return { measure: "penetration", label, unit: "pct", availability: "unavailable", basis };
 }
 
-function baseNode(path: string, fyValue: string, name: string, source: string, detail: unknown, measures: MeasureValue[], availability: GraphNode["availability"] = "measured"): GraphNode {
+export type SecondaryCoverageMetadata = {
+  source: "productwise_xlsx" | "pscode3_xlsx";
+  value_basis: "basic_order_value_ex_gst" | "net_amount";
+  months: string[];
+  cutoff: string | null;
+  completeness: "complete" | "partial" | "unavailable";
+};
+
+export function coverageAvailability(
+  rows: number,
+  completeness: SecondaryCoverageMetadata["completeness"],
+): "measured" | "partial" | "unavailable" {
+  if (rows <= 0 || completeness === "unavailable") return "unavailable";
+  return completeness === "complete" ? "measured" : "partial";
+}
+
+function baseNode(
+  path: string,
+  fyValue: string,
+  name: string,
+  source: string,
+  detail: unknown,
+  measures: MeasureValue[],
+  availability: GraphNode["availability"] = "measured",
+  coverage?: SecondaryCoverageMetadata,
+): GraphNode {
   return {
     path, level: "time", fy: fyValue, name, measures,
     population: "Bounded secondary register rows with explicit source and period coverage.",
-    source, cutoff: `registered through ${fyValue}`, readTime: now(), availability,
+    source, cutoff: coverage?.cutoff ?? "not recorded", readTime: now(), availability,
     category: "Unmapped", flags: ["SOURCE_LABELLED", "NO_UNSAFE_ARITHMETIC"],
     parent: null, children: [], childrenSumToParent: null, detail: sanitizeMetadata(detail), isGap: false,
   };
@@ -118,6 +151,58 @@ export async function resolveSecondaryBooking(fyValue: string): Promise<GraphNod
 /** Reconciled pending-order attribution; unknown member is never assigned. */
 export async function resolvePendingOrders(fyValue: string): Promise<GraphNode> {
   if (!FY_RE.test(fyValue)) throw new Error("Invalid fiscal year");
+  const coverageResult = await pool.query<{
+    rows: string; cutoff: string | null; completeness: string | null; months: string[] | null;
+  }>(
+    `SELECT COUNT(*)::text rows,
+            MAX(loaded_at)::text cutoff,
+            CASE WHEN COUNT(*) = 0 THEN 'unavailable'
+                 WHEN BOOL_AND(COALESCE(period_completeness, 'partial') = 'complete') THEN 'complete'
+                 ELSE 'partial' END completeness,
+            ARRAY_AGG(DISTINCT to_char(order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')) months
+       FROM secondary_order_line
+      WHERE fiscal_year=$1 AND source_kind='product_wise'
+        AND order_datetime >= TIMESTAMPTZ '2026-08-01'`,
+    [fyValue],
+  );
+  const coverageRow = coverageResult.rows[0];
+  const coverage: SecondaryCoverageMetadata = {
+    source: "productwise_xlsx",
+    value_basis: "basic_order_value_ex_gst",
+    months: coverageRow?.months ?? [],
+    cutoff: coverageRow?.cutoff ?? null,
+    completeness: coverageRow?.completeness === "complete"
+      ? "complete"
+      : coverageRow?.completeness === "partial"
+        ? "partial"
+        : "unavailable",
+  };
+  const coverageRows = Number(coverageRow?.rows ?? 0);
+  const coverageState = coverageAvailability(coverageRows, coverage.completeness);
+  const sourceMetadata = {
+    source: "productwise_xlsx",
+    value_basis: "basic_order_value_ex_gst",
+    months: coverage.months,
+    month: coverage.months.length === 1 ? coverage.months[0] : null,
+    cutoff: coverage.cutoff,
+    completeness: coverage.completeness,
+  };
+  if (coverageState === "unavailable") {
+    return baseNode(
+      `pending-orders/${fyValue}`,
+      fyValue,
+      "Pending secondary orders — reconciled attribution",
+      "Product-Wise / secondary_order_line",
+      {
+        sourceMetadata,
+        unavailableReason: `Product-Wise order source is not loaded for ${fyValue}; pending order value is unavailable, not zero.`,
+        attribution: "Legacy PSCode3 rows are excluded.",
+      },
+      [money(null, "Pending order booking value", "unavailable")],
+      "unavailable",
+      coverage,
+    );
+  }
   const result = await pool.query<{
     bucket: string; lines: string; qty: string; value: string; heads: string;
   }>(
@@ -140,8 +225,9 @@ export async function resolvePendingOrders(fyValue: string): Promise<GraphNode> 
   return baseNode(`pending-orders/${fyValue}`, fyValue, "Pending secondary orders — reconciled attribution", "secondary_order_line (Product-Wise CRM order_status; August 2026 onward)", {
     rows, reconciliation: { totalLines: total, totalQty, totalBasicOrderValue: totalValue, sumOfBucketsEqualsTotal: true },
     coverage: rows.map((r) => ({ bucket: r.bucket, lines: r.lines, qty: r.qty, sharePct: total ? r.lines / total * 100 : null })),
+    sourceMetadata,
     attribution: "assigned by sales_user_name; missing member is unassigned; missing state is disputed; no member is inferred. Legacy PSCode3 rows are excluded.",
-  }, [money(totalValue, "Pending order booking value")]);
+  }, [money(totalValue, "Pending order booking value", coverageState === "measured" ? "measured" : "partial")], coverageState === "measured" ? "measured" : "partial", coverage);
 }
 
 export type PeerBasis = "same-distributor" | "same-state" | "national";

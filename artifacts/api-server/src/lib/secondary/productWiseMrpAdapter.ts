@@ -24,6 +24,10 @@ export type ProductWiseMrpControls = {
   includedRows: number;
   missingMrpRows: number;
   missingMrpValue: number;
+  invalidDiscountRows: number;
+  invalidDiscountValue: number;
+  nonPositiveDenominatorRows: number;
+  nonPositiveDenominatorValue: number;
   excludedCodes: string[];
   valueSelected: number;
   valueCovered: number;
@@ -45,6 +49,12 @@ function dateValue(value: string | Date): Date {
   return date;
 }
 
+/** Product-Wise and MRP catalogues use the same code vocabulary, but exports
+ * have historically varied in casing and surrounding whitespace. */
+export function normaliseMrpCode(productCode: string): string {
+  return productCode.trim().toUpperCase();
+}
+
 function fyForDate(date: Date): string {
   const year = date.getUTCFullYear();
   const start = date.getUTCMonth() >= 3 ? year : year - 1;
@@ -52,7 +62,7 @@ function fyForDate(date: Date): string {
 }
 
 export function productWiseMrpLookupKey(productCode: string, transactionDate: string | Date): string {
-  return `${productCode}\u0000${dateValue(transactionDate).toISOString().slice(0, 10)}`;
+  return `${normaliseMrpCode(productCode)}\u0000${dateValue(transactionDate).toISOString().slice(0, 10)}`;
 }
 
 /** Pure application of an effective MRP lookup. Missing MRP is not zero. */
@@ -65,7 +75,10 @@ export function applyProductWiseMrp(
     const mrpSource = fyForDate(rowDate) === currentOpenFy() ? "mrp_synced" as const : "mrp_history" as const;
     // Code-only fallback keeps this pure helper convenient for focused tests.
     // The database adapter always supplies the stricter code+transaction-date key.
-    const mrp = mrps.get(productWiseMrpLookupKey(row.productCode, rowDate)) ?? mrps.get(row.productCode) ?? null;
+    const normalisedCode = normaliseMrpCode(row.productCode);
+    const mrp = mrps.get(productWiseMrpLookupKey(normalisedCode, rowDate))
+      ?? mrps.get(normalisedCode)
+      ?? null;
     const denominator = row.discountPct == null ? null : 1 - row.discountPct / 100;
     let exclusionReason: ProductWiseMrpResult["exclusionReason"] = null;
     if (mrp == null) exclusionReason = "missing_mrp";
@@ -90,7 +103,14 @@ export function applyProductWiseMrp(
       missingMrpRows: rows.filter((row) => row.exclusionReason === "missing_mrp").length,
       missingMrpValue: rows.filter((row) => row.exclusionReason === "missing_mrp")
         .reduce((sum, row) => sum + row.basicOrderValueExGst, 0),
-      excludedCodes: [...new Set(rows.filter((row) => !row.included).map((row) => row.productCode))].sort(),
+      invalidDiscountRows: rows.filter((row) => row.exclusionReason === "invalid_discount").length,
+      invalidDiscountValue: rows.filter((row) => row.exclusionReason === "invalid_discount")
+        .reduce((sum, row) => sum + row.basicOrderValueExGst, 0),
+      nonPositiveDenominatorRows: rows.filter((row) => row.exclusionReason === "non_positive_denominator").length,
+      nonPositiveDenominatorValue: rows.filter((row) => row.exclusionReason === "non_positive_denominator")
+        .reduce((sum, row) => sum + row.basicOrderValueExGst, 0),
+      excludedCodes: [...new Set(rows.filter((row) => !row.included)
+        .map((row) => normaliseMrpCode(row.productCode)))].sort(),
       valueSelected,
       valueCovered,
       valueCoveragePct: valueSelected > 0 ? valueCovered / valueSelected : 0,
@@ -121,15 +141,19 @@ export async function adaptProductWiseMrp(rows: ProductWiseDiscountRow[]): Promi
   const generation = currentGeneration.rows[0]?.generation_id ?? null;
   const lookup = new Map<string, number | null>();
   if (generation && openRows.length) {
-    const codes = [...new Set(openRows.map(({ row }) => row.productCode))];
+    const codes = [...new Set(openRows.map(({ row }) => normaliseMrpCode(row.productCode)))];
     const result = await pool.query<{ item_code: string; mrp: string | null }>(
       `SELECT item_code, mrp::text FROM mrp_synced
-       WHERE generation_id = $1 AND item_code = ANY($2::text[])`,
+       WHERE generation_id = $1 AND UPPER(BTRIM(item_code)) = ANY($2::text[])`,
       [generation, codes],
     );
-    const currentByCode = new Map(result.rows.map((row) => [row.item_code, row.mrp == null ? null : Number(row.mrp)]));
+    const currentByCode = new Map(result.rows.map((row) => [
+      normaliseMrpCode(row.item_code),
+      row.mrp == null ? null : Number(row.mrp),
+    ]));
     for (const { row, date } of openRows) {
-      lookup.set(productWiseMrpLookupKey(row.productCode, date), currentByCode.get(row.productCode) ?? null);
+      const code = normaliseMrpCode(row.productCode);
+      lookup.set(productWiseMrpLookupKey(code, date), currentByCode.get(code) ?? null);
     }
   } else {
     for (const { row, date } of openRows) {
@@ -139,7 +163,7 @@ export async function adaptProductWiseMrp(rows: ProductWiseDiscountRow[]): Promi
   if (closedRows.length) {
     const requests = [...new Map(closedRows.map(({ row, date }) => [
       productWiseMrpLookupKey(row.productCode, date),
-      { productCode: row.productCode, date: date.toISOString().slice(0, 10) },
+      { productCode: normaliseMrpCode(row.productCode), date: date.toISOString().slice(0, 10) },
     ])).values()];
     const params: string[] = [];
     const valuesSql = requests.map(({ productCode, date }, index) => {
@@ -153,7 +177,7 @@ export async function adaptProductWiseMrp(rows: ProductWiseDiscountRow[]): Promi
          LEFT JOIN LATERAL (
            SELECT h.mrp
              FROM mrp_history h
-            WHERE h.item_code = requested.item_code
+             WHERE UPPER(BTRIM(h.item_code)) = requested.item_code
               AND h.mrp IS NOT NULL
               AND h.effective_from <= requested.tx_date
               AND (h.effective_to IS NULL OR h.effective_to > requested.tx_date)
@@ -163,7 +187,7 @@ export async function adaptProductWiseMrp(rows: ProductWiseDiscountRow[]): Promi
       params,
     );
     result.rows.forEach((row) => {
-      lookup.set(productWiseMrpLookupKey(row.item_code, row.tx_date), row.mrp == null ? null : Number(row.mrp));
+       lookup.set(productWiseMrpLookupKey(row.item_code, row.tx_date), row.mrp == null ? null : Number(row.mrp));
     });
   }
   return applyProductWiseMrp(rows, lookup);

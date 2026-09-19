@@ -713,9 +713,9 @@ export default function SkuPage() {
         {section === "overview" && level === "retailer" && (
           <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/40">
             <h3 className="text-sm font-semibold">August 2026 · isolated retailer × item view</h3>
-            <p className="mt-1 text-xs text-muted-foreground">Source: Product-Wise CRM order booking, August 2026</p>
+            <p className="mt-1 text-xs text-muted-foreground">From Aug 2026: new CRM (Product-Wise), valued ex-GST on basic order value. Jul 2026 and earlier: PSCode3 net amount. Rupees are not compared across this change; counts are.</p>
             <p className="text-xs text-muted-foreground">Value: Basic Order Value, ex-GST</p>
-            <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Permanently not comparable with PSCode3 SKU NET: PSCode3 ended 31 July and Product-Wise began 1 August, so no overlapping CRM month exists.</p>
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Rupees are not compared across this change; counts are.</p>
             {augViewError ? <p className="mt-2 text-xs text-destructive">{augViewError}</p> : (
               <div className="mt-3 max-h-64 overflow-auto">
                 <table className="w-full text-xs">

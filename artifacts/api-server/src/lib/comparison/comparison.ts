@@ -29,6 +29,7 @@ import {
   getSecondaryRegisterCoverageDisclosureSafe,
   type SecondaryRegisterCoverageDisclosure,
 } from "../secondary/registerCoverage.js";
+import { secondarySourceForMonth } from "../secondary/sourceContract.js";
 
 // ── Selection schema ─────────────────────────────────────────────────────────
 
@@ -632,6 +633,31 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
 
   // ── Period resolution + completeness (from data, not config) ──
   const periods = await resolvePeriods(req.periods, basis, today);
+  // The member/head/retailer comparison engine still reads the historical
+  // register for its KPI catalogue.  Fail closed for Product-Wise months
+  // rather than returning genuine zeroes or silently substituting July.
+  if (basis === "secondary") {
+    const productWiseMonths = periods.flatMap((period) =>
+      period.monthsWithData.filter((month) => secondarySourceForMonth(month) === "productwise_xlsx"),
+    );
+    if (productWiseMonths.length > 0) {
+      return {
+        blocked: true,
+        reason: `Secondary comparison is unavailable for Product-Wise month(s) ${[...new Set(productWiseMonths)].join(", ")}: this KPI engine is still backed by secondary_register_line/secondary_sku_line and has no approved Product-Wise KPI mapping. No zero or cross-seam rupee figure is returned.`,
+        guards: [guard(1, "blocked", "Product-Wise source requires a dedicated KPI mapping; cross-seam money is refused.")],
+        basis: {
+          entityType: req.entityType,
+          basis,
+          periods: periods.map((period) => ({
+            label: period.label,
+            fy: period.fy,
+            completeness: period.completeness,
+            months: period.monthLabels,
+          })),
+        },
+      };
+    }
+  }
   const coverageFy = basis === "secondary"
     ? periods.find((period) => period.fy === "2026-27")?.fy
     : undefined;

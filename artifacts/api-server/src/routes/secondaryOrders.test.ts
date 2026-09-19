@@ -14,6 +14,7 @@
 
 import { describe, it, expect } from "vitest";
 import { ExportGate } from "../lib/secondaryOrders/exportGate";
+import { readFileSync } from "node:fs";
 
 describe("Secondary Orders export gate", () => {
   it("keeps a hard two-export limit and never goes negative", () => {
@@ -28,6 +29,22 @@ describe("Secondary Orders export gate", () => {
     expect(gate.tryAcquire()).toBe(false);
     gate.release();
     expect(gate.tryAcquire()).toBe(true);
+  });
+
+  it("keeps Product-Wise source and basis in the export contract", () => {
+    const source = readFileSync(new URL("./secondaryOrders.ts", import.meta.url), "utf8");
+    expect(source).toContain('["Source", "secondary_order_line (Product-Wise CRM)"]');
+    expect(source).toContain('["Value basis", "basic_order_value_ex_gst');
+    expect(source).toContain("PERMANENT_SECONDARY_SEAM_NOTICE");
+    expect(source).toContain('availability: rowCount > 0 ? "value" : "unavailable-with-reason"');
+    expect(source).toContain("No Product-Wise rows are loaded for the selected range");
+    expect(source).toContain('["Completeness", exportCompleteness]');
+    expect(source).toContain("COALESCE(sol.period_completeness, 'partial') <> 'complete'");
+    expect(source).toContain("incomplete_periods");
+    expect(source).toContain("const filteredRange = Boolean(filters.dateFrom || filters.dateTo)");
+    expect(source).toContain("sol.source_kind = 'product_wise'");
+    expect(source).toContain("2026-08-01 00:00:00+05:30");
+    expect(source).toContain("source_kind = 'product_wise'");
   });
 });
 

@@ -12,6 +12,7 @@ import {
   resolveHoldExclusionsFromRows,
   type ResolutionHold,
 } from "./resolution/holdResolver.js";
+import { secondarySourceForMonth, SecondarySourceSeamError } from "./secondary/sourceContract.js";
 
 const OPEN_FY_TTL_MS = 5 * 60 * 1000;
 const CLOSED_FY_TTL_MS = 60 * 60 * 1000;
@@ -352,13 +353,30 @@ function marginHoldFilter(
 }
 
 async function buildFyReport(fy: string, holds: ResolutionHold[]): Promise<AiSchemesFyReport> {
-  const monthRows = await db.execute<{ month_label: string }>(sql`
+  const legacyMonthRows = await db.execute<{ month_label: string }>(sql`
     SELECT DISTINCT month_label
-    FROM secondary_sku_line
-    WHERE fy = ${fy}
-    ORDER BY month_label
+      FROM secondary_sku_line
+     WHERE fy = ${fy}
+       AND (fy < '2026-27' OR (fy = '2026-27' AND month_label IN ('Apr-26','May-26','Jun-26','Jul-26')))
   `);
-  const loadedMonths = monthRows.rows.map((row) => row.month_label);
+  const productWiseMonthRows = fy >= "2026-27"
+    ? await db.execute<{ month_label: string }>(sql`
+        SELECT DISTINCT TO_CHAR(order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY') AS month_label
+          FROM secondary_order_line
+         WHERE fiscal_year = ${fy} AND source_kind = 'product_wise'
+           AND order_datetime >= TIMESTAMPTZ '2026-08-01'
+      `)
+    : { rows: [] as Array<{ month_label: string }> };
+  const loadedMonths = [...new Set([
+    ...legacyMonthRows.rows.map((row) => row.month_label),
+    ...productWiseMonthRows.rows.map((row) => row.month_label),
+  ])].sort();
+  const loadedSources = new Set(loadedMonths.map((month) => secondarySourceForMonth(month)));
+  if (loadedSources.size > 1) {
+    throw new SecondarySourceSeamError(
+      `AI Schemes monetary pair arithmetic is unavailable for ${fy}: selected secondary months cross the PSCode3/Product-Wise seam. Counts may be compared, but rupees are not summed or compared across Jul-26/Aug-26.`,
+    );
+  }
   const secondaryHeld = heldPeriods(holds, fy, loadedMonths, "secondary SKU");
   const availableSecondaryMonths = loadedMonths.filter((month) => !secondaryHeld.periods.includes(month));
   const monthArray = (months: string[]) => months.length
@@ -366,21 +384,34 @@ async function buildFyReport(fy: string, holds: ResolutionHold[]): Promise<AiSch
     : sql`AND FALSE`;
 
   const pairRows = await db.execute<{ retailer: string; item_code: string; category: string | null; value: string }>(sql`
-    SELECT
-      CASE
-        WHEN NULLIF(BTRIM(retailer_id), '') IS NOT NULL
+    WITH secondary_pairs AS (
+      SELECT
+        CASE WHEN NULLIF(BTRIM(retailer_id), '') IS NOT NULL
           THEN 'RET#:' || BTRIM(retailer_id)
-        ELSE 'NAME:' || regexp_replace(LOWER(BTRIM(COALESCE(retailer, ''))), '[^a-z0-9]+', ' ', 'g')
-      END AS retailer,
-      BTRIM(item_code) AS item_code,
-      MAX(COALESCE(NULLIF(BTRIM(segment_canon), ''), NULLIF(BTRIM(segment_raw), ''), 'Unmapped')) AS category,
-      SUM(net_amount)::text AS value
-    FROM secondary_sku_line
-    WHERE fy = ${fy}
-      ${monthArray(availableSecondaryMonths)}
+          ELSE 'NAME:' || regexp_replace(LOWER(BTRIM(COALESCE(retailer, ''))), '[^a-z0-9]+', ' ', 'g')
+        END AS retailer,
+        BTRIM(item_code) AS item_code,
+        COALESCE(NULLIF(BTRIM(segment_canon), ''), NULLIF(BTRIM(segment_raw), ''), 'Unmapped') AS category,
+        net_amount::numeric AS value, month_label
+      FROM secondary_sku_line
+      WHERE fy = ${fy}
+        AND NOT (fy = '2026-27' AND month_label NOT IN ('Apr-26','May-26','Jun-26','Jul-26'))
+      UNION ALL
+      SELECT
+        'RET#:' || BTRIM(dealer_id), BTRIM(product_code),
+        COALESCE(NULLIF(BTRIM(segment_canon), ''), NULLIF(BTRIM(category_name), ''), 'Unmapped'),
+        basic_order_value::numeric,
+        TO_CHAR(order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')
+      FROM secondary_order_line
+      WHERE fiscal_year = ${fy} AND source_kind = 'product_wise'
+        AND order_datetime >= TIMESTAMPTZ '2026-08-01'
+    )
+    SELECT retailer, item_code, MAX(category) AS category, SUM(value)::text AS value
+    FROM secondary_pairs
+    WHERE month_label IN (${sql.join(availableSecondaryMonths.map((month) => sql`${month}`), sql`, `)})
       AND NULLIF(BTRIM(item_code), '') IS NOT NULL
     GROUP BY 1, 2
-    HAVING SUM(net_amount) > 0
+    HAVING SUM(value) > 0
   `);
   const pairs: PairValueRow[] = pairRows.rows.map((row) => ({
     retailer: row.retailer,
@@ -573,7 +604,7 @@ async function buildFyReport(fy: string, holds: ResolutionHold[]): Promise<AiSch
       heldMetadata: [...secondaryHeld.metadata, ...marginHeld.metadata],
       sources: {
         primaryRevenue: "sale_line_current.amount (current rows; dispatch)",
-        secondaryBreadth: "secondary_sku_line.net_amount (signed rows aggregated by pair; positive aggregate pairs only)",
+        secondaryBreadth: "PSCode3 secondary_sku_line.net_amount through Jul-26; Product-Wise secondary_order_line.basic_order_value ex-GST from Aug-26 onward (signed rows aggregated by pair; positive aggregate pairs only)",
         catalogue: "mrp_current_catalogue (authoritative current catalogue)",
         margin: "margin_fact.sale_value and margin_fact.bom_value (gross contribution; factory BOM only)",
       },

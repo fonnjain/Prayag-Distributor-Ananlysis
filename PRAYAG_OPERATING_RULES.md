@@ -46,16 +46,14 @@ export carries source, value basis, completeness, and identity coverage for
 each month. A source change is visible and is never treated as a continuous
 comparable series by default.
 
-August 2026 Product-Wise retailer×item data may be shown only as an isolated
-view labelled:
-
-- `Source: Product-Wise CRM order booking, August 2026`
-- `Value: Basic Order Value, ex-GST`
-- `Not comparable with PSCode3 SKU NET without reconciliation`
-
-Until a reconciliation contract exists, that August Product-Wise view is
-excluded from B3, secondary discount, and every multi-month gap or breadth
-conclusion.
+From August 2026 onward, Product-Wise retailer×item data is the supported
+secondary source for every surface whose metric is defined on that source.
+Each result must retain its source, value basis, month, cutoff, completeness,
+and identity coverage. Product-Wise values use Basic Order Value ex-GST;
+PSCode3 values through July use net amount. A view crossing the seam may
+compare explicitly labelled counts, but must not add or compare rupees.
+Discount/gross is **derived from MRP** where an effective price exists; a
+missing price is unavailable for that period, never a zero.
 
 **Implemented not-offered behaviour:** a closed-period sale with no
 effective-dated MRP row is excluded from discount and realisation calculations.
@@ -72,6 +70,10 @@ gross margin, or other).
 
 State fiscal year, month labels, timezone, and completeness. Open months are
 provisional. Closed-period prices use the price effective in that period.
+
+**RULE 6.1 — permanent secondary source seam:** PSCode3 ends on 31 July 2026; Product-Wise is the sole secondary source from 1 August 2026 (SORD-9) onward. There is no overlap month. Rupees are never summed or compared across the seam; counts may be compared when their population and completeness are named. Every new month loads from Product-Wise automatically.
+
+This source change removes no capability. Historical PSCode3 observed MRP and gross columns remain historical observations; where an effective-dated MRP exists, discount/gross is rebuilt and labelled **derived from MRP**. A code without an effective price is not offered for that period. Product-Wise rows without a confirmed Item Type remain visible as **Unmapped**, never dropped.
 
 ## 7. Annualisation and projection
 

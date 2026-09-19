@@ -26,6 +26,9 @@ export type SecondarySeam = {
   disclosure: string;
 };
 
+export const PERMANENT_SECONDARY_SEAM_NOTICE =
+  "From Aug 2026: new CRM (Product-Wise), valued ex-GST on basic order value. Jul 2026 and earlier: PSCode3 net amount. Rupees are not compared across this change; counts are.";
+
 export class SecondarySourceSeamError extends Error {
   readonly code = "SECONDARY_SOURCE_SEAM_NOT_COMPARABLE";
   constructor(message: string) {
@@ -80,7 +83,7 @@ export function secondarySeam(
     crossesSourceBoundary: true,
     crmOverlapExists: false,
     comparability: "unprovable_from_crm",
-    disclosure: `Secondary source seam: ${from.month} ${from.source}/${from.value_basis} to ${to.month} ${to.source}/${to.value_basis}. PSCode3 ended on 31 July 2026 and Product-Wise began on 1 August 2026, so no overlapping CRM month exists. Retailer × item values across the seam are permanently not comparable and must not be aggregated.`,
+    disclosure: `${PERMANENT_SECONDARY_SEAM_NOTICE} No overlapping CRM month exists; retailer × item values across the seam are permanently not comparable and must not be aggregated.`,
   };
 }
 

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { applyProductWiseMrp, productWiseMrpLookupKey } from "./productWiseMrpAdapter.js";
+import {
+  applyProductWiseMrp,
+  normaliseMrpCode,
+  productWiseMrpLookupKey,
+} from "./productWiseMrpAdapter.js";
 
 describe("Product-Wise effective MRP adapter", () => {
   it("derives gross and labels it derived without exposing observed gross", () => {
@@ -27,6 +31,25 @@ describe("Product-Wise effective MRP adapter", () => {
       segment: "PTMT", discountPct: 100, basicOrderValueExGst: 250,
     }], new Map([["P-3", 1000]]));
     expect(result.rows[0]?.exclusionReason).toBe("non_positive_denominator");
+    expect(result.controls.nonPositiveDenominatorRows).toBe(1);
+    expect(result.controls.nonPositiveDenominatorValue).toBe(250);
+  });
+
+  it("normalizes Product-Wise and MRP code keys and reports invalid discounts", () => {
+    expect(normaliseMrpCode("  p-5 ")).toBe("P-5");
+    const result = applyProductWiseMrp([{
+      productCode: "  p-5 ", month: "Aug-26", transactionDate: "2026-08-10",
+      segment: null, discountPct: null, basicOrderValueExGst: 125,
+    }], new Map([["P-5", 1000]]));
+    expect(result.rows[0]).toMatchObject({
+      mrp: 1000,
+      gross: null,
+      included: false,
+      exclusionReason: "invalid_discount",
+    });
+    expect(result.controls.invalidDiscountRows).toBe(1);
+    expect(result.controls.invalidDiscountValue).toBe(125);
+    expect(result.controls.excludedCodes).toEqual(["P-5"]);
   });
 
   it("resolves effective MRP by code and transaction date", () => {

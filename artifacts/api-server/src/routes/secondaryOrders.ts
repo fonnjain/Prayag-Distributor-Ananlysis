@@ -55,6 +55,7 @@ import { runFY2425SegmentWiseOrders } from "../loadFY2425SegmentWiseOrders.js";
 import { logger } from "../lib/logger.js";
 import { ExportGate } from "../lib/secondaryOrders/exportGate.js";
 import { applyAug26Replacement, previewAug26Replacement } from "../lib/secondaryOrders/aug26Replacement.js";
+import { PERMANENT_SECONDARY_SEAM_NOTICE } from "../lib/secondary/sourceContract.js";
 
 const router = Router();
 
@@ -116,11 +117,18 @@ type FilterParams = {
 };
 
 const STATUS_UNAVAILABLE = "Status unavailable";
-const MIXED_ERA_NOTE = "Mixed-era order-booking history: legacy rows may not contain Product-Wise status or distributor fields; August 2026 is complete for 1–31 Aug 2026.";
+const MIXED_ERA_NOTE = "Product-Wise order-booking scope: only source_kind=product_wise rows from 1 Aug 2026 onward are included. Legacy/PSCode3 rows use a different basis and are excluded.";
 const DISTRIBUTOR_NOTE = "Distinct distributor names; legacy rows have no CP codes.";
+const PRODUCT_WISE_START = "2026-08-01 00:00:00+05:30";
 
 function buildWhereClause(f: FilterParams): { where: string; params: unknown[] } {
-  const conditions: string[] = [];
+  // This surface is intentionally Product-Wise only. Legacy/PSCode3 rows in
+  // secondary_order_line have a different value basis and must not be
+  // silently labelled or aggregated as Product-Wise order booking.
+  const conditions: string[] = [
+    "sol.source_kind = 'product_wise'",
+    `sol.order_datetime >= TIMESTAMPTZ '${PRODUCT_WISE_START}'`,
+  ];
   const params: unknown[] = [];
 
   // State-head scope comes from the editable person hierarchy. person_registry
@@ -500,6 +508,11 @@ router.get("/secondary-orders/summary", async (req: Request, res: Response) => {
         COALESCE(SUM(sol.dealer_order_value::numeric), 0) AS total_dealer,
          MIN((sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_min,
          MAX((sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_max,
+         MAX(sol.loaded_at)::text                         AS loaded_at,
+         COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')) AS periods,
+         COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY'))
+           FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_periods,
+         COUNT(*) FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_rows,
         COUNT(*) FILTER (WHERE sol.order_status = 'APPROVED') AS approved_lines,
         COUNT(*) FILTER (WHERE sol.order_status = 'PENDING')  AS pending_lines
       FROM secondary_order_line sol
@@ -508,10 +521,36 @@ router.get("/secondary-orders/summary", async (req: Request, res: Response) => {
 
     const result = await pool.query(query, params);
     const r = result.rows[0];
+    const rowCount = Number(r.rows);
+    const filteredRange = Boolean(filters.dateFrom || filters.dateTo);
+    const incompletePeriods = Number(r.incomplete_periods ?? 0);
+    const completeness = rowCount === 0
+      ? "unavailable" as const
+      : filteredRange || incompletePeriods > 0
+        ? "partial" as const
+        : "complete" as const;
+    const unavailableReason = rowCount === 0
+      ? "No Product-Wise rows are loaded for the selected range; this is unavailable, not a genuine zero."
+      : null;
+    const sourceMetadata = {
+      source: "productwise_xlsx" as const,
+      value_basis: "basic_order_value_ex_gst" as const,
+      month: filters.dateFrom || filters.dateTo
+        ? `${filters.dateFrom ?? "start"}..${filters.dateTo ?? "end"}`
+        : "all loaded Product-Wise months",
+      cutoff: r.loaded_at ?? "no Product-Wise rows loaded",
+      completeness,
+      periods: Number(r.periods ?? 0),
+      incompletePeriods,
+      incompleteRows: Number(r.incomplete_rows ?? 0),
+    };
     res.json({
+      availability: rowCount > 0 ? "value" : "unavailable-with-reason",
+      unavailableReason,
+      sourceMetadata,
       basis: "ORDER BOOKING",
       note: "Order booking, not dispatch. Not comparable with secondary order-booking register figures.",
-      rows: Number(r.rows),
+      rows: rowCount,
       orders: Number(r.orders),
       retailers: Number(r.retailers),
       distributors: Number(r.distributors),
@@ -540,15 +579,23 @@ router.get("/secondary-orders/filters", async (req: Request, res: Response) => {
     const retailerLimit = Number.isFinite(retailerLimitRaw) ? Math.min(Math.max(Math.floor(retailerLimitRaw), 1), 100) : 50;
     const [states, distributors, retailers, stateHeads] = await Promise.all([
       pool.query<{ state: string }>(
-        `SELECT DISTINCT state FROM secondary_order_line WHERE state IS NOT NULL ORDER BY state`,
+        `SELECT DISTINCT state FROM secondary_order_line
+         WHERE source_kind = 'product_wise'
+           AND order_datetime >= TIMESTAMPTZ '${PRODUCT_WISE_START}'
+           AND state IS NOT NULL ORDER BY state`,
       ),
       pool.query<{ cp_code: string; cp_name: string | null }>(
-        `SELECT DISTINCT cp_code, MAX(cp_name) AS cp_name FROM secondary_order_line GROUP BY cp_code ORDER BY cp_code`,
+        `SELECT DISTINCT cp_code, MAX(cp_name) AS cp_name FROM secondary_order_line
+         WHERE source_kind = 'product_wise'
+           AND order_datetime >= TIMESTAMPTZ '${PRODUCT_WISE_START}'
+         GROUP BY cp_code ORDER BY cp_code`,
       ),
       pool.query<{ dealer_id: string; customer_name: string | null }>(
         `SELECT dealer_id, MAX(customer_name) AS customer_name
          FROM secondary_order_line
-         WHERE $1 <> '' AND (dealer_id ILIKE '%' || $1 || '%' OR customer_name ILIKE '%' || $1 || '%')
+         WHERE source_kind = 'product_wise'
+           AND order_datetime >= TIMESTAMPTZ '${PRODUCT_WISE_START}'
+           AND $1 <> '' AND (dealer_id ILIKE '%' || $1 || '%' OR customer_name ILIKE '%' || $1 || '%')
          GROUP BY dealer_id ORDER BY dealer_id LIMIT $2`,
         [retailerSearch, retailerLimit],
       ),
@@ -643,6 +690,11 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
            COALESCE(SUM(sol.basic_order_value::numeric), 0) AS total_basic,
            MIN((sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_min,
            MAX((sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_max,
+            MAX(sol.loaded_at)::text AS loaded_at,
+            COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')) AS periods,
+            COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY'))
+              FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_periods,
+            COUNT(*) FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_rows,
            COUNT(*) FILTER (WHERE sol.order_status = 'APPROVED') AS approved_lines,
            COUNT(DISTINCT sol.order_id) FILTER (WHERE sol.order_status = 'APPROVED') AS approved_orders,
            COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status = 'APPROVED'), 0) AS approved_basic,
@@ -688,16 +740,24 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
         params,
       ),
       Promise.all([
-        pool.query<{ state: string }>(`SELECT DISTINCT state FROM secondary_order_line WHERE state IS NOT NULL ORDER BY state`),
+         pool.query<{ state: string }>(`SELECT DISTINCT state FROM secondary_order_line
+           WHERE source_kind = 'product_wise'
+             AND order_datetime >= TIMESTAMPTZ '${PRODUCT_WISE_START}'
+             AND state IS NOT NULL ORDER BY state`),
         pool.query<{ cp_code: string; cp_name: string | null }>(
-          `SELECT cp_code, MAX(cp_name) AS cp_name FROM secondary_order_line GROUP BY cp_code ORDER BY cp_code`,
+           `SELECT cp_code, MAX(cp_name) AS cp_name FROM secondary_order_line
+            WHERE source_kind = 'product_wise'
+              AND order_datetime >= TIMESTAMPTZ '${PRODUCT_WISE_START}'
+            GROUP BY cp_code ORDER BY cp_code`,
         ),
         pool.query<{ state_head: string }>(
           `SELECT DISTINCT COALESCE(state_head.name, p.name) AS state_head
            FROM secondary_order_line sol
            JOIN person p ON p.person_id = sol.sales_user_id
            LEFT JOIN person state_head ON state_head.person_id = p.state_head_person_id
-           WHERE p.is_state_head OR p.state_head_person_id IS NOT NULL
+           WHERE sol.source_kind = 'product_wise'
+             AND sol.order_datetime >= TIMESTAMPTZ '${PRODUCT_WISE_START}'
+             AND (p.is_state_head OR p.state_head_person_id IS NOT NULL)
            ORDER BY state_head`,
         ),
       ]),
@@ -709,18 +769,33 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
           COALESCE(SUM(basic_order_value::numeric) FILTER (WHERE is_exact_duplicate_export), 0)::text AS duplicate_basic,
           COUNT(*)::text AS total_rows
         FROM secondary_order_line
+        WHERE source_kind = 'product_wise'
+          AND order_datetime >= TIMESTAMPTZ '${PRODUCT_WISE_START}'
       `),
     ]);
 
     const s = summary.rows[0];
      const [states, distributors, stateHeads] = filterRows;
     const totalRows = Number(s?.lines ?? 0);
+     const filteredRange = Boolean(filters.dateFrom || filters.dateTo);
+     const incompletePeriods = Number(s?.incomplete_periods ?? 0);
+     const listCompleteness = totalRows === 0
+       ? "unavailable"
+       : filteredRange || incompletePeriods > 0 ? "partial" : "complete";
      const pageRows = rows.rows.slice(0, pageSize);
      const nextCursor = rows.rows.length > pageSize ? encodeCursor(pageRows[pageRows.length - 1] as Record<string, unknown>) : null;
     res.json({
       basis: {
         measure: "ORDER BOOKING",
         value: "Basic order value excludes GST",
+        source: "secondary_order_line",
+        valueBasis: "basic_order_value_ex_gst",
+        month: "Product-Wise from Aug-26 onward",
+         cutoff: s?.loaded_at ?? null,
+         completeness: listCompleteness,
+         periods: Number(s?.periods ?? 0),
+         incompletePeriods,
+         incompleteRows: Number(s?.incomplete_rows ?? 0),
         disclaimer: "Order booking, not dispatch. Not comparable with secondary order-booking register figures.",
           mixedEraNote: MIXED_ERA_NOTE,
       },
@@ -821,13 +896,27 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
            COUNT(DISTINCT sol.order_id) AS orders,
            COALESCE(SUM(sol.basic_order_value::numeric),0) AS total_basic,
            MIN(sol.order_datetime)::date::text AS date_min,
-           MAX(sol.order_datetime)::date::text AS date_max
+           MAX(sol.order_datetime)::date::text AS date_max,
+           MAX(sol.loaded_at)::text AS loaded_at
+           ,COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY')) AS periods
+           ,COUNT(DISTINCT to_char(sol.order_datetime AT TIME ZONE 'Asia/Kolkata', 'Mon-YY'))
+             FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_periods
+           ,COUNT(*) FILTER (WHERE COALESCE(sol.period_completeness, 'partial') <> 'complete') AS incomplete_rows
          FROM secondary_order_line sol ${where}`,
         params,
       ),
     ]);
 
     const s = summary.rows[0];
+    const exportRows = Number(s.rows);
+    const filteredRange = Boolean(filters.dateFrom || filters.dateTo);
+    const incompletePeriods = Number(s.incomplete_periods ?? 0);
+    const exportCompleteness = exportRows === 0
+      ? "unavailable"
+      : filteredRange || incompletePeriods > 0 ? "partial" : "complete";
+    const exportUnavailableReason = exportRows === 0
+      ? "No Product-Wise rows are loaded for the selected range; this export is unavailable, not a genuine zero."
+      : null;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     const date = new Date().toISOString().slice(0, 10);
     res.setHeader("Content-Disposition", `attachment; filename="SecondaryOrders_OrderBooking_${date}.xlsx"`);
@@ -839,7 +928,19 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
     info.columns = [{ width: 28 }, { width: 80 }];
     const infoRows: [string, string][] = [
       ["Basis", "ORDER BOOKING — not dispatch"],
+      ["Source", "secondary_order_line (Product-Wise CRM)"],
+      ["Value basis", "basic_order_value_ex_gst — excludes GST; dealer_order_value is not used for these figures."],
+      ["Availability", exportRows > 0 ? "value" : "unavailable-with-reason"],
+      ["Unavailable reason", exportUnavailableReason ?? "–"],
+      ["Month", filters.dateFrom || filters.dateTo ? `${filters.dateFrom ?? "start"}..${filters.dateTo ?? "end"}` : "all loaded Product-Wise months"],
+      ["Cutoff", s.loaded_at ?? "no Product-Wise rows loaded"],
+       ["Completeness", exportCompleteness],
+       ["Periods", String(s.periods ?? 0)],
+       ["Incomplete periods", String(incompletePeriods)],
+       ["Incomplete rows", String(s.incomplete_rows ?? 0)],
+      ["Source metadata", "source=productwise_xlsx; value_basis=basic_order_value_ex_gst"],
       ["Note", "Not comparable with secondary order-booking register figures (secondary_sku_line / secondary_register_line)."],
+      ["Permanent source seam", PERMANENT_SECONDARY_SEAM_NOTICE],
       ["Mixed-era coverage", MIXED_ERA_NOTE],
       ["Status filter", "APPROVED/PENDING applies only to Product-Wise rows. Legacy periods have no status and are not silently represented as a status."],
       ["Basic Order Value", "Excludes GST. Use this for commercial analysis."],

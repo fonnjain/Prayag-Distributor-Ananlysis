@@ -24,7 +24,7 @@ export type TrendMonthRow = {
   monthIdx: number;
   segment: string;
   codesBought: number;
-  net: number;
+  net: number | null;
 };
 
 export type TrendFyRow = {

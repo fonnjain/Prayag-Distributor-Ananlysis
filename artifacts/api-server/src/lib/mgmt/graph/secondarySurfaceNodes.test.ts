@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { PRODUCTWISE_PENDING_PREDICATE, sourceSegmentPolicy, targetAnchoredQuintile } from "./secondarySurfaceNodes.js";
+import {
+  PRODUCTWISE_PENDING_PREDICATE,
+  coverageAvailability,
+  sourceSegmentPolicy,
+  targetAnchoredQuintile,
+} from "./secondarySurfaceNodes.js";
 
 describe("Prompt 115 secondary surface helpers", () => {
   it("anchors broad cohorts to the target annual-value quintile", () => {
@@ -19,5 +24,12 @@ describe("Prompt 115 secondary surface helpers", () => {
     expect(PRODUCTWISE_PENDING_PREDICATE).toContain("source_kind='product_wise'");
     expect(PRODUCTWISE_PENDING_PREDICATE).toContain("2026-08-01");
     expect(PRODUCTWISE_PENDING_PREDICATE).not.toContain("secondary_sku_line");
+  });
+
+  it("does not turn an unloaded Product-Wise source into a measured zero", () => {
+    expect(coverageAvailability(0, "unavailable")).toBe("unavailable");
+    expect(coverageAvailability(0, "complete")).toBe("unavailable");
+    expect(coverageAvailability(12, "partial")).toBe("partial");
+    expect(coverageAvailability(12, "complete")).toBe("measured");
   });
 });

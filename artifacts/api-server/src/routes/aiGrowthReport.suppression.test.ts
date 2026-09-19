@@ -101,4 +101,44 @@ describe("AI Growth H5 suppression decision", () => {
       widen: "WIDEN withheld under H5.",
     });
   });
+
+  it("uses the Product-Wise unavailable reason instead of leaking legacy conclusions", () => {
+    const reason =
+      "Sales Deep Dive secondary KPIs are unavailable for Product-Wise months: no approved Product-Wise KPI mapping.";
+    const payload = suppressSecondaryRegisterFinalPayload({
+      activate: {
+        totalDormantCount: 2,
+        valueHigh: 500,
+        lowActivationDistributors: [{ name: "stale July distributor" }],
+        notAvailableReason: "old reason",
+      },
+      widen: {
+        valueHigh: 300,
+        top20Distributors: [{ name: "stale July distributor" }],
+        notAvailableReason: "old reason",
+      },
+      opportunityLedger: {
+        rows: [
+          { lever: "ACTIVATE", entityName: "stale July distributor", valueHigh: 500 },
+          { lever: "WIDEN", entityName: "stale July distributor", valueHigh: 300 },
+        ],
+      },
+      executiveSummary: {
+        leverRanking: [
+          { lever: "ACTIVATE", value: 500 },
+          { lever: "WIDEN", value: 300 },
+        ],
+      },
+      narrative: { activate: "old claim", widen: "old claim" },
+    }, reason);
+    expect(payload.activate.valueHigh).toBeNull();
+    expect(payload.activate.totalDormantCount).toBeNull();
+    expect(payload.activate.afterDedupCount).toBeNull();
+    expect(payload.activate.notAvailableReason).toBe("old reason");
+    expect(payload.narrative.activate).toBe(reason);
+    expect(payload.narrative.widen).toBe(reason);
+    expect(payload.opportunityLedger.rows).toEqual([]);
+    expect(payload.executiveSummary.leverRanking).toEqual([]);
+    expect(payload.deduplication.note).toContain(reason);
+  });
 });

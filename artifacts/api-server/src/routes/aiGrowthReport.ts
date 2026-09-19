@@ -41,6 +41,7 @@ import {
   getSecondaryRegisterCoverageDisclosureSafe,
   type SecondaryRegisterCoverageDisclosure,
 } from "../lib/secondary/registerCoverage.js";
+import { secondarySourceForMonth } from "../lib/secondary/sourceContract.js";
 
 const router: IRouter = Router();
 const MODEL = "claude-sonnet-4-6";
@@ -103,7 +104,10 @@ export function secondaryCoverageFingerprint(
 /** Final guard: no stale AI register-derived material can escape suppression. */
 export function suppressSecondaryRegisterFinalPayload(
   payload: Record<string, any>,
+  unavailableReason?: string,
 ): Record<string, any> {
+  const suppressionReason =
+    unavailableReason ?? "ACTIVATE and WIDEN are unavailable under partial secondary-register coverage.";
   const activate = payload.activate ?? {};
   const widen = payload.widen ?? {};
   const ledger = payload.opportunityLedger ?? {};
@@ -120,8 +124,8 @@ export function suppressSecondaryRegisterFinalPayload(
     ...payload,
     activate: {
       ...activate,
-      totalDormantCount: 0,
-      afterDedupCount: 0,
+      totalDormantCount: null,
+      afterDedupCount: null,
       lowActivationDistributors: [],
       medianActiveRetailerValue: null,
       valueHigh: null,
@@ -153,12 +157,12 @@ export function suppressSecondaryRegisterFinalPayload(
       ...deduplication,
       multiLeverEntityCount: dedupExamples.length,
       examples: dedupExamples,
-      note: `${deduplication.note ?? ""} ACTIVATE and WIDEN are unavailable under partial H5 coverage.`.trim(),
+      note: `${deduplication.note ?? ""} ${suppressionReason}`.trim(),
     },
-    narrative: {
+      narrative: {
       ...narrative,
-      activate: activate.notAvailableReason,
-      widen: widen.notAvailableReason,
+      activate: unavailableReason ?? activate.notAvailableReason,
+      widen: unavailableReason ?? widen.notAvailableReason,
     },
   };
 }
@@ -895,6 +899,29 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
 
   const py          = prevFy(fy);
   const labels      = fiscalMonthsToLabels(fy, monthFrom, monthTo);
+  const secondaryProductWiseMonths = labels.filter((month) => secondarySourceForMonth(month) === "productwise_xlsx");
+  const secondaryLegacyMonths = labels.filter((month) => secondarySourceForMonth(month) === "pscode3_xlsx");
+  const secondaryMoneyBlocked = secondaryProductWiseMonths.length > 0;
+  const secondarySurface = secondaryProductWiseMonths.length > 0
+    ? {
+        status: "blocked" as const,
+        reason: "Sales Deep Dive secondary KPIs are unavailable for Product-Wise months: this FY-only member pipeline has no approved Product-Wise KPI mapping. No zero is shown.",
+        source: "secondary_order_line",
+        value_basis: "basic_order_value_ex_gst",
+        months: secondaryProductWiseMonths,
+        cutoff: "source-table coverage",
+        completeness: "unavailable" as const,
+        seam: secondaryLegacyMonths.length > 0,
+      }
+    : {
+        status: "available" as const,
+        source: "secondary_sku_line",
+        value_basis: "net_amount",
+        months: secondaryLegacyMonths,
+        cutoff: "source-table coverage",
+        completeness: "complete" as const,
+        seam: false,
+      };
   const priorLabels = toPriorYearMonths(labels);
   const periodLabel      = buildPeriodLabel(fy, monthFrom, monthTo);
   const priorPeriodLabel = buildPeriodLabel(py, monthFrom, monthTo);
@@ -1066,7 +1093,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     // Independent availability signal: true when secondary_sku_line has rows
     // for this FY/geography regardless of whether an opportunity query returns results.
     let secondarySkuHasData = false;
-    if (scope === "company" || scope === "state") {
+    if ((scope === "company" || scope === "state") && !secondaryMoneyBlocked) {
       [companyActivationRows, companyRangeGapRows, secondarySkuHasData] = await Promise.all([
         queryDistributorActivationCompany(fy, labels, stateFilter, null).catch((): DistActivationRow[] => []),
         queryDistributorRangeGapCompany(fy, stateFilter).catch((): DistRangeGapRow[] => []),
@@ -1492,8 +1519,8 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       lowActivationDists.length = 0;
       widenDists.length = 0;
       activateEntitySet.clear();
-      activate.totalDormantCount = 0;
-      activate.afterDedupCount = 0;
+      (activate as Record<string, unknown>).totalDormantCount = null;
+      (activate as Record<string, unknown>).afterDedupCount = null;
       activate.lowActivationDistributors = [];
       activate.notAvailable = true;
       activate.notAvailableReason =
@@ -1934,13 +1961,18 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       whereNotToLook,
       capacityCheck,
       assumptionsAndLimits,
+      secondarySurface,
       secondaryRegisterCoverage,
       deduplication,
       narrative: sectionNarratives,
       guard,
     };
-    if (secondaryRegisterPartial) {
-      responsePayload = suppressSecondaryRegisterFinalPayload(responsePayload);
+    if (secondaryRegisterPartial || secondaryMoneyBlocked) {
+      const unavailableReason = secondaryMoneyBlocked
+        ? secondarySurface.reason
+        : secondaryRegisterCoverage!.message +
+          " AI secondary-register conclusions are withheld until the protected load is complete.";
+      responsePayload = suppressSecondaryRegisterFinalPayload(responsePayload, unavailableReason);
     }
 
         // ── Store in cache ─────────────────────────────────────────────────────

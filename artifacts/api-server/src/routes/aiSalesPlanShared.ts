@@ -5,6 +5,7 @@
  */
 import { Router } from "express";
 import { pool } from "@workspace/db";
+import { secondarySourceForMonth } from "../lib/secondary/sourceContract.js";
 import { getOpenResolutionHolds } from "../lib/resolution/holdResolver.js";
 import registry from "../config/prompt68-category-registry.json";
 import top80Snapshots from "../config/prompt105-top80-snapshots.json";
@@ -17,6 +18,13 @@ const basisNames = new Set(["same-distributor", "same-state", "national"]);
 const num = (v: unknown) => Number(v ?? 0) || 0;
 const VALID_RET_ID = /^RET#\d+$/i;
 const VALID_DIST_ID = /^DIST#\d+$/i;
+export function crossesSecondarySourceSeam(periods: string[]): boolean {
+  return new Set(periods.map((period) => secondarySourceForMonth(period))).size > 1;
+}
+export function missingSecondaryMonths(periods: string[], loadedMonths: string[]): string[] {
+  const loaded = new Set(loadedMonths);
+  return periods.filter((month) => !loaded.has(month));
+}
 export const isValidRetId = (value: unknown) => typeof value === "string" && VALID_RET_ID.test(value.trim());
 export const isValidDistId = (value: unknown) => typeof value === "string" && VALID_DIST_ID.test(value.trim());
 export const median = (xs: number[]) => {
@@ -135,30 +143,48 @@ async function peerSet(retailer: string, fy: string, basis: string, state?: stri
 async function penetration(peers: Retailer[], fy: string, periods: string[]) {
   if (!peers.length) return [];
   const ids = peers.map((p) => p.id);
-  const q = await pool.query(
-    `WITH identity AS (
-       SELECT DISTINCT fiscal_year, dealer_id
-         FROM secondary_order_line
-        WHERE fiscal_year=$1 AND dealer_id=ANY($2::text[])
-     ), per_peer AS (
-       SELECT identity.dealer_id, sku.item_code,
-              SUM(sku.qty)::double precision qty, SUM(sku.net_amount)::double precision value
-         FROM secondary_sku_line sku
-         JOIN identity ON identity.fiscal_year=sku.fy
-          AND identity.dealer_id=COALESCE(
-            CASE WHEN BTRIM(sku.dealer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.dealer_id) END,
-            CASE WHEN BTRIM(sku.retailer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer_id) END,
-            CASE WHEN BTRIM(sku.retailer) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer) END
+  const productWisePeriods = periods
+    .filter((period) => secondarySourceForMonth(period) === "productwise_xlsx");
+  const useProductWise = productWisePeriods.length > 0;
+   const q = await pool.query(
+    useProductWise
+       ? `WITH per_peer_product AS (
+             SELECT dealer_id, product_code,
+                    SUM(qty)::double precision qty,
+                    SUM(basic_order_value)::double precision value
+               FROM secondary_order_line
+              WHERE fiscal_year=$1 AND source_kind='product_wise'
+                AND dealer_id=ANY($2::text[])
+                AND ($3::text[] IS NULL OR TO_CHAR(order_datetime AT TIME ZONE 'Asia/Kolkata','Mon-YY')=ANY($3::text[]))
+              GROUP BY dealer_id, product_code
           )
-        WHERE sku.fy=$1
-          AND ($3::text[] IS NULL OR month_label=ANY($3::text[]))
-         GROUP BY identity.dealer_id, sku.item_code
-     )
-     SELECT item_code code, COUNT(*)::int buyers,
-            percentile_cont(.5) WITHIN GROUP (ORDER BY qty) median_qty,
-            percentile_cont(.5) WITHIN GROUP (ORDER BY value) median_value
-       FROM per_peer GROUP BY item_code ORDER BY item_code`,
-    [fy, ids, periods.length ? periods : null],
+          SELECT product_code code, COUNT(*)::int buyers,
+                 percentile_cont(.5) WITHIN GROUP (ORDER BY qty) median_qty,
+                 percentile_cont(.5) WITHIN GROUP (ORDER BY value) median_value
+            FROM per_peer_product
+           GROUP BY product_code ORDER BY product_code`
+      : `WITH identity AS (
+          SELECT DISTINCT fiscal_year, dealer_id
+            FROM secondary_order_line
+           WHERE fiscal_year=$1 AND dealer_id=ANY($2::text[])
+        ), per_peer AS (
+          SELECT identity.dealer_id, sku.item_code,
+                 SUM(sku.qty)::double precision qty, SUM(sku.net_amount)::double precision value
+            FROM secondary_sku_line sku
+            JOIN identity ON identity.fiscal_year=sku.fy
+             AND identity.dealer_id=COALESCE(
+               CASE WHEN BTRIM(sku.dealer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.dealer_id) END,
+               CASE WHEN BTRIM(sku.retailer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer_id) END,
+               CASE WHEN BTRIM(sku.retailer) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer) END
+             )
+           WHERE sku.fy=$1 AND ($3::text[] IS NULL OR month_label=ANY($3::text[]))
+            GROUP BY identity.dealer_id, sku.item_code
+        )
+        SELECT item_code code, COUNT(*)::int buyers,
+               percentile_cont(.5) WITHIN GROUP (ORDER BY qty) median_qty,
+               percentile_cont(.5) WITHIN GROUP (ORDER BY value) median_value
+          FROM per_peer GROUP BY item_code ORDER BY item_code`,
+    [fy, ids, (useProductWise ? productWisePeriods : periods).length ? (useProductWise ? productWisePeriods : periods) : null],
   );
   return q.rows.map((r) => ({ code: r.code, buyingRetailers: Number(r.buyers), eligibleRetailers: peers.length,
     penetrationPct: peers.length ? Number(r.buyers) / peers.length * 100 : 0,
@@ -167,36 +193,36 @@ async function penetration(peers: Retailer[], fy: string, periods: string[]) {
 }
 
 async function secondaryCoverage(fy: string) {
-  const frozen = await pool.query<{ month_label: string; frozen: boolean }>(
-    `SELECT month_label, BOOL_AND(frozen_at IS NOT NULL) frozen FROM secondary_sku_line WHERE fy=$1 GROUP BY month_label`, [fy]);
-  const result = await pool.query<{ month_no: number; through: string | null; completeness: string | null }>(
-    `SELECT EXTRACT(MONTH FROM (order_datetime AT TIME ZONE 'Asia/Kolkata'))::int AS month_no,
-            MAX((order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text through,
-            CASE WHEN BOOL_AND(LOWER(period_completeness)='complete') THEN 'complete'
-                 WHEN COUNT(*) > 0 THEN 'partial' ELSE 'unavailable' END completeness
-       FROM secondary_order_line WHERE fiscal_year=$1 GROUP BY 1 ORDER BY 1`, [fy],
-  );
-  const rows = result.rows;
-  const loaded = rows.filter((r) => r.completeness !== "unavailable").map((r) => ({ month: Number(r.month_no), through: r.through, state: r.completeness }));
-  // This is intentionally an observation of the order register, not a date
-  // based guess. An absent month remains unavailable even if the calendar has
-  // advanced beyond it.
   const months = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
   const labels = months.map((m, i) => `${m}-${String((Number(fy.slice(0, 4)) + (i >= 9 ? 1 : 0)) % 100).padStart(2, "0")}`);
-  const orderByLabel = new Map(loaded.map((r) => {
-    const idx = Number(r.month) >= 4 ? Number(r.month) - 4 : Number(r.month) + 8;
-    return [`${months[idx]}-${String((Number(fy.slice(0, 4)) + (idx >= 9 ? 1 : 0)) % 100).padStart(2, "0")}`, r];
-  }));
-  const skuByLabel = new Map(frozen.rows.map((r) => [r.month_label, r.frozen]));
-  const completeMonths = labels.filter((label) => skuByLabel.get(label) === true && orderByLabel.get(label)?.state === "complete");
-  const partialMonths = labels.filter((label) => skuByLabel.has(label) && !completeMonths.includes(label))
-    .map((month) => ({ month, through: orderByLabel.get(month)?.through ?? null }));
+  const [legacy, productWise] = await Promise.all([
+    pool.query<{ month: string; frozen: boolean }>(
+      `SELECT month_label month, BOOL_AND(frozen_at IS NOT NULL) frozen
+         FROM secondary_sku_line WHERE fy=$1 GROUP BY month_label`, [fy]),
+    pool.query<{ month: string; through: string | null; completeness: string | null }>(
+      `SELECT TO_CHAR(order_datetime AT TIME ZONE 'Asia/Kolkata','Mon-YY') month,
+              MAX((order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text through,
+              CASE WHEN BOOL_AND(LOWER(period_completeness)='complete') THEN 'complete'
+                   WHEN COUNT(*) > 0 THEN 'partial' ELSE 'unavailable' END completeness
+         FROM secondary_order_line
+        WHERE fiscal_year=$1 AND source_kind='product_wise'
+        GROUP BY 1`, [fy]),
+  ]);
+  const loaded = [
+    ...legacy.rows
+      .filter((r) => labels.includes(r.month) && secondarySourceForMonth(r.month) === "pscode3_xlsx")
+      .map((r) => ({ month: r.month, source: "pscode3_xlsx" as const, through: null, state: r.frozen ? "complete" : "partial" })),
+    ...productWise.rows
+      .filter((r) => labels.includes(r.month) && secondarySourceForMonth(r.month) === "productwise_xlsx")
+      .map((r) => ({ month: r.month, source: "productwise_xlsx" as const, through: r.through, state: r.completeness === "complete" ? "complete" : "partial" })),
+  ];
+  const loadedKeys = new Set(loaded.map((entry) => `${entry.month}:${entry.source}`));
+  const completeMonths = loaded.filter((entry) => entry.state === "complete").map((entry) => entry.month);
+  const partialMonths = loaded.filter((entry) => entry.state !== "complete")
+    .map((entry) => ({ month: entry.month, source: entry.source, through: entry.through }));
   return { source: "secondary_sku_line frozen_at + secondary_order_line through-date", loaded, completeMonths,
     partialMonths,
-    unavailableMonths: labels.filter((label) => !skuByLabel.has(label) && !loaded.some((r) => {
-      const month = label.slice(0, 3);
-      return Number(r.month) === months.indexOf(month) + 4 || (months.indexOf(month) >= 9 && Number(r.month) === months.indexOf(month) - 8);
-    })) };
+    unavailableMonths: labels.filter((label) => !loadedKeys.has(`${label}:${secondarySourceForMonth(label)}`)) };
 }
 
 async function top80Demand(state: string | undefined) {
@@ -529,14 +555,42 @@ router.get("/ai-sales-plan/shared-compute", async (req, res): Promise<void> => {
       basisMetadata: meta("secondary_order_line dealer_id + valid cp_code/cp_name identity; basic_order_value quintile", fy, peers.raw.length, peers.raw.length, { basis }),
     };
     const periods = typeof req.query.periods === "string" ? req.query.periods.split(",").map((x) => x.trim()).filter(Boolean) : [];
+    const crossesSecondarySeam = crossesSecondarySourceSeam(periods) || (periods.length === 0 && fy === "2026-27");
+    const secondarySkuBasis = periods.some((period) => secondarySourceForMonth(period) === "productwise_xlsx")
+      ? "Product-Wise secondary_order_line.product_code + dealer_id; basic_order_value ex-GST (Aug-26 onward)"
+      : "PSCode3 secondary_sku_line.item_code + dealer_id; net_amount (through Jul-26)";
     const need = (name: string) => requested.some((r) => r.toLowerCase() === name.toLowerCase());
-    const [penetrationRows, holds, orderCoverage] = await Promise.all([
-      need("penetration") && selected.length >= MIN_PEERS ? penetration(selected, fy, periods) : Promise.resolve([]),
-      getOpenResolutionHolds(), secondaryCoverage(fy),
-    ]);
+     const [holds, orderCoverage] = await Promise.all([getOpenResolutionHolds(), secondaryCoverage(fy)]);
+     const sourceMetadata = periods.map((month) => {
+       const source = secondarySourceForMonth(month);
+        const loaded = orderCoverage.loaded.find((entry) => entry.month === month && entry.source === source);
+       return {
+         source,
+         value_basis: source === "productwise_xlsx" ? "basic_order_value_ex_gst" : "net_amount",
+         month,
+         cutoff: loaded?.through ?? "not loaded",
+         completeness: loaded?.state ?? "unavailable",
+       };
+     });
+     const requestedUnavailable = missingSecondaryMonths(
+       periods,
+        periods.filter((month) => {
+          const source = secondarySourceForMonth(month);
+          return orderCoverage.loaded.some((entry) => entry.month === month && entry.source === source);
+        }),
+     );
+     const penetrationRows = need("penetration") && selected.length >= MIN_PEERS && !crossesSecondarySeam && !requestedUnavailable.length
+       ? await penetration(selected, fy, periods)
+       : [];
     const customer = need("customerSku") ? await customerComparison(retailer, orderCoverage.completeMonths) : null;
-    const customerCodes = need("adjacency") ? await pool.query<{ item_code: string }>(
-      `WITH identity AS (
+     const customerCodes = need("adjacency") && !requestedUnavailable.length && !crossesSecondarySeam ? await pool.query<{ item_code: string }>(
+       periods.some((period) => secondarySourceForMonth(period) === "productwise_xlsx")
+         ? `SELECT DISTINCT product_code AS item_code
+              FROM secondary_order_line
+             WHERE fiscal_year=$1 AND source_kind='product_wise'
+               AND dealer_id=$2
+               AND TO_CHAR(order_datetime AT TIME ZONE 'Asia/Kolkata','Mon-YY')=ANY($3::text[])`
+        : `WITH identity AS (
          SELECT DISTINCT fiscal_year, dealer_id
            FROM secondary_order_line WHERE fiscal_year=$1 AND dealer_id=$2
        )
@@ -547,15 +601,53 @@ router.get("/ai-sales-plan/shared-compute", async (req, res): Promise<void> => {
             CASE WHEN BTRIM(sku.dealer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.dealer_id) END,
             CASE WHEN BTRIM(sku.retailer_id) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer_id) END,
             CASE WHEN BTRIM(sku.retailer) ~ '^RET#[0-9]+$' THEN BTRIM(sku.retailer) END
-          )`, [fy, retailer]) : { rows: [] };
+            )
+            AND ($3::text[] IS NULL OR sku.month_label=ANY($3::text[]))`, [fy, retailer, periods.length ? periods : null]) : { rows: [] };
     const codeSet = new Set(customerCodes.rows.map((r) => r.item_code));
     const touched = categories.filter((c) => assignments.some((a) => a.subcategory === c && codeSet.has(a.item_code)));
     const computations = {
       peerSet: peerBasis,
-      penetration: selected.length < MIN_PEERS ? unavailable("minimum peer size not met", "secondary_sku_line", fy, { basis }) : {
-        availability: "value", value: penetrationRows, basis: meta("secondary_sku_line.qty + net_amount joined to secondary_order_line.dealer_id", periods.join(",") || fy, selected.length, selected.length, { peerBasis: basis }),
-      },
-      adjacency: need("adjacency") ? { availability: "value", value: { touched, absent: categories.filter((c) => !touched.includes(c)), registryVersion: registry.version, registryCoverage: `${assignments.length} assignments / ${categories.length} categories`, unmappedCodes: [...codeSet].filter((c) => !assignments.some((a) => a.item_code === c)), categoryLevelOnly: true, pipeFittingsSplit: "unavailable — registry has no code-level split" }, basis: meta("config/prompt68-category-registry.json", fy, codeSet.size, codeSet.size) } : unavailable("not requested", "config/prompt68-category-registry.json", fy),
+      penetration: selected.length < MIN_PEERS
+        ? unavailable("minimum peer size not met", secondarySkuBasis, fy, { basis })
+        : crossesSecondarySeam
+          ? unavailable(
+            "Jul-26/Aug-26 secondary seam: penetration money/medians are not comparable across PSCode3 and Product-Wise; request one source period",
+            "PSCode3 secondary_sku_line + Product-Wise secondary_order_line",
+            periods.join(","),
+            { basis, seam: true, countsComparable: true },
+          )
+         : requestedUnavailable.length
+           ? unavailable(
+             `No secondary rows loaded for requested month(s): ${requestedUnavailable.join(", ")}`,
+             secondarySkuBasis,
+             periods.join(","),
+             { sourceMetadata },
+           )
+         : {
+            availability: "value",
+            value: penetrationRows,
+            basis: {
+              ...meta(secondarySkuBasis, periods.join(",") || fy, selected.length, selected.length, { peerBasis: basis }),
+              sourceMetadata,
+            },
+          },
+       adjacency: !need("adjacency")
+        ? unavailable("not requested", "config/prompt68-category-registry.json", fy)
+        : crossesSecondarySeam
+          ? unavailable(
+            "Jul-26/Aug-26 secondary seam: adjacency money is not comparable across PSCode3 and Product-Wise; request one source period",
+            "PSCode3 secondary_sku_line + Product-Wise secondary_order_line",
+            periods.join(","),
+            { seam: true, countsComparable: true },
+           )
+          : requestedUnavailable.length
+            ? unavailable(
+              `No secondary rows loaded for requested month(s): ${requestedUnavailable.join(", ")}`,
+              secondarySkuBasis,
+              periods.join(","),
+              { sourceMetadata },
+            )
+          : { availability: "value", value: { touched, absent: categories.filter((c) => !touched.includes(c)), registryVersion: registry.version, registryCoverage: `${assignments.length} assignments / ${categories.length} categories`, unmappedCodes: [...codeSet].filter((c) => !assignments.some((a) => a.item_code === c)), categoryLevelOnly: true, pipeFittingsSplit: "unavailable — registry has no code-level split" }, basis: meta("config/prompt68-category-registry.json", fy, codeSet.size, codeSet.size) },
       top80: need("top80") || need("demand") ? await top80Demand(state) : unavailable("not requested", "frozen metrics", fy),
       customerSku: customer ? { availability: "value", value: customer.items, history: customer.history, basis: meta("secondary_sku_line.qty + net_amount joined to secondary_order_line.dealer_id", "FY2025-26 full year vs FY2026-27 loaded SKU months", 1, 1) } : unavailable("not requested", "secondary_sku_line", fy),
     };
@@ -574,6 +666,7 @@ router.get("/ai-sales-plan/shared-compute", async (req, res): Promise<void> => {
         period: "FY2025-26 full year and FY2026-27 loaded SKU months",
         identityJoin: "validated RET# matched to secondary_order_line.dealer_id",
       },
+      sourceMetadata,
       secondaryOrderCoverage: orderCoverage,
       periodStates: fy === "2025-26"
         ? { fiscalYear: "FY25-26", complete: true, completeMonths: orderCoverage.completeMonths, partialMonths: [], unavailableMonths: [] }
