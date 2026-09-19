@@ -146,3 +146,4 @@
 - [AI Sales Plan source-aware RET#](ai-sales-plan-production-identity.md) — retailer identity is source-dependent; Prompt 105 must not query dealer_id alone.
 - [AI graph held-value boundary](ai-graph-held-values.md) — model-facing holds use safe non-numeric reasons; full numeric evidence stays only in the Resolution register.
 - [Product-Wise MRP fallback drift](productwise-mrp-fallback-drift.md) — closed-month controls drift when history gaps fall back to a refreshed active catalogue.
+- [Product-Wise CRM head authority](productwise-crm-head-authority.md) — use effective full-ID+name authority first; registry fallback users stay visibly NEW.

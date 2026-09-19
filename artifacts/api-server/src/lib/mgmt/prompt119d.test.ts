@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
 import { aggregateAugustSecondaryHeadRows, resolveProductWiseRows, type MemberKpis } from "./deepDiveData.js";
 import { buildDeepDiveExport } from "./deepDiveExport.js";
+import { CRM_USER_HEAD_MAP_AUTHORITY } from "../../../../../lib/db/src/seed/crmUserHeadAuthority.js";
 
 const people = [
   { canonical_name: "Alice Code", employee_code: "353", norm_key: "alicecode", person_id: 1, state_head: "Head" },
@@ -12,6 +13,77 @@ const people = [
 ];
 
 describe("Prompt 119 D Product-Wise identity controls", () => {
+  it("contains the reviewed 152 full-ID/name keys and canonical head spellings", () => {
+    expect(CRM_USER_HEAD_MAP_AUTHORITY).toHaveLength(152);
+    const keys = CRM_USER_HEAD_MAP_AUTHORITY.map((row) =>
+      `${row.employeeId.toUpperCase()}|${row.salesUserName.toLowerCase().replace(/[^a-z0-9]+/g, "")}`,
+    );
+    expect(new Set(keys).size).toBe(152);
+    expect(new Set(CRM_USER_HEAD_MAP_AUTHORITY.map((row) => row.stateHead))).toEqual(
+      new Set([
+        "Sandeep Dadheech", "Syed Aqil Rizvi", "Lalan Kumar", "Anant Singh",
+        "Biju C.O", "Pawan Kumar Sharma", "Sunil Patel", "Sulinder Pal",
+        "Nasir Hussain Khan",
+      ]),
+    );
+    const totals = new Map<string, number>();
+    for (const row of CRM_USER_HEAD_MAP_AUTHORITY) {
+      totals.set(row.stateHead, (totals.get(row.stateHead) ?? 0) + row.augValue);
+    }
+    expect(Object.fromEntries(totals)).toEqual({
+      "Sandeep Dadheech": 123742880,
+      "Syed Aqil Rizvi": 37557506,
+      "Lalan Kumar": 11240415,
+      "Anant Singh": 8646568,
+      "Biju C.O": 6725577,
+      "Pawan Kumar Sharma": 3511104,
+      "Sunil Patel": 1722676,
+      "Sulinder Pal": 1404844,
+      "Nasir Hussain Khan": 1236719,
+    });
+    expect(totals.has("[Unresolved]")).toBe(false);
+  });
+
+  it("uses the authority map before registry, requires the full exact pair, and marks misses NEW", () => {
+    const authority = [{
+      employee_id: "PRG-001",
+      sales_user_name: "Mapped User",
+      state_head: "Syed Aqil Rizvi",
+      effective_from: "2026-08-01",
+      effective_to: null,
+    }];
+    const registry = [
+      { canonical_name: "Conflicting Registry", employee_code: "PRG-001", norm_key: "conflict", person_id: 1, state_head: "Sunil Patel" },
+      { canonical_name: "Fallback User", employee_code: "PRG-002", norm_key: "fallback", person_id: 2, state_head: "Pawan Kumar Sharma" },
+    ];
+    const result = resolveProductWiseRows([
+      { employee_id: "PRG-001", sales_user_name: "Mapped User", basic_order_value: 10, order_datetime: "2026-08-01T00:00:00+05:30" },
+      { employee_id: "001", sales_user_name: "Mapped User", basic_order_value: 20, order_datetime: "2026-08-02T00:00:00+05:30" },
+      { employee_id: "PRG-002", sales_user_name: "Fallback User", basic_order_value: 30, order_datetime: "2026-08-02T00:00:00+05:30" },
+      { employee_id: "PRG-999", sales_user_name: "Unknown User", basic_order_value: 40, order_datetime: "2026-08-02T00:00:00+05:30" },
+    ], registry, new Map(), authority);
+    expect(result.productWiseByStateHead.get("syedaqilrizvi")).toBe(10);
+    expect(result.productWiseByStateHead.get("pawankumarsharma")).toBe(30);
+    expect(result.newUsers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ employeeId: "PRG-002", resolution: "registry_fallback", value: 30 }),
+      expect.objectContaining({ employeeId: "PRG-999", resolution: "unresolved", value: 40 }),
+    ]));
+    expect(result.values.get("mappeduser")).toBe(10);
+  });
+
+  it("does not apply an authority row before its effective date", () => {
+    const result = resolveProductWiseRows([
+      { employee_id: "PRG-001", sales_user_name: "Mapped User", basic_order_value: 10, order_datetime: "2026-07-31T23:59:59+05:30" },
+      { employee_id: "PRG-001", sales_user_name: "Mapped User", basic_order_value: 20, order_datetime: "2026-08-01T00:00:00+05:30" },
+    ], [
+      { canonical_name: "Fallback User", employee_code: "PRG-001", norm_key: "fallback", person_id: 1, state_head: "Pawan Kumar Sharma" },
+    ], new Map(), [{
+      employee_id: "PRG-001", sales_user_name: "Mapped User", state_head: "Syed Aqil Rizvi",
+      effective_from: "2026-08-01", effective_to: null,
+    }]);
+    expect(result.productWiseByStateHead.get("pawankumarsharma")).toBe(10);
+    expect(result.productWiseByStateHead.get("syedaqilrizvi")).toBe(20);
+  });
   it("sums every August head-month row for reconciliation (162 rows / Rs 14.41 Cr fixture)", () => {
     const rows = Array.from({ length: 162 }, (_, i) => ({
       head_canon: `head-${i}`, state_head: i < 81 ? "West" : "East",

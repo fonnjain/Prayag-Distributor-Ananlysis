@@ -224,6 +224,7 @@ export type TeamSummary = {
     mappedCount: number;
     unmappedCount: number;
     reasons: Record<string, number>;
+    newUsers: ProductWiseResolution["newUsers"];
   };
   stateHeadComparison?: Array<{
     stateHead: string;
@@ -258,6 +259,7 @@ export type DeepDiveDataResult = {
     mappedCount: number;
     unmappedCount: number;
     reasons: Record<string, number>;
+    newUsers: ProductWiseResolution["newUsers"];
   };
   augustSecondaryHeadOrdered?: number | null;
   stateHeadComparison?: TeamSummary["stateHeadComparison"];
@@ -1262,12 +1264,27 @@ export type ProductWiseResolution = {
   augustByHead: Map<string, number>;
   augustByStateHead: Map<string, number>;
   productWiseByStateHead: Map<string, number>;
+  newUsers: Array<{
+    employeeId: string | null;
+    salesUserName: string | null;
+    rows: number;
+    value: number;
+    resolution: "registry_fallback" | "unresolved";
+  }>;
 };
 
 export type ProductWiseLineForResolution = {
   employee_id: string | null;
   sales_user_name: string | null;
   basic_order_value: string | number | null;
+  order_datetime?: string | Date | null;
+};
+export type ProductWiseAuthorityMapRow = {
+  employee_id: string;
+  sales_user_name: string;
+  state_head: string;
+  effective_from: string;
+  effective_to: string | null;
 };
 export type ProductWiseRegistryPerson = {
   person_id?: number | null;
@@ -1282,6 +1299,29 @@ export function normalizeProductEmployeeCode(value: string | null | undefined): 
   if (!raw) return null;
   const prefixed = raw.match(/^PRG-(.+)$/i);
   return (prefixed ? prefixed[1] : raw).trim() || null;
+}
+
+function normalizeCrmEmployeeId(value: string | null | undefined): string | null {
+  const raw = value?.trim() ?? "";
+  return raw ? raw.toUpperCase() : null;
+}
+
+function normalizeCrmUserName(value: string | null | undefined): string | null {
+  const raw = value?.trim() ?? "";
+  return raw ? normSecKey(raw) : null;
+}
+
+function crmEffectiveDate(value: string | Date | null | undefined): string | null {
+  if (!value) return null;
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
 export function aggregateAugustSecondaryHeadRows(
@@ -1309,11 +1349,24 @@ export function resolveProductWiseRows(
   lines: ProductWiseLineForResolution[],
   registryRows: ProductWiseRegistryPerson[],
   hrUniqueEmployeeCodes: Map<string, string> = new Map(),
+  authorityRows: ProductWiseAuthorityMapRow[] = [],
 ): ProductWiseResolution {
   const out: ProductWiseResolution = {
     values: new Map(), reasons: new Map(), mappedCount: 0, unmappedCount: 0,
     reasonCounts: {}, augustByHead: new Map(), augustByStateHead: new Map(), productWiseByStateHead: new Map(),
+    newUsers: [],
   };
+  const authority = new Map<string, ProductWiseAuthorityMapRow[]>();
+  for (const row of authorityRows) {
+    const employeeId = normalizeCrmEmployeeId(row.employee_id);
+    const salesUserName = normalizeCrmUserName(row.sales_user_name);
+    if (!employeeId || !salesUserName) continue;
+    const key = `${employeeId}|${salesUserName}`;
+    const versions = authority.get(key) ?? [];
+    versions.push(row);
+    versions.sort((a, b) => b.effective_from.localeCompare(a.effective_from));
+    authority.set(key, versions);
+  }
   const unique = new Map<string, ProductWiseRegistryPerson>();
   for (const row of registryRows) {
     const identity = row.person_id != null ? `person:${row.person_id}` : `key:${row.norm_key}`;
@@ -1330,7 +1383,48 @@ export function resolveProductWiseRows(
   const addReason = (reason: string) => {
     out.reasonCounts[reason] = (out.reasonCounts[reason] ?? 0) + 1;
   };
+  const newUsers = new Map<string, ProductWiseResolution["newUsers"][number]>();
+  const addNewUser = (
+    line: ProductWiseLineForResolution,
+    value: number,
+    resolution: "registry_fallback" | "unresolved",
+  ) => {
+    const key = `${normalizeCrmEmployeeId(line.employee_id) ?? ""}|${normalizeCrmUserName(line.sales_user_name) ?? ""}`;
+    const existing = newUsers.get(key) ?? {
+      employeeId: line.employee_id,
+      salesUserName: line.sales_user_name,
+      rows: 0,
+      value: 0,
+      resolution,
+    };
+    existing.rows++;
+    existing.value += value;
+    if (resolution === "unresolved") existing.resolution = resolution;
+    newUsers.set(key, existing);
+  };
   for (const line of lines) {
+    const value = typeof line.basic_order_value === "number"
+      ? line.basic_order_value : Number(line.basic_order_value ?? 0);
+    if (!Number.isFinite(value)) {
+      out.unmappedCount++; addReason("basic_order_value_invalid"); continue;
+    }
+    const lineDate = crmEffectiveDate(line.order_datetime);
+    const mapRow = authority.get(
+      `${normalizeCrmEmployeeId(line.employee_id) ?? ""}|${normalizeCrmUserName(line.sales_user_name) ?? ""}`,
+    )?.find((row) =>
+      lineDate != null
+      && lineDate >= row.effective_from
+      && (!row.effective_to || lineDate < row.effective_to)
+    );
+    if (mapRow) {
+      const key = normSecKey(line.sales_user_name ?? "");
+      out.values.set(key, (out.values.get(key) ?? 0) + value);
+      const headKey = resolveHeadKey(mapRow.state_head);
+      out.productWiseByStateHead.set(headKey, (out.productWiseByStateHead.get(headKey) ?? 0) + value);
+      out.mappedCount++;
+      continue;
+    }
+    const mapMissIsNew = true;
     const codeResolution = resolveEmployeeCode(
       normalizeProductEmployeeCode(line.employee_id),
       candidates,
@@ -1347,7 +1441,11 @@ export function resolveProductWiseRows(
         person = hrMatches[0];
         addReason("employee_code_hr_deterministic");
       } else {
-        out.unmappedCount++; addReason("employee_code_ambiguous"); continue;
+        out.unmappedCount++;
+        addReason("employee_code_ambiguous");
+        addReason("new_user_unresolved");
+        addNewUser(line, value, "unresolved");
+        continue;
       }
     } else {
       const nameMatches = byName.get(normSecKey(line.sales_user_name ?? "")) ?? [];
@@ -1356,13 +1454,14 @@ export function resolveProductWiseRows(
         out.unmappedCount++;
         addReason(nameMatches.length > 1 ? "sales_user_name_ambiguous" :
           (line.employee_id ? "employee_code_unresolved" : "employee_code_absent"));
+        addReason("new_user_unresolved");
+        addNewUser(line, value, "unresolved");
         continue;
       }
     }
-    const value = typeof line.basic_order_value === "number"
-      ? line.basic_order_value : Number(line.basic_order_value ?? 0);
-    if (!Number.isFinite(value)) {
-      out.unmappedCount++; addReason("basic_order_value_invalid"); continue;
+    if (mapMissIsNew) {
+      addReason("new_user_registry_fallback");
+      addNewUser(line, value, "registry_fallback");
     }
     const key = person.norm_key;
     out.values.set(key, (out.values.get(key) ?? 0) + value);
@@ -1372,6 +1471,7 @@ export function resolveProductWiseRows(
     }
     out.mappedCount++;
   }
+  out.newUsers = [...newUsers.values()].sort((a, b) => b.value - a.value);
   return out;
 }
 
@@ -1385,6 +1485,7 @@ async function loadProductWiseResolution(fy: string): Promise<ProductWiseResolut
   const empty: ProductWiseResolution = {
     values: new Map(), reasons: new Map(), mappedCount: 0, unmappedCount: 0,
     reasonCounts: {}, augustByHead: new Map(), augustByStateHead: new Map(), productWiseByStateHead: new Map(),
+    newUsers: [],
   };
   try {
     const registryRows = (await db.execute(sql`
@@ -1393,15 +1494,20 @@ async function loadProductWiseResolution(fy: string): Promise<ProductWiseResolut
       WHERE is_person = true
     `)).rows as ProductWiseRegistryPerson[];
     const lines = (await db.execute(sql`
-      SELECT employee_id, sales_user_name, basic_order_value
+      SELECT employee_id, sales_user_name, basic_order_value, order_datetime
       FROM secondary_order_line
       WHERE fiscal_year = ${fy} AND source_kind = 'product_wise'
-    `)).rows as Array<{ employee_id: string | null; sales_user_name: string | null; basic_order_value: string | number | null }>;
-    const resolved = resolveProductWiseRows(lines, registryRows, getHrRosterUniqueEmployeeCodeNames());
+    `)).rows as Array<{ employee_id: string | null; sales_user_name: string | null; basic_order_value: string | number | null; order_datetime?: string | Date | null }>;
+    const authorityRows = (await db.execute(sql`
+      SELECT employee_id, sales_user_name, state_head, effective_from, effective_to
+      FROM crm_user_head_map
+    `)).rows as ProductWiseAuthorityMapRow[];
+    const resolved = resolveProductWiseRows(lines, registryRows, getHrRosterUniqueEmployeeCodeNames(), authorityRows);
     empty.values = resolved.values;
     empty.mappedCount = resolved.mappedCount;
     empty.unmappedCount = resolved.unmappedCount;
     empty.reasonCounts = resolved.reasonCounts;
+    empty.newUsers = resolved.newUsers;
     empty.productWiseByStateHead = resolved.productWiseByStateHead;
     const augustRows = (await db.execute(sql`
       SELECT head_canon, state_head, COALESCE(ordered_amount, 0) AS ordered_amount
@@ -1509,7 +1615,7 @@ function buildTeamSummary(filtered: MemberKpis[]): TeamSummary {
     byState,
     augustSecondaryHeadOrdered: null,
     productWiseOrderValue,
-    productWiseMapping: { mappedCount: 0, unmappedCount: 0, reasons: {} },
+    productWiseMapping: { mappedCount: 0, unmappedCount: 0, reasons: {}, newUsers: [] },
   };
 }
 
@@ -1547,7 +1653,7 @@ export async function loadDeepDiveData(
       rowsRead: 0,
       dataReadAt: 0,
       error: `Could not load the 'Data' tab for FY ${fy}. The sheet may not be connected or the tab name may differ.`,
-      productWiseMapping: { mappedCount: 0, unmappedCount: 0, reasons: { source_unavailable: 1 } },
+      productWiseMapping: { mappedCount: 0, unmappedCount: 0, reasons: { source_unavailable: 1 }, newUsers: [] },
       augustSecondaryHeadOrdered: null,
     };
   }
@@ -1586,7 +1692,9 @@ export async function loadDeepDiveData(
   }
   for (const member of entry.allMembers) {
     const identityKey = personByMemberKey.get(member.normKey);
-    member.productWiseOrderValue = identityKey ? productWise.values.get(identityKey) ?? null : null;
+    member.productWiseOrderValue =
+      productWise.values.get(normSecKey(member.name)) ??
+      (identityKey ? productWise.values.get(identityKey) ?? null : null);
     member.augustSecondaryHeadOrdered = productWise.augustByHead.get(member.normKey) ?? null;
     if (member.productWiseOrderValue == null) {
       member.productWiseOrderValueReason =
@@ -1624,6 +1732,7 @@ export async function loadDeepDiveData(
       mappedCount: productWise.mappedCount,
       unmappedCount: productWise.unmappedCount,
       reasons: productWise.reasonCounts,
+      newUsers: productWise.newUsers,
     };
     teamSummary.augustSecondaryHeadOrdered =
       productWise.augustByStateHead.get(resolveHeadKey(selectedStateHead)) ?? null;
@@ -1730,6 +1839,7 @@ export async function loadDeepDiveData(
       mappedCount: productWise.mappedCount,
       unmappedCount: productWise.unmappedCount,
       reasons: productWise.reasonCounts,
+      newUsers: productWise.newUsers,
     },
     augustSecondaryHeadOrdered: selectedStateHead
       ? productWise.augustByStateHead.get(resolveHeadKey(selectedStateHead)) ?? null

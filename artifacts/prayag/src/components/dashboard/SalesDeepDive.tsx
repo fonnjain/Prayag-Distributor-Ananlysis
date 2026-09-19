@@ -295,7 +295,7 @@ interface TeamSummary {
   byState: StateBreakdownRow[];
   augustSecondaryHeadOrdered: number | null;
   productWiseOrderValue: number | null;
-  productWiseMapping: { mappedCount: number; unmappedCount: number; reasons: Record<string, number> };
+  productWiseMapping: ProductWiseMapping;
   stateHeadComparison?: Array<{ stateHead: string; productWiseOrderValue: number | null; augustSecondaryHeadOrdered: number | null; difference: number | null; percentage: number | null }>;
 }
 
@@ -319,8 +319,21 @@ interface DeepDiveData {
    *  was briefly busy — figures may be slightly out of date. */
   stale?: boolean | null;
   seasonalCalibration?: SeasonalCalibration | null;
-  productWiseMapping?: { mappedCount: number; unmappedCount: number; reasons: Record<string, number> };
+  productWiseMapping?: ProductWiseMapping;
   augustSecondaryHeadOrdered?: number | null;
+}
+
+interface ProductWiseMapping {
+  mappedCount: number;
+  unmappedCount: number;
+  reasons: Record<string, number>;
+  newUsers: Array<{
+    employeeId: string | null;
+    salesUserName: string | null;
+    rows: number;
+    value: number;
+    resolution: "registry_fallback" | "unresolved";
+  }>;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -645,6 +658,42 @@ function TeamSummaryPanel({ summary, dataReadAt }: { summary: TeamSummary; dataR
         Product-Wise identity: {summary.productWiseMapping?.mappedCount ?? 0} mapped · {summary.productWiseMapping?.unmappedCount ?? 0} unmapped
         {summary.productWiseMapping && Object.keys(summary.productWiseMapping.reasons).length > 0 && (
           <span className="ml-2">({Object.entries(summary.productWiseMapping.reasons).map(([reason, count]) => `${reason}: ${count}`).join(" · ")})</span>
+        )}
+        {summary.productWiseMapping?.newUsers.length > 0 && (
+          <details className="mt-2">
+            <summary className="cursor-pointer font-semibold text-amber-700 dark:text-amber-300">
+              NEW CRM users ({summary.productWiseMapping.newUsers.length})
+            </summary>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="py-1 pr-3 text-left">Employee ID</th>
+                    <th className="py-1 pr-3 text-left">Sales user</th>
+                    <th className="py-1 pr-3 text-left">Resolution</th>
+                    <th className="py-1 pr-3 text-right">Rows</th>
+                    <th className="py-1 text-right">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.productWiseMapping.newUsers.map((user) => (
+                    <tr
+                      key={`${user.employeeId ?? ""}|${user.salesUserName ?? ""}`}
+                      className="border-b border-border/50"
+                    >
+                      <td className="py-1 pr-3 font-mono">{user.employeeId || "—"}</td>
+                      <td className="py-1 pr-3">{user.salesUserName || "—"}</td>
+                      <td className="py-1 pr-3">
+                        {user.resolution === "registry_fallback" ? "Registry fallback" : "Unresolved"}
+                      </td>
+                      <td className="py-1 pr-3 text-right">{user.rows.toLocaleString("en-IN")}</td>
+                      <td className="py-1 text-right">{fmtRs(user.value)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
         )}
       </div>
 
