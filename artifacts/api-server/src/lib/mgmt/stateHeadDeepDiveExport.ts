@@ -304,6 +304,34 @@ export function buildStateHeadDeepDiveWorkbook(input: StateHeadDeepDiveExportInp
 
   // 1. Team summary
   const summary = inputTeamSummary(input, summaryMeta, sourceDashboard, disclosure, active, withTarget, headlineOperands);
+  summary.workbook.getWorksheet("Team summary")?.addRow([
+    "August secondary_head_month ordered (separate line)",
+    input.teamSummary.augustSecondaryHeadOrdered ?? null,
+    "secondary_head_month; state_head identity",
+  ]);
+  const comparison = summary.workbook.addWorksheet("State-head reconciliation");
+  title(comparison, "State-head order reconciliation — separate measures", [
+    "State head", "Product-Wise ex-GST", "August secondary ordered", "Difference", "Difference %",
+  ]);
+  for (const row of input.teamSummary.stateHeadComparison ?? []) {
+    const excelRow = comparison.addRow([
+      row.stateHead, row.productWiseOrderValue, row.augustSecondaryHeadOrdered,
+      row.difference, row.percentage == null ? null : row.percentage / 100,
+    ]);
+    for (const col of [2, 3, 4]) money(excelRow.getCell(col), excelRow.getCell(col).value as number | null);
+    excelRow.getCell(5).numFmt = "0.00%";
+  }
+  finish(comparison, [28, 22, 24, 20, 16]);
+  summary.workbook.getWorksheet("Team summary")?.addRow([
+    "Product-Wise order value (ex-GST; separate line)",
+    input.teamSummary.productWiseOrderValue ?? null,
+    "secondary_order_line.basic_order_value; person_registry identity",
+  ]);
+  summary.workbook.getWorksheet("Team summary")?.addRow([
+    "Product-Wise mapping controls",
+    `${input.teamSummary.productWiseMapping?.mappedCount ?? 0} mapped / ${input.teamSummary.productWiseMapping?.unmappedCount ?? 0} unmapped`,
+    JSON.stringify(input.teamSummary.productWiseMapping?.reasons ?? {}),
+  ]);
 
   // 2. Members
   const members = summary.workbook.addWorksheet("Members");
@@ -317,6 +345,7 @@ export function buildStateHeadDeepDiveWorkbook(input: StateHeadDeepDiveExportInp
     "T.A.", "T.A. marker", "T.A. source",
     "Retailers", "Retailers marker", "Visited", "Visited marker",
     "Visits", "Visits marker", "Coverage source",
+    "August secondary ordered (separate)", "Product-Wise ex-GST (separate)", "Product-Wise reason",
     "Excluded from LFL", "Exclusion reason",
   ]);
   for (const member of input.members) {
@@ -339,9 +368,11 @@ export function buildStateHeadDeepDiveWorkbook(input: StateHeadDeepDiveExportInp
       periodScoped ? null : member.totalRetailers, periodScoped ? "unavailable" : state(member.totalRetailers),
       periodScoped ? null : member.visitedRetailers, periodScoped ? "unavailable" : state(member.visitedRetailers),
       periodScoped ? null : member.totalVisitsYtd, periodScoped ? "unavailable" : state(member.totalVisitsYtd), sourceCoverage,
+      member.augustSecondaryHeadOrdered ?? null, member.productWiseOrderValue ?? null,
+      member.productWiseOrderValueReason ?? "",
       excluded.excluded ? "Yes" : "No", excluded.reason,
     ]);
-    for (const col of [4, 7, 10, 16, 19]) money(row.getCell(col), row.getCell(col).value as number | null);
+    for (const col of [4, 7, 10, 16, 19, 29, 30]) money(row.getCell(col), row.getCell(col).value as number | null);
     const achievementCell = row.getCell(13);
     achievementCell.numFmt = "0.00%";
     if (achieve == null) grey(achievementCell);

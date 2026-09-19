@@ -2073,6 +2073,7 @@ router.get("/mgmt/deep-dive/export", async (req: Request, res: Response): Promis
         return buildDeepDiveExport({
           fy,
           kpis: result.kpis,
+          productWiseMapping: result.productWiseMapping,
           monthlyRows,
           reportingMonthCount,
           periodAnalysis: buildDeepDivePeriodAnalysis(

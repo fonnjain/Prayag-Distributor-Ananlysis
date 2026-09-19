@@ -38,7 +38,7 @@ import { SKU_SHEET_IDS, secondarySkuFyHasData, getSecondarySkuFyPeriodLabel } fr
 import { logger } from "../logger.js";
 import { deriveSaleLineClosedFys, currentOpenFy } from "../fyAnchors.js";
 import { getOpenResolutionHolds, resolveHoldExclusionsFromRows, type StructuredExclusion } from "../resolution/holdResolver.js";
-import { adaptProductWiseMrp } from "../secondary/productWiseMrpAdapter.js";
+import { adaptProductWiseMrp, type ProductWiseMrpControls } from "../secondary/productWiseMrpAdapter.js";
 import { secondarySourceForMonth } from "../secondary/sourceContract.js";
 
 // Closed-FY list is derived at runtime from sale_line_current ingest stats
@@ -213,11 +213,6 @@ export async function getPrimaryDiscountByCode(
       monthLabels && monthLabels.length > 0
         ? sql`AND month_label IN (${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)})`
         : sql``;
-    const useCurrentAuthority = fy === currentOpenFy();
-    const historicalAsOf = primaryPeriodEndDate(fy, monthLabels);
-    const periodMrp = useCurrentAuthority
-      ? sql`SELECT item_code, segment, mrp FROM current_mrp`
-      : sql`SELECT item_code, segment, mrp FROM historical_mrp`;
 
     // Per customer-per-code effective discount, then per-code stats. Segment
     // pairing is strict: exact first, then the two documented app-label
@@ -226,19 +221,11 @@ export async function getPrimaryDiscountByCode(
       WITH current_mrp AS (
         ${authoritativeCurrentMrpRows}
       ),
-      historical_mrp AS (
-        SELECT DISTINCT ON (h.item_code, h.segment)
-          h.item_code, h.segment, h.mrp
-        FROM mrp_history h
-        WHERE h.effective_from <= ${historicalAsOf}
-        ORDER BY h.item_code, h.segment,
-          CASE WHEN h.effective_to IS NULL OR h.effective_to >= ${historicalAsOf} THEN 0 ELSE 1 END ASC,
-          h.effective_from DESC
-      ),
       sale_rows AS (
         SELECT sl.code,
                COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
                upper(trim(COALESCE(sl.customer, '?'))) AS customer,
+                sl.invoice_date AS transaction_date,
                sl.qty::float8 AS qty,
                sl.amount::float8 AS amount
         FROM sale_line_current sl
@@ -249,8 +236,8 @@ export async function getPrimaryDiscountByCode(
       ),
       mrp_segments AS (
         SELECT item_code, segment FROM current_mrp
-        UNION
-        SELECT item_code, segment FROM historical_mrp
+         UNION
+         SELECT item_code, segment FROM mrp_history
       ),
       code_mrp_ranked AS (
         SELECT p.code, p.segment AS sale_segment, m.segment AS mrp_segment,
@@ -276,23 +263,41 @@ export async function getPrimaryDiscountByCode(
         GROUP BY code, sale_segment
         HAVING COUNT(DISTINCT mrp_segment) = 1
       ),
-      period_mrp AS (
-        ${periodMrp}
+       priced_sale_rows AS (
+         SELECT s.*, COALESCE(history.mrp, synced.mrp) AS mrp
+           FROM sale_rows s
+           JOIN code_mrp_segment cms
+             ON cms.code = s.code AND cms.sale_segment = s.segment
+           LEFT JOIN LATERAL (
+             SELECT h.mrp
+               FROM mrp_history h
+              WHERE h.item_code = s.code
+                AND h.segment = cms.mrp_segment
+                AND h.effective_from <= s.transaction_date
+                AND (h.effective_to IS NULL OR h.effective_to > s.transaction_date)
+              ORDER BY h.effective_from DESC
+              LIMIT 1
+           ) history ON TRUE
+           LEFT JOIN LATERAL (
+             SELECT c.mrp
+               FROM current_mrp c
+              WHERE history.mrp IS NULL
+                AND c.item_code = s.code
+                AND c.segment = cms.mrp_segment
+              LIMIT 1
+           ) synced ON TRUE
       ),
       cust AS (
-        SELECT s.code,
+         SELECT s.code,
                s.segment,
                s.customer,
                SUM(s.amount) AS net,
-               SUM(p.mrp::float8 * s.qty) AS mrp_value,
+                SUM(s.mrp::float8 * s.qty) AS mrp_value,
                COUNT(*)::int AS source_rows
-        FROM sale_rows s
-        JOIN code_mrp_segment cms
-          ON cms.code = s.code AND cms.sale_segment = s.segment
-        JOIN period_mrp p
-          ON p.item_code = s.code AND p.segment = cms.mrp_segment
+         FROM priced_sale_rows s
+         WHERE s.mrp IS NOT NULL
         GROUP BY 1, 2, 3
-        HAVING SUM(p.mrp::float8 * s.qty) > 0
+         HAVING SUM(s.mrp::float8 * s.qty) > 0
       ), cd AS (
         SELECT *, greatest(0, least(1, 1 - net / mrp_value)) AS disc FROM cust
       )
@@ -347,9 +352,7 @@ export async function getPrimaryDiscountByCode(
     const coveragePct = Number(covRow.total_value ?? 0) > 0 ? coveredValue / Number(covRow.total_value) : 0;
     return {
       measureLabel:
-        useCurrentAuthority
-          ? "Discount off authoritative current MRP (prayag-price.com cache; local uploaded MRP is not used). NOT margin."
-          : "Discount off effective-dated historical MRP for the selected period (current MRP is not retroactively applied). NOT margin.",
+        "Discount off effective-dated MRP for the selected period (active MRP is fallback only when history does not cover the date). NOT margin.",
       fy,
       channel,
       // Below the agreed 75% value floor, retain row detail but suppress the
@@ -388,8 +391,8 @@ export type SecondaryDiscountResult = {
   sourceMetadata?: {
     source: "productwise_xlsx";
     valueBasis: "basic_order_value_ex_gst";
-    grossBasis: "derived";
-    observedGross: false;
+    grossMrpBasis: "effective_mrp_times_qty";
+    grossCrmBasis: "crm_discount_percent";
   };
   mrpControls?: {
     rows: number;
@@ -400,6 +403,18 @@ export type SecondaryDiscountResult = {
     valueSelected: number;
     valueCovered: number;
     valueCoveragePct: number;
+    unitMismatchRows: number;
+    unitMismatchValue: number;
+    agreementWithin1Pct: { codes: number; value: number };
+    agreementWithin5Pct: { codes: number; value: number };
+    agreementOutside5Pct: { codes: number; value: number };
+    disagreementRows: number;
+    disagreementValue: number;
+  };
+  productWiseControls?: {
+    mrpBasis: string;
+    rows: Array<{ orderId: string | null; productCode: string; transactionDate: string | Date; qty: number | null; basicOrderValueExGst: number; mrp: number | null; mrpSource: string; grossMrp: number | null; discountMrp: number | null; grossCrm: number | null; observedCrmDiscount: number | null; unitMismatch: boolean; discountDisagreement: boolean }>;
+    controls: ProductWiseMrpControls;
   };
 };
 
@@ -425,11 +440,11 @@ export async function getSecondaryDiscountByCode(
   }
   if (selectedSources.has("productwise_xlsx")) {
     const raw = await db.execute<{
-      product_code: string; order_datetime: string; category_name: string | null;
-      discount_pct: number | null; basic_order_value: number; dealer_id: string;
+      order_id: string | null; product_code: string; order_datetime: string; category_name: string | null;
+      discount_pct: number | null; basic_order_value: number; qty: number | null; dealer_id: string;
     }>(sql`
-      SELECT product_code, order_datetime::text, category_name,
-             discount_pct::float8, basic_order_value::float8, dealer_id
+       SELECT order_id, product_code, order_datetime::text, category_name,
+              discount_pct::float8, basic_order_value::float8, qty::float8, dealer_id
         FROM secondary_order_line
        WHERE fiscal_year = ${fy}
          AND source_kind = 'product_wise'
@@ -438,18 +453,20 @@ export async function getSecondaryDiscountByCode(
          AND basic_order_value IS NOT NULL
     `);
     const adapted = await adaptProductWiseMrp(raw.rows.map((row) => ({
+      orderId: row.order_id,
       productCode: row.product_code,
       month: selectedPeriods[0]!,
       transactionDate: row.order_datetime,
       segment: row.category_name,
       discountPct: row.discount_pct,
+       qty: row.qty,
       basicOrderValueExGst: row.basic_order_value,
     })));
     const customerRows = new Map<string, {
       code: string; segment: string; customer: string; net: number; gross: number;
     }>();
     adapted.rows.forEach((row, index) => {
-      if (!row.included || row.gross == null) return;
+       if (!row.included || row.grossMrp == null) return;
       const source = raw.rows[index]!;
       const key = `${row.productCode}\u0000${source.dealer_id}`;
       const current = customerRows.get(key) ?? {
@@ -457,7 +474,7 @@ export async function getSecondaryDiscountByCode(
         customer: source.dealer_id, net: 0, gross: 0,
       };
       current.net += row.basicOrderValueExGst;
-      current.gross += row.gross;
+       current.gross += row.grossMrp;
       customerRows.set(key, current);
     });
     const byCode = new Map<string, {
@@ -489,7 +506,7 @@ export async function getSecondaryDiscountByCode(
       };
     }).sort((a, b) => b.net - a.net);
     return {
-      measureLabel: "Product-Wise Discount % on Basic Order Value, ex-GST; effective MRP is used only for not-offered coverage. Gross is derived, never observed.",
+      measureLabel: "Product-Wise discount_mrp = 1 − Basic Order Value ÷ (effective MRP × Qty), ex-GST; observed CRM Discount % is a separate field.",
       fy,
       available: codes.length > 0,
       reason: codes.length > 0 ? undefined : "No Product-Wise rows passed the effective-MRP and discount controls.",
@@ -497,7 +514,20 @@ export async function getSecondaryDiscountByCode(
       widestGaps: codes.filter((row) => row.customers >= 3).sort((a, b) => b.spread - a.spread).slice(0, 25),
       sourceMetadata: {
         source: "productwise_xlsx", valueBasis: "basic_order_value_ex_gst",
-        grossBasis: "derived", observedGross: false,
+         grossMrpBasis: "effective_mrp_times_qty",
+         grossCrmBasis: "crm_discount_percent",
+      },
+      productWiseControls: {
+        mrpBasis: adapted.mrpBasis,
+        rows: adapted.rows.map((row) => ({
+          orderId: row.orderId ?? null, productCode: row.productCode, qty: row.qty ?? null, grossMrp: row.grossMrp,
+          transactionDate: row.transactionDate, basicOrderValueExGst: row.basicOrderValueExGst,
+          mrp: row.mrp, mrpSource: row.mrpSource,
+          discountMrp: row.discountMrp, grossCrm: row.grossCrm,
+          observedCrmDiscount: row.observedCrmDiscount,
+          unitMismatch: row.unitMismatch, discountDisagreement: row.discountDisagreement,
+        })),
+        controls: adapted.controls,
       },
       mrpControls: adapted.controls,
       verification: {

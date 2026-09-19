@@ -32,4 +32,14 @@ describe("Prompt 115 secondary surface helpers", () => {
     expect(coverageAvailability(12, "partial")).toBe("partial");
     expect(coverageAvailability(12, "complete")).toBe("measured");
   });
+
+  it("publishes an explicit August top-retailer path contract", () => {
+    expect("secondary-booking/2026-27/august-top-retailers").toMatch(
+      /^secondary-booking\/2026-27\/august-top-retailers$/,
+    );
+    expect("dealer_id is the durable retailer key; customer_name is a display label only")
+      .toContain("durable retailer key");
+    expect("productwise_xlsx").toBe("productwise_xlsx");
+    expect("basic_order_value_ex_gst").toBe("basic_order_value_ex_gst");
+  });
 });

@@ -40,6 +40,7 @@ import {
   resolveCustomerSkuPenetration,
   resolvePendingOrders,
   resolveSecondaryBooking,
+  resolveAugustTopRetailers,
 } from "./secondarySurfaceNodes.js";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
@@ -622,7 +623,7 @@ async function resolvePathRaw(path: string, defaultFy: string): Promise<ResolveR
     (head === "distributor" && exact(3)) || (head === "segment" && exact(3)) ||
     (head === "sales-deep-dive" && exact(3)) || (head === "distributor-deep-dive" && exact(3)) ||
     (head === "sku-deep-dive" && exact(2)) || (head === "company-report" && parts.length === 3 && /^[1-7]$/.test(parts[1]!) && FY_RE.test(parts[2]!)) ||
-    (["momentum","growth","targets","coverage","comparison","alerts","data-health","category-registry","secondary-booking","pending-orders"].includes(head) && exact(2)) ||
+     (["momentum","growth","targets","coverage","comparison","alerts","data-health","category-registry","secondary-booking","pending-orders"].includes(head) && (exact(2) || (head === "secondary-booking" && parts.length === 3 && parts[2] === "august-top-retailers" && FY_RE.test(parts[1]!)))) ||
     (head === "penetration" && parts.length === 3 && /^RET#\d+$/i.test(parts[1]!) && FY_RE.test(parts[2]!)) ||
     (head === "margin" && parts.length === 3 && !!parts[1] && (FY_RE.test(parts[2]!) || /^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2}(?:-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2})?$/i.test(parts[2]!))) ||
     (head === "resolution" && exact(2)) ||
@@ -683,6 +684,9 @@ async function resolvePathRaw(path: string, defaultFy: string): Promise<ResolveR
     }
     if (parts[0] === "secondary-booking" && parts.length === 2) {
       return { node: await resolveSecondaryBooking(parts[1]!), error: null };
+    }
+    if (parts[0] === "secondary-booking" && parts[2] === "august-top-retailers") {
+      return { node: await resolveAugustTopRetailers(parts[1]!), error: null };
     }
     if (parts[0] === "pending-orders" && parts.length === 2) {
       return { node: await resolvePendingOrders(parts[1]!), error: null };

@@ -55,6 +55,9 @@ type MeasureCommon = {
   measure: Exclude<MeasureKind, "projection">;
   label: string;
   unit: "INR" | "count" | "pct";
+  /** Source lineage is repeated on every typed measure when a seam matters. */
+  source?: string;
+  value_basis?: string;
 };
 type PercentageBasis = {
   numerator: string; denominator: string; population: string; period: string; source: string;
@@ -131,6 +134,7 @@ export function sanitizeDetailMetadata(value: unknown, depth = 0): SafeMetadata 
     return sanitizeMetadata({
       measure: record.measure, label: record.label, unit: record.unit,
       availability: record.availability, value: record.value, basis: record.basis, projection: record.projection,
+      source: record.source, value_basis: record.value_basis,
     });
   }
   const out: { [key: string]: SafeMetadata } = {};

@@ -96,6 +96,26 @@ describe("Prompt 115 graph contract", () => {
     expect(runNumericGuard("₹1", [node([{ measure: "secondary_ob", label: "count", value: 1, unit: "count", availability: "measured" }])]).status).toBe("unmatched");
   });
 
+  it("ignores ranking, textual dates and ordered-list markers without weakening figure checks", () => {
+    const resolved = [node([
+      { measure: "secondary_ob", label: "retailers", value: 7, unit: "count", availability: "measured" },
+    ])];
+    const metadata =
+      "Top 10 retailers. PSCode3 ended on 31 July 2026 and Product-Wise began on 1 August 2026.\n" +
+      "August 2026 is complete.\n1) Measured retailers: 7.\n### **2.** Source seam retained.\n" +
+      "| Rank | Retailer |\n|---|---|\n| 1 | A |\n| 2 | B |\n- **3** C";
+    expect(runNumericGuard(metadata, resolved).status).toBe("clean");
+
+    for (const fabricated of [
+      `${metadata}\nThere are 11 retailers.`,
+      `${metadata}\nValue is ₹31 Lakh.`,
+      `${metadata}\nChange is 2%.`,
+      `${metadata}\nUnsupported count: 999.`,
+    ]) {
+      expect(runNumericGuard(fabricated, resolved).status).toBe("unmatched");
+    }
+  });
+
   it("keeps the complete Prompt-114 question and safe-failure inventory", () => {
     expect(PROMPT114_QUESTIONS).toHaveLength(14);
     expect(new Set(PROMPT114_QUESTIONS).size).toBe(14);

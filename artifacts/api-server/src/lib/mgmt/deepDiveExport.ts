@@ -101,6 +101,7 @@ export type DeepDiveExportInput = {
   reportingMonthCount?: number | null;
   /** A resolved page field; no workbook-layer source lookup is performed. */
   omissions?: string[];
+  productWiseMapping?: { mappedCount: number; unmappedCount: number; reasons: Record<string, number> };
 };
 
 type Scalar = string | number | Date | null;
@@ -845,6 +846,12 @@ export function buildDeepDiveWorkbook(input: DeepDiveExportInput): ExcelJS.Workb
   metric(targets, "Secondary target (to date)", kpis.secondaryTarget, sourceA, "Secondary target unavailable", "money");
   metric(targets, "Total target (to date)", totalTarget, sourceA, "Total target unavailable", "money");
   metric(targets, "Retailer / party order booking", kpis.orderBooking, sourceA, "Retailer booking unavailable", "money");
+  metric(targets, "Product-Wise order value (ex-GST)", kpis.productWiseOrderValue ?? null, "secondary_order_line basic_order_value", "Product-Wise value unavailable", "money");
+  metric(targets, "August secondary_head_month ordered (separate)", kpis.augustSecondaryHeadOrdered ?? null, "secondary_head_month; state_head/head_canon identity", "August ordered value unavailable", "money");
+  const mapping = input.productWiseMapping;
+  metric(targets, "Product-Wise mapped line count", mapping?.mappedCount ?? null, "person_registry employee-code resolver", "Mapping controls unavailable");
+  metric(targets, "Product-Wise unmapped line count", mapping?.unmappedCount ?? null, "person_registry employee-code resolver", "Mapping controls unavailable");
+  if (mapping) targets.addRow(["Product-Wise unmapped reasons", null, null, null, null, "reported", "person_registry employee-code resolver", JSON.stringify(mapping.reasons)]);
   metric(targets, "New-party order booking", kpis.newPartyOrderBooking, sourceA, "New-party booking unavailable", "money");
   metric(targets, "Direct dealer order booking", kpis.directDealersOrder, sourceA, "Direct dealer booking unavailable", "money");
   metric(targets, "Sales received", kpis.sale, sourceA, "Sales unavailable", "money");

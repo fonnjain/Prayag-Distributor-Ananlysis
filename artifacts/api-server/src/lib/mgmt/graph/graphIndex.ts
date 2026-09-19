@@ -81,6 +81,7 @@ export async function buildGraphIndex(fy: string, period?: string): Promise<Grap
         `sku/discounts/${fy}`,
         `sku/detail/${fy}`,
         `secondary-booking/${fy}`,
+        `secondary-booking/${fy}/august-top-retailers`,
         `pending-orders/${fy}`,
         `penetration/RET#123/${fy}`,
       ],
@@ -142,8 +143,10 @@ export async function buildGraphIndex(fy: string, period?: string): Promise<Grap
     "Margin uses gross margin/gross contribution terminology; bom_cost is factory cost only.",
   );
   notes.push(
-    "Segment / SKU nodes are available for closed FYs AND for FY2026-27 Apr–Jun (PARTIAL — " +
-    "the PSCode_3 register covers Apr–Jun 2026; later months are absent, not zero). " +
+    "Segment / SKU nodes are available for closed FYs AND for FY2026-27 Apr–Jul (PARTIAL — " +
+    "the PSCode_3 register covers Apr–Jul 2026). Complete August Product-Wise retailer " +
+    "order value and distinct product-code breadth are available at " +
+    "secondary-booking/2026-27/august-top-retailers. " +
     "See gap/live-year-sku.",
   );
   notes.push(

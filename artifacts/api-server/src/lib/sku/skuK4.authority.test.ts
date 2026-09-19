@@ -9,12 +9,14 @@ describe("K4 authoritative MRP source isolation", () => {
     expect(source).toContain("mrp_history");
   });
 
-  it("selects the active source only for the open FY and an as-of history otherwise", () => {
+  it("prices each sale once by transaction date and falls back only when history misses", () => {
     const source = readFileSync(new URL("./skuK4.ts", import.meta.url), "utf8");
-    expect(source).toContain("fy === currentOpenFy()");
-    expect(source).toContain("SELECT item_code, segment, mrp FROM current_mrp");
-    expect(source).toContain("SELECT item_code, segment, mrp FROM historical_mrp");
-    expect(source).toContain("h.effective_from <= ${historicalAsOf}");
+    expect(source).toContain("FROM priced_sale_rows s");
+    expect(source).toContain("h.effective_from <= s.transaction_date");
+    expect(source).toContain("(h.effective_to IS NULL OR h.effective_to > s.transaction_date)");
+    expect(source).toContain("FROM current_mrp c");
+    expect(source).not.toContain("SUM(p.mrp");
+    expect(source).not.toContain("period_mrp AS");
   });
 
   it("keeps a multi-division source product to one current price row per item and segment", () => {

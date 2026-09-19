@@ -84,6 +84,12 @@ HOW TO USE THE GRAPH:
 - Call resolve_nodes with a list of paths to fetch those nodes.
 - Wildcards: "head/*/2026-27" returns all heads (hard cap: ${MAX_NODES_PER_RESOLVE} nodes per call).
 - Make as many resolve_nodes calls as needed, but be targeted — fetch only what you need to answer the question.
+- For "top 10 retailers by August order value and their SKU breadth" (or the same
+  request with minor wording changes), resolve
+  secondary-booking/2026-27/august-top-retailers. It is the bounded complete
+  Product-Wise August answer: rank by Basic Order Value ex-GST and report the
+  distinct product_code count. Do not use gap/live-year-sku or gap/mapping-confidence
+  for this request; customer_name is a label and dealer_id is the durable retailer key.
 - After fetching, include a "## Traversal" section listing all node paths consulted.
 
 ${indexText}`;
@@ -104,6 +110,7 @@ const RESOLVE_NODES_TOOL = {
      "sales-deep-dive/{member}/2026-27, distributor-deep-dive/{name}/2026-27, " +
      "sku-deep-dive/2026-27, resolution/2026-27, margin/PTMT/2026-27, " +
      "penetration/2026-27, secondary-booking/2026-27, pending-orders/2026-27, " +
+      "secondary-booking/2026-27/august-top-retailers, " +
      "company-report/{1-7}/2026-27, momentum/2026-27, growth/2026-27, targets/2026-27, " +
      "coverage/2026-27, comparison/2026-27, alerts/2026-27, data-health/2026-27, " +
      "category-registry/2026-27, top80/{snapshot-date}, gap/live-year-sku, head/*/2026-27 (wildcard). " +
@@ -215,7 +222,17 @@ export function runNumericGuard(
     .replace(/\b(?:company|head|salesperson|distributor|segment|sku|margin|resolution|penetration|top80|gap|company-report|momentum|growth|targets|coverage|comparison|alerts|data-health|category-registry|secondary-booking|pending-orders)\/[^\s,.;]+/gi, "")
     .replace(/\b(?:FY\s*)?20\d{2}\s*[-–—]\s*\d{2}\b/gi, "")
     .replace(/\b20\d{2}[/-]\d{1,2}[/-]\d{1,2}\b/g, "")
-    .replace(/\b[A-Za-z][A-Za-z_-]*#\d+\b/g, "");
+    .replace(/\b[A-Za-z][A-Za-z_-]*#\d+\b/g, "")
+    // Presentation metadata is not a business figure. Remove only complete
+    // textual dates, line-leading ordered-list markers, and bounded ranking
+    // descriptors; arbitrary nearby numbers remain guarded.
+    .replace(/\b(?:[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+20\d{2}\b/gi, "")
+    .replace(/\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(?:[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?,?\s+20\d{2}\b/gi, "")
+    .replace(/\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+20\d{2}\b/gi, "")
+    .replace(/^\s*\|\s*\d{1,3}\s*\|/gm, "| |")
+    .replace(/^\s*(?:#{1,6}\s*|[-*]\s+)?(?:\*\*)?(?:\(\d{1,3}\)|\d{1,3}(?:[.):]|(?:\*\*)?\s*[-–—]))(?:\*\*)?(?=\s)/gm, "")
+    .replace(/^\s*[-*]\s+\*\*\d{1,3}\*\*(?=\s)/gm, "")
+    .replace(/\b(?:top|bottom|first|last)\s+\d{1,3}\b/gi, "");
   for (const match of protectedAnswer.matchAll(
     /(?<![\w#])(?:₹|Rs\.?|INR)?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(Cr|crore|L|lakh|K|thousand|%)?(?![\w])/gi,
   )) {

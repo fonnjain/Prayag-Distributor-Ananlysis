@@ -61,6 +61,17 @@ export type SecondaryDiscount = {
   codes: DiscountCodeRow[];
   widestGaps: DiscountCodeRow[];
   verification: SecondaryVerification;
+  productWiseControls?: {
+    mrpBasis: string;
+    rows: Array<{ orderId?: string | null; productCode: string; transactionDate?: string; qty: number | null; basicOrderValueExGst?: number; mrp?: number | null; mrpSource?: string; grossMrp: number | null; discountMrp: number | null; grossCrm: number | null; observedCrmDiscount: number | null; unitMismatch: boolean; discountDisagreement: boolean }>;
+    controls: {
+      unitMismatchRows: number; unitMismatchCodes: number; unitMismatchValue: number;
+      agreementWithin1Pct: { codes: number; value: number };
+      agreementWithin5Pct: { codes: number; value: number };
+      agreementOutside5Pct: { codes: number; value: number };
+      disagreementRows: number; disagreementValue: number;
+    };
+  };
 };
 
 export type DiscountsResult = {
@@ -222,6 +233,39 @@ export default function SkuDiscounts({ fy, channel, monthFrom, monthTo, periodLa
             </span>
           </div>
         </div>
+        {secondary.productWiseControls && (
+          <div className="px-4 py-2 border-b text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Product-Wise price-list controls:</span>{" "}
+            <div className="mb-1">{secondary.productWiseControls.mrpBasis}</div>
+            {secondary.productWiseControls.controls.agreementWithin1Pct.codes} codes within 1% ·{" "}
+            {secondary.productWiseControls.controls.agreementWithin5Pct.codes} codes within 1–5% ·{" "}
+            {secondary.productWiseControls.controls.agreementOutside5Pct.codes} outside 5% ·{" "}
+            {secondary.productWiseControls.controls.unitMismatchCodes} UNIT_MISMATCH codes ({secondary.productWiseControls.controls.unitMismatchRows} rows) excluded.
+            {secondary.productWiseControls.controls.disagreementRows > 0 && (
+              <> {secondary.productWiseControls.controls.disagreementRows} rows differ from observed CRM discount by &gt;2 points.</>
+            )}
+            {secondary.productWiseControls.rows.filter((row) => row.discountDisagreement || row.unitMismatch).slice(0, 10).map((row) => (
+              <div className="mt-1" key={`${row.productCode}-${row.qty}`}>
+                <span className="font-mono">{row.productCode}</span>:{" "}
+                {row.unitMismatch ? "UNIT_MISMATCH (excluded)" : "discount disagreement"} · discount_mrp{" "}
+                {row.discountMrp == null ? "—" : `${trunc2(row.discountMrp)}%`}
+                {" "}· observed CRM{" "}
+                {row.observedCrmDiscount == null ? "—" : `${trunc2(row.observedCrmDiscount)}%`}
+                {" "}· gross_mrp {row.grossMrp == null ? "—" : fmtNet(row.grossMrp)}
+                {" "}· gross_crm {row.grossCrm == null ? "—" : fmtNet(row.grossCrm)}
+              </div>
+            ))}
+            {secondary.productWiseControls.rows.find((row) => row.orderId === "SORD-9") && (() => {
+              const row = secondary.productWiseControls!.rows.find((candidate) => candidate.orderId === "SORD-9")!;
+              return <div className="mt-2 rounded border p-2 text-foreground">
+                <div className="font-medium">SORD-9 worked row</div>
+                <div>Order {row.orderId} · {row.transactionDate} · {row.productCode} · Qty {row.qty ?? "—"} · Basic ex-GST {row.basicOrderValueExGst}</div>
+                <div>MRP {row.mrp ?? "—"} ({row.mrpSource}) × Qty = gross_mrp {row.grossMrp ?? "—"}; discount_mrp {row.discountMrp == null ? "—" : `${trunc2(row.discountMrp)}%`}</div>
+                <div>CRM discount {row.observedCrmDiscount == null ? "—" : `${trunc2(row.observedCrmDiscount)}%`} → gross_crm {row.grossCrm ?? "—"}</div>
+              </div>;
+            })()}
+          </div>
+        )}
 
         {/* Widest gaps first — variance emphasis */}
         {primary.coverage?.headlineSuppressed ? (

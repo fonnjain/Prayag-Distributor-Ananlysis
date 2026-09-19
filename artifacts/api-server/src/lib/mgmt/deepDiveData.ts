@@ -15,7 +15,7 @@
 //  - Never console.log; use logger.
 
 import { db, deepDiveSnapshots } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import { logger } from "../logger.js";
 import {
   readAllTabRows,
@@ -37,6 +37,8 @@ import {
 } from "../secondary/registerCoverage.js";
 import { IdentityRegistry } from "./identityRegistry.js";
 import { getCachedStateDashboard } from "./stateDashboard.js";
+import { personRegistry } from "@workspace/db";
+import { resolveEmployeeCode } from "../employeeCodeIdentity.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -141,6 +143,10 @@ export type MemberKpis = {
   businessPerRetailer: number | null;
   totalRetailers: number | null;
   directDealersCount: number | null;
+  /** Product-Wise basic order value (ex-GST), kept separate from dashboard OB. */
+  productWiseOrderValue?: number | null;
+  productWiseOrderValueReason?: string;
+  augustSecondaryHeadOrdered?: number | null;
   // AF: Total all-type YTD visits (retailer + distributor + DD + leads) — dashboard col AF.
   // Distinct from visitedRetailers (unique retailers visited in a month) and from
   // the working-sheet retailer-visits-only figure (sheet.visits.done).
@@ -161,6 +167,10 @@ export type MemberRef = {
   isLeft: boolean;
   /** Data-tab directDealersOrder — for DD OB reconciliation in distributorDeepDive. */
   directDealerOb: number;
+  /** Product-Wise order booking, basic value excluding GST. Separate from dashboard OB. */
+  productWiseOrderValue?: number | null;
+  productWiseOrderValueReason?: string;
+  augustSecondaryHeadOrdered?: number | null;
 };
 
 // ── Team-summary types (SD1: Sandeep Dadheech onboarding) ────────────────────
@@ -182,6 +192,9 @@ export type StateBreakdownRow = {
   likeForLikePct: number | null;
   zeroTargetCount: number;
   zeroTargetOb: number;
+  /** August secondary_head_month ordered amount; never folded into OB. */
+  augustSecondaryHeadOrdered?: number | null;
+  productWiseOrderValue?: number | null;
 };
 
 export type TeamSummary = {
@@ -204,6 +217,20 @@ export type TeamSummary = {
   /** totalOB(with-target) / totalTarget(with-target) — excludes zero-target members entirely */
   likeForLikeAchievementPct: number | null;
   byState: StateBreakdownRow[];
+  augustSecondaryHeadOrdered?: number | null;
+  productWiseOrderValue?: number | null;
+  productWiseMapping?: {
+    mappedCount: number;
+    unmappedCount: number;
+    reasons: Record<string, number>;
+  };
+  stateHeadComparison?: Array<{
+    stateHead: string;
+    productWiseOrderValue: number | null;
+    augustSecondaryHeadOrdered: number | null;
+    difference: number | null;
+    percentage: number | null;
+  }>;
 };
 
 export type DeepDiveDataResult = {
@@ -225,6 +252,14 @@ export type DeepDiveDataResult = {
   /** True when the live Sheets read failed transiently and the last saved DB
    *  snapshot was served instead — figures may be slightly out of date. */
   stale?: boolean;
+  /** Product-Wise identity audit, independent of dashboard OB. */
+  productWiseMapping?: {
+    mappedCount: number;
+    unmappedCount: number;
+    reasons: Record<string, number>;
+  };
+  augustSecondaryHeadOrdered?: number | null;
+  stateHeadComparison?: TeamSummary["stateHeadComparison"];
 };
 
 // ── Column map ────────────────────────────────────────────────────────────────
@@ -1002,6 +1037,7 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       totalRetailers:       cols.totalRetailers >= 0 ? cellNum(row[cols.totalRetailers]) : null,
       directDealersCount:   cols.directDealersCount >= 0 ? cellNum(row[cols.directDealersCount]) : null,
       totalVisitsYtd:       cols.totalVisitsYtd >= 0 ? cellNum(row[cols.totalVisitsYtd]) : null,
+      productWiseOrderValue: null,
       extra,
     });
     applyPriorYearQuarterFallback(members[members.length - 1], fy);
@@ -1216,6 +1252,163 @@ function extractStateName(m: MemberKpis): string {
   return raw;
 }
 
+export type ProductWiseResolution = {
+  values: Map<string, number>;
+  reasons: Map<string, string>;
+  mappedCount: number;
+  unmappedCount: number;
+  reasonCounts: Record<string, number>;
+  augustByHead: Map<string, number>;
+  augustByStateHead: Map<string, number>;
+  productWiseByStateHead: Map<string, number>;
+};
+
+export type ProductWiseLineForResolution = {
+  employee_id: string | null;
+  sales_user_name: string | null;
+  basic_order_value: string | number | null;
+};
+export type ProductWiseRegistryPerson = {
+  person_id?: number | null;
+  canonical_name: string;
+  employee_code: string | null;
+  norm_key: string;
+  state_head: string | null;
+};
+
+export function normalizeProductEmployeeCode(value: string | null | undefined): string | null {
+  const raw = value?.trim() ?? "";
+  if (!raw) return null;
+  const prefixed = raw.match(/^PRG-(.+)$/i);
+  return (prefixed ? prefixed[1] : raw).trim() || null;
+}
+
+export function aggregateAugustSecondaryHeadRows(
+  rows: Array<{ head_canon: string; state_head: string | null; ordered_amount: string | number | null }>,
+): { byHead: Map<string, number>; byStateHead: Map<string, number>; rowCount: number; total: number } {
+  const byHead = new Map<string, number>();
+  const byStateHead = new Map<string, number>();
+  let total = 0;
+  for (const row of rows) {
+    const value = Number(row.ordered_amount ?? 0);
+    if (!Number.isFinite(value)) continue;
+    total += value;
+    const headKey = normSecKey(row.head_canon);
+    byHead.set(headKey, (byHead.get(headKey) ?? 0) + value);
+    if (row.state_head) {
+      const stateHeadKey = row.state_head.trim().toLowerCase();
+      byStateHead.set(stateHeadKey, (byStateHead.get(stateHeadKey) ?? 0) + value);
+    }
+  }
+  return { byHead, byStateHead, rowCount: rows.length, total };
+}
+
+/** Pure identity/value resolver used by the DB loader and focused tests. */
+export function resolveProductWiseRows(
+  lines: ProductWiseLineForResolution[],
+  registryRows: ProductWiseRegistryPerson[],
+): ProductWiseResolution {
+  const out: ProductWiseResolution = {
+    values: new Map(), reasons: new Map(), mappedCount: 0, unmappedCount: 0,
+    reasonCounts: {}, augustByHead: new Map(), augustByStateHead: new Map(), productWiseByStateHead: new Map(),
+  };
+  const unique = new Map<string, ProductWiseRegistryPerson>();
+  for (const row of registryRows) {
+    const identity = row.person_id != null ? `person:${row.person_id}` : `key:${row.norm_key}`;
+    if (!unique.has(identity)) unique.set(identity, row);
+  }
+  const candidates = [...unique.values()];
+  const byName = new Map<string, ProductWiseRegistryPerson[]>();
+  for (const row of candidates) {
+    const key = normSecKey(row.canonical_name);
+    const bucket = byName.get(key) ?? [];
+    bucket.push(row);
+    byName.set(key, bucket);
+  }
+  const addReason = (reason: string) => {
+    out.reasonCounts[reason] = (out.reasonCounts[reason] ?? 0) + 1;
+  };
+  for (const line of lines) {
+    const codeResolution = resolveEmployeeCode(
+      normalizeProductEmployeeCode(line.employee_id),
+      candidates,
+      (r) => normalizeProductEmployeeCode(r.employee_code),
+    );
+    let person: ProductWiseRegistryPerson | null = null;
+    if (codeResolution.status === "unique") person = codeResolution.unique;
+    else if (codeResolution.status === "ambiguous") {
+      out.unmappedCount++; addReason("employee_code_ambiguous"); continue;
+    } else {
+      const nameMatches = byName.get(normSecKey(line.sales_user_name ?? "")) ?? [];
+      if (nameMatches.length === 1) person = nameMatches[0];
+      else {
+        out.unmappedCount++;
+        addReason(nameMatches.length > 1 ? "sales_user_name_ambiguous" :
+          (line.employee_id ? "employee_code_unresolved" : "employee_code_absent"));
+        continue;
+      }
+    }
+    const value = typeof line.basic_order_value === "number"
+      ? line.basic_order_value : Number(line.basic_order_value ?? 0);
+    if (!Number.isFinite(value)) {
+      out.unmappedCount++; addReason("basic_order_value_invalid"); continue;
+    }
+    const key = person.norm_key;
+    out.values.set(key, (out.values.get(key) ?? 0) + value);
+    if (person.state_head) {
+      const headKey = person.state_head.trim().toLowerCase();
+      out.productWiseByStateHead.set(headKey, (out.productWiseByStateHead.get(headKey) ?? 0) + value);
+    }
+    out.mappedCount++;
+  }
+  return out;
+}
+
+/**
+ * Product-Wise is an independent order-booking measure.  Employee ID is the
+ * preferred identity evidence; a name is used only when no employee-code
+ * candidate exists.  In particular, an ambiguous code never gets rescued by
+ * a conflicting Sales User Name.
+ */
+async function loadProductWiseResolution(fy: string): Promise<ProductWiseResolution> {
+  const empty: ProductWiseResolution = {
+    values: new Map(), reasons: new Map(), mappedCount: 0, unmappedCount: 0,
+    reasonCounts: {}, augustByHead: new Map(), augustByStateHead: new Map(), productWiseByStateHead: new Map(),
+  };
+  try {
+    const registryRows = (await db.execute(sql`
+      SELECT canonical_name, employee_code, norm_key, person_id, state_head
+      FROM person_registry
+      WHERE is_person = true
+    `)).rows as ProductWiseRegistryPerson[];
+    const lines = (await db.execute(sql`
+      SELECT employee_id, sales_user_name, basic_order_value
+      FROM secondary_order_line
+      WHERE fiscal_year = ${fy} AND source_kind = 'product_wise'
+    `)).rows as Array<{ employee_id: string | null; sales_user_name: string | null; basic_order_value: string | number | null }>;
+    const resolved = resolveProductWiseRows(lines, registryRows);
+    empty.values = resolved.values;
+    empty.mappedCount = resolved.mappedCount;
+    empty.unmappedCount = resolved.unmappedCount;
+    empty.reasonCounts = resolved.reasonCounts;
+    empty.productWiseByStateHead = resolved.productWiseByStateHead;
+    const augustRows = (await db.execute(sql`
+      SELECT head_canon, state_head, COALESCE(ordered_amount, 0) AS ordered_amount
+      FROM secondary_head_month
+      WHERE fy = ${fy} AND month_idx = 4
+    `)).rows as Array<{ head_canon: string; state_head: string | null; ordered_amount: string | number | null }>;
+    const august = aggregateAugustSecondaryHeadRows(augustRows);
+    empty.augustByHead = august.byHead;
+    empty.augustByStateHead = august.byStateHead;
+    return empty;
+  } catch (err) {
+    logger.warn({ err, fy }, "deepDiveData: Product-Wise resolution unavailable");
+    empty.unmappedCount = 0;
+    empty.reasonCounts = { source_unavailable: 1 };
+    return empty;
+  }
+}
+
 function buildTeamSummary(filtered: MemberKpis[]): TeamSummary {
   const active = filtered.filter((m) => !m.isLeft);
   const left   = filtered.filter((m) => m.isLeft);
@@ -1240,6 +1433,7 @@ function buildTeamSummary(filtered: MemberKpis[]): TeamSummary {
   const totalSale      = sumN(active, (m) => m.sale);
   const totalVisits    = sumN(active, (m) => m.totalVisitsYtd);
   const totalRetailers = sumN(active, (m) => m.totalRetailers);
+  const productWiseOrderValue = sumN(active, (m) => m.productWiseOrderValue ?? null);
 
   const headlineAchievementPct =
     totalTarget > 0 ? (totalOB / totalTarget) * 100 : null;
@@ -1279,6 +1473,8 @@ function buildTeamSummary(filtered: MemberKpis[]): TeamSummary {
       likeForLikePct:    likeTarget  > 0 ? (likeOB  / likeTarget)  * 100 : null,
       zeroTargetCount:   zeroMems.length,
       zeroTargetOb:      sumN(zeroMems, memberOB),
+      augustSecondaryHeadOrdered: null,
+      productWiseOrderValue: sumN(mems, (m) => m.productWiseOrderValue ?? null),
     });
   }
   // Descending by OB so the largest states appear first.
@@ -1300,6 +1496,9 @@ function buildTeamSummary(filtered: MemberKpis[]): TeamSummary {
     headlineAchievementPct,
     likeForLikeAchievementPct,
     byState,
+    augustSecondaryHeadOrdered: null,
+    productWiseOrderValue,
+    productWiseMapping: { mappedCount: 0, unmappedCount: 0, reasons: {} },
   };
 }
 
@@ -1337,6 +1536,8 @@ export async function loadDeepDiveData(
       rowsRead: 0,
       dataReadAt: 0,
       error: `Could not load the 'Data' tab for FY ${fy}. The sheet may not be connected or the tab name may differ.`,
+      productWiseMapping: { mappedCount: 0, unmappedCount: 0, reasons: { source_unavailable: 1 } },
+      augustSecondaryHeadOrdered: null,
     };
   }
 
@@ -1346,6 +1547,38 @@ export async function loadDeepDiveData(
     if (m.stateHead) headsSet.add(m.stateHead);
   }
   const stateHeads = [...headsSet];
+
+  // Resolve the independent Product-Wise measure once per response.  This
+  // deliberately does not alter orderBooking or any dashboard achievement.
+  const productWise = await loadProductWiseResolution(fy);
+  // Bridge sheet member keys to the durable registry key.  Never aggregate
+  // Product-Wise values by a mutable display-name string.
+  const personBridge = (await db.execute(sql`
+    SELECT canonical_name, norm_key, person_id FROM person_registry WHERE is_person = true
+  `)).rows as Array<{ canonical_name: string; norm_key: string; person_id: number | null }>;
+  const personByMemberKey = new Map<string, string>();
+  const ambiguousMemberKeys = new Set<string>();
+  const durableSeen = new Set<string>();
+  for (const person of personBridge) {
+    const durable = person.person_id != null ? `person:${person.person_id}` : `key:${person.norm_key}`;
+    if (durableSeen.has(durable)) continue;
+    durableSeen.add(durable);
+    const memberKey = normSecKey(person.canonical_name);
+    if (ambiguousMemberKeys.has(memberKey)) continue;
+    if (personByMemberKey.has(memberKey)) {
+      personByMemberKey.delete(memberKey);
+      ambiguousMemberKeys.add(memberKey);
+    } else personByMemberKey.set(memberKey, person.norm_key);
+  }
+  for (const member of entry.allMembers) {
+    const identityKey = personByMemberKey.get(member.normKey);
+    member.productWiseOrderValue = identityKey ? productWise.values.get(identityKey) ?? null : null;
+    member.augustSecondaryHeadOrdered = productWise.augustByHead.get(member.normKey) ?? null;
+    if (member.productWiseOrderValue == null) {
+      member.productWiseOrderValueReason =
+        productWise.reasonCounts.source_unavailable ? "source_unavailable" : "no_mapped_product_wise_rows";
+    }
+  }
 
   // Members under the selected state head (or all members if no head selected).
   const filtered = selectedStateHead
@@ -1360,6 +1593,9 @@ export async function loadDeepDiveData(
     achievementTotal: m.achievementTotal ?? null,
     isLeft: m.isLeft,
     directDealerOb: m.directDealersOrder ?? 0,
+    productWiseOrderValue: m.productWiseOrderValue,
+    productWiseOrderValueReason: m.productWiseOrderValueReason,
+    augustSecondaryHeadOrdered: m.augustSecondaryHeadOrdered,
   }));
 
   // Team summary — computed whenever a state head is chosen (regardless of
@@ -1368,6 +1604,25 @@ export async function loadDeepDiveData(
     selectedStateHead && filtered.length > 0
       ? buildTeamSummary(filtered)
       : null;
+  if (teamSummary) {
+    teamSummary.productWiseMapping = {
+      mappedCount: productWise.mappedCount,
+      unmappedCount: productWise.unmappedCount,
+      reasons: productWise.reasonCounts,
+    };
+    teamSummary.augustSecondaryHeadOrdered =
+      productWise.augustByStateHead.get(selectedStateHead!.trim().toLowerCase()) ?? null;
+    teamSummary.stateHeadComparison = stateHeads.map((stateHead) => {
+      const key = stateHead.trim().toLowerCase();
+      const p = productWise.productWiseByStateHead.get(key) ?? null;
+      const h = productWise.augustByStateHead.get(key) ?? null;
+      return {
+        stateHead, productWiseOrderValue: p, augustSecondaryHeadOrdered: h,
+        difference: p != null && h != null ? p - h : null,
+        percentage: p != null && h != null && h !== 0 ? (p - h) / h * 100 : null,
+      };
+    });
+  }
 
   // Find the selected member by normSecKey.
   let kpis: MemberKpis | null = null;
@@ -1456,5 +1711,14 @@ export async function loadDeepDiveData(
     error: null,
     fromDbSnapshot,
     stale,
+    productWiseMapping: {
+      mappedCount: productWise.mappedCount,
+      unmappedCount: productWise.unmappedCount,
+      reasons: productWise.reasonCounts,
+    },
+    augustSecondaryHeadOrdered: selectedStateHead
+      ? productWise.augustByStateHead.get(selectedStateHead.trim().toLowerCase()) ?? null
+      : null,
+    stateHeadComparison: selectedStateHead ? teamSummary?.stateHeadComparison : undefined,
   };
 }

@@ -26,6 +26,9 @@ interface MemberRef {
   stateHead: string;
   name: string;
   normKey: string;
+  productWiseOrderValue: number | null;
+  productWiseOrderValueReason?: string;
+  augustSecondaryHeadOrdered?: number | null;
 }
 
 interface MemberKpis {
@@ -68,6 +71,9 @@ interface MemberKpis {
   businessPerRetailer: number | null;
   totalRetailers: number | null;
   directDealersCount: number | null;
+  productWiseOrderValue: number | null;
+  productWiseOrderValueReason?: string;
+  augustSecondaryHeadOrdered?: number | null;
   extra: Record<string, number | string | null>;
 }
 
@@ -267,6 +273,8 @@ interface StateBreakdownRow {
   likeForLikePct: number | null;
   zeroTargetCount: number;
   zeroTargetOb: number;
+  augustSecondaryHeadOrdered: number | null;
+  productWiseOrderValue: number | null;
 }
 
 interface TeamSummary {
@@ -285,6 +293,10 @@ interface TeamSummary {
   headlineAchievementPct: number | null;
   likeForLikeAchievementPct: number | null;
   byState: StateBreakdownRow[];
+  augustSecondaryHeadOrdered: number | null;
+  productWiseOrderValue: number | null;
+  productWiseMapping: { mappedCount: number; unmappedCount: number; reasons: Record<string, number> };
+  stateHeadComparison?: Array<{ stateHead: string; productWiseOrderValue: number | null; augustSecondaryHeadOrdered: number | null; difference: number | null; percentage: number | null }>;
 }
 
 interface DeepDiveData {
@@ -307,6 +319,8 @@ interface DeepDiveData {
    *  was briefly busy — figures may be slightly out of date. */
   stale?: boolean | null;
   seasonalCalibration?: SeasonalCalibration | null;
+  productWiseMapping?: { mappedCount: number; unmappedCount: number; reasons: Record<string, number> };
+  augustSecondaryHeadOrdered?: number | null;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -603,6 +617,12 @@ function TeamSummaryPanel({ summary, dataReadAt }: { summary: TeamSummary; dataR
           </div>
 
           <div className="flex flex-wrap gap-2">
+            <div className="rounded-full px-3 py-1 text-xs font-semibold bg-muted/60">
+              August secondary ordered: {fmtRs(summary.augustSecondaryHeadOrdered)}
+            </div>
+            <div className="rounded-full px-3 py-1 text-xs font-semibold bg-muted/60">
+              Product-Wise order (ex-GST): {fmtRs(summary.productWiseOrderValue)}
+            </div>
             {summary.headlineAchievementPct != null && (
               <div className={cn("rounded-full px-3 py-1 text-xs font-semibold", achieveBand(summary.headlineAchievementPct))}>
                 {fmtPct(summary.headlineAchievementPct)} headline OB
@@ -616,6 +636,30 @@ function TeamSummaryPanel({ summary, dataReadAt }: { summary: TeamSummary; dataR
           </div>
         </div>
       </div>
+      <div className="rounded-lg border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+        Product-Wise identity: {summary.productWiseMapping?.mappedCount ?? 0} mapped · {summary.productWiseMapping?.unmappedCount ?? 0} unmapped
+        {summary.productWiseMapping && Object.keys(summary.productWiseMapping.reasons).length > 0 && (
+          <span className="ml-2">({Object.entries(summary.productWiseMapping.reasons).map(([reason, count]) => `${reason}: ${count}`).join(" · ")})</span>
+        )}
+      </div>
+
+      {summary.stateHeadComparison && summary.stateHeadComparison.length > 0 && (
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="px-4 py-3 border-b border-border">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">State-head order reconciliation (separate measures)</p>
+          </div>
+          <div className="overflow-x-auto"><table className="w-full text-sm">
+            <thead><tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
+              <th className="px-3 py-2 text-left">State head</th><th className="px-3 py-2 text-right">Product-Wise ex-GST</th>
+              <th className="px-3 py-2 text-right">August head ordered</th><th className="px-3 py-2 text-right">Difference</th><th className="px-3 py-2 text-right">Difference %</th>
+            </tr></thead>
+            <tbody>{summary.stateHeadComparison.map((row) => <tr key={row.stateHead} className="border-b border-border/50">
+              <td className="px-3 py-2 font-medium">{row.stateHead}</td><td className="px-3 py-2 text-right">{fmtRs(row.productWiseOrderValue)}</td>
+              <td className="px-3 py-2 text-right">{fmtRs(row.augustSecondaryHeadOrdered)}</td><td className="px-3 py-2 text-right">{fmtRs(row.difference)}</td><td className="px-3 py-2 text-right">{fmtPct(row.percentage)}</td>
+            </tr>)}</tbody>
+          </table></div>
+        </div>
+      )}
 
       {/* Zero-target notice */}
       {summary.zeroTargetActiveCount > 0 && (
@@ -666,6 +710,8 @@ function TeamSummaryPanel({ summary, dataReadAt }: { summary: TeamSummary; dataR
                   <th className="px-3 py-2 text-right">Members</th>
                   <th className="px-3 py-2 text-right">Target</th>
                   <th className="px-3 py-2 text-right">OB</th>
+                  <th className="px-3 py-2 text-right">Aug secondary ordered</th>
+                  <th className="px-3 py-2 text-right">Product-Wise ex-GST</th>
                   <th className="px-3 py-2 text-right">Sales</th>
                   <th className="px-3 py-2 text-right">Headline</th>
                   <th className="px-3 py-2 text-right">Like-for-like</th>
@@ -678,6 +724,8 @@ function TeamSummaryPanel({ summary, dataReadAt }: { summary: TeamSummary; dataR
                     <td className="px-3 py-2 text-right text-muted-foreground">{row.memberCount}</td>
                     <td className="px-3 py-2 text-right">{row.targetTotal > 0 ? fmtRs(row.targetTotal) : <span className="text-muted-foreground text-xs">no target</span>}</td>
                     <td className="px-3 py-2 text-right">{fmtRs(row.obTotal)}</td>
+                    <td className="px-3 py-2 text-right">{fmtRs(row.augustSecondaryHeadOrdered)}</td>
+                    <td className="px-3 py-2 text-right">{fmtRs(row.productWiseOrderValue)}</td>
                     <td className="px-3 py-2 text-right">{fmtRs(row.saleTotal)}</td>
                     <td className="px-3 py-2 text-right">
                       {row.headlinePct != null ? (
@@ -2793,6 +2841,8 @@ export default function SalesDeepDive() {
 
             <SectionLabel>{isFyClosed(fy) ? "Performance (Full Year)" : "Performance (YTD)"}</SectionLabel>
             <Tile label="Order Booking (Retailer / Party)" value={fmtRs(kpis.orderBooking)} sub="NET = Sub Total" accent />
+            <Tile label="Product-Wise order value (ex-GST)" value={fmtRs(kpis.productWiseOrderValue)} sub="secondary_order_line basic_order_value; separate measure" />
+            <Tile label="August secondary ordered" value={fmtRs(kpis.augustSecondaryHeadOrdered)} sub="secondary_head_month; separate measure" />
             <Tile label="Direct Dealers Order" value={fmtRs(kpis.directDealersOrder)} sub="Kept separate from party OB" />
             <Tile label="Sales Received" value={fmtRs(kpis.sale)} accent />
             <Tile label="Sale Achievement" value={fmtPct(kpis.achievementSale)} sub="Sale / Total Target (to date)" />

@@ -13,12 +13,14 @@ export const GAP_NODE_REGISTRY: GapNodeMeta[] = [
     path: "gap/live-year-sku",
     reason:
       "PARTIAL, not blocked: the FY2026-27 secondary register (PSCode_3 xlsx drop) covers " +
-      "Apr–Jun 2026 and is loaded at item-code level in secondary_sku_line (mirrored at brand " +
-      "level into secondary_register_line). SKU/segment/discount questions for Apr–Jun 2026 " +
-      "CAN be answered — use sku/detail/2026-27, sku/gaps/2026-27, sku/discounts/2026-27. " +
-      "July 2026 onward is absent (not zero) until a fresh export is loaded.",
+      "Apr–Jul 2026 and is loaded at item-code level in secondary_sku_line. The separate " +
+      "Product-Wise CRM source covers complete August 2026 order lines in secondary_order_line, " +
+      "including retailer value and distinct product-code breadth. SKU/segment/discount questions " +
+      "for Apr–Jul use sku/detail/2026-27, sku/gaps/2026-27; August top-retailer order value and " +
+      "breadth use secondary-booking/2026-27/august-top-retailers. August is not absent.",
     blocks:
-      "SKU/segment questions for FY2026-27 months after Jun-26 only. Apr–Jun 2026 is answerable.",
+      "SKU/segment questions for FY2026-27 months after Jul-26 except the bounded August " +
+      "Product-Wise retailer value/breadth adapter. The permanent Jul|Aug source seam remains.",
   },
   {
     path: "gap/finished-goods-cost",

@@ -148,6 +148,90 @@ export async function resolveSecondaryBooking(fyValue: string): Promise<GraphNod
   }, [money(selectedSegments.length === 1 ? selectedSegments[0].value : null, "Secondary order booking", selectedSegments.length === 1 ? "measured" : "partial")], selectedSegments.length ? "partial" : "unavailable");
 }
 
+/**
+ * Bounded Product-Wise August answer for retailer ranking questions.  This is
+ * intentionally not folded into the annual summary: July PSCode3 and August
+ * Product-Wise are a permanent source seam and must never be added together.
+ */
+export async function resolveAugustTopRetailers(fyValue: string): Promise<GraphNode> {
+  if (fyValue !== "2026-27") throw new Error("August Product-Wise retailer node is only loaded for FY2026-27");
+  const result = await pool.query<{
+    retailer_key: string;
+    customer_name: string | null;
+    order_value: string;
+    sku_breadth: string;
+    lines: string;
+  }>(
+    `SELECT dealer_id AS retailer_key,
+            MAX(NULLIF(BTRIM(customer_name), '')) AS customer_name,
+            COALESCE(SUM(basic_order_value), 0)::text AS order_value,
+            COUNT(DISTINCT NULLIF(BTRIM(product_code), ''))::text AS sku_breadth,
+            COUNT(*)::text AS lines
+       FROM secondary_order_line
+      WHERE fiscal_year = $1
+        AND source_kind = 'product_wise'
+        AND order_datetime >= TIMESTAMPTZ '2026-08-01'
+        AND order_datetime < TIMESTAMPTZ '2026-09-01'
+      GROUP BY dealer_id
+      ORDER BY SUM(basic_order_value) DESC NULLS LAST, dealer_id
+      LIMIT 10`,
+    [fyValue],
+  );
+  const source = "productwise_xlsx / secondary_order_line";
+  const valueBasis = "basic_order_value_ex_gst";
+  const retailers = result.rows.map((row, index) => ({
+    rank: index + 1,
+    retailerKey: row.retailer_key,
+    customer_name: row.customer_name,
+    identity: "dealer_id is the durable retailer key; customer_name is a display label only",
+    lines: Number(row.lines),
+    measures: [
+      {
+        measure: "secondary_ob" as const,
+        label: "August Basic Order Value ex-GST",
+        value: Number(row.order_value),
+        unit: "INR" as const,
+        availability: "measured" as const,
+        source,
+        value_basis: valueBasis,
+      },
+      {
+        measure: "quantity" as const,
+        label: "August SKU breadth (distinct product_code)",
+        value: Number(row.sku_breadth),
+        unit: "count" as const,
+        availability: "measured" as const,
+        source,
+        value_basis: "distinct product_code",
+      },
+    ],
+  }));
+  const coverage: SecondaryCoverageMetadata = {
+    source: "productwise_xlsx",
+    value_basis: "basic_order_value_ex_gst",
+    months: ["Aug-26"],
+    cutoff: null,
+    completeness: result.rows.length ? "complete" : "unavailable",
+  };
+  return baseNode(
+    `secondary-booking/${fyValue}/august-top-retailers`,
+    fyValue,
+    "Top 10 retailers by August order value and SKU breadth",
+    source,
+    {
+      source,
+      value_basis: valueBasis,
+      period: "Aug-26",
+      identity: "dealer_id is the durable retailer key; customer_name is a label and is not used as identity",
+      seam: "July remains PSCode3; this node is August Product-Wise only and is never summed with July.",
+      retailers,
+    },
+    [],
+    result.rows.length ? "measured" : "unavailable",
+    coverage,
+  );
+}
+
 /** Reconciled pending-order attribution; unknown member is never assigned. */
 export async function resolvePendingOrders(fyValue: string): Promise<GraphNode> {
   if (!FY_RE.test(fyValue)) throw new Error("Invalid fiscal year");
